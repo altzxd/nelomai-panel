@@ -93,7 +93,7 @@ function renderPeerConfig(interfaceRecord, peerRecord) {
   const interfaceName = String(interfaceRecord.name || "interface");
   const comment = peerRecord.comment ? `# ${peerRecord.comment}\n` : "";
   const routeMode = String(interfaceRecord.route_mode || "standalone");
-  const endpointLabel = interfaceRecord.tak_server_id == null ? "Russia" : "Not-Russia";
+  const endpointLabel = routeMode === "via_tak" ? "Not-Russia" : "Russia";
   return [
     `${comment}# Nelomai generated WireGuard peer config`,
     `[Interface]`,
