@@ -2,6 +2,9 @@ set -e
 
 BACKUP_DIR=/opt/nelomai/state/hotfix-backup
 REPO_DIR=/opt/nelomai/current
+TYPE="${NELOMAI_SERVER_TYPE:-tic}"
+SERVICE_NAME="nelomai-${TYPE}-agent.service"
+INTERFACE_ID="${NELOMAI_LIVE_INTERFACE_ID:-wg-1-00001}"
 
 install -d -m 700 "${BACKUP_DIR}"
 cd "${REPO_DIR}"
@@ -18,10 +21,10 @@ do
 done
 
 git pull --ff-only
-systemctl restart nelomai-tic-agent.service
+systemctl restart "${SERVICE_NAME}"
 sleep 2
-systemctl is-active nelomai-tic-agent.service
+systemctl is-active "${SERVICE_NAME}"
 echo "---"
-wg show wg-1-00001
+wg show "${INTERFACE_ID}"
 echo "---"
-sed -n '1,200p' /etc/wireguard/wg-1-00001.conf
+sed -n '1,200p' "/etc/wireguard/${INTERFACE_ID}.conf"

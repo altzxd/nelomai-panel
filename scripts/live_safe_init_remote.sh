@@ -2,7 +2,14 @@ export DEBIAN_FRONTEND=noninteractive
 set -e
 
 ROOT=/opt/nelomai
-TYPE=tic
+TYPE="${NELOMAI_SERVER_TYPE:-tic}"
+case "${TYPE}" in
+  tic|tak) ;;
+  *)
+    echo "Unsupported NELOMAI_SERVER_TYPE: ${TYPE}" >&2
+    exit 1
+    ;;
+esac
 REPO_URL="${NELOMAI_REPOSITORY_URL:-https://github.com/altzxd/nelomai-panel.git}"
 SERVICE_NAME="nelomai-${TYPE}-agent.service"
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}"
@@ -42,7 +49,7 @@ npm install --omit=dev
 
 cat > "${SERVICE_PATH}" <<UNIT
 [Unit]
-Description=Nelomai TIC Node Agent
+Description=Nelomai ${TYPE^^} Node Agent
 After=network-online.target
 Wants=network-online.target
 
@@ -52,9 +59,9 @@ WorkingDirectory=${ROOT}/current/agents/node-tic-agent
 ExecStart=/usr/bin/node ${ROOT}/current/agents/node-tic-agent/src/daemon.js
 Restart=always
 RestartSec=3
-Environment=NELOMAI_AGENT_COMPONENT=tic-agent
-Environment=NELOMAI_AGENT_STATE_FILE=${ROOT}/state/tic-agent-state.json
-Environment=NELOMAI_AGENT_DAEMON_STATUS_FILE=${ROOT}/state/tic-agent-daemon-status.json
+Environment=NELOMAI_AGENT_COMPONENT=${TYPE}-agent
+Environment=NELOMAI_AGENT_STATE_FILE=${ROOT}/state/${TYPE}-agent-state.json
+Environment=NELOMAI_AGENT_DAEMON_STATUS_FILE=${ROOT}/state/${TYPE}-agent-daemon-status.json
 Environment=NELOMAI_AGENT_RUNTIME_ROOT=${ROOT}/runtime/${TYPE}
 Environment=NELOMAI_AGENT_EXEC_MODE=system
 User=root

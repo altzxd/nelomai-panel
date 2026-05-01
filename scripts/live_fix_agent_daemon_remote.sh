@@ -2,7 +2,8 @@ set -e
 
 ROOT=/opt/nelomai
 AGENT_DIR="${ROOT}/current/agents/node-tic-agent"
-SERVICE_NAME="nelomai-tic-agent.service"
+TYPE="${NELOMAI_SERVER_TYPE:-tic}"
+SERVICE_NAME="nelomai-${TYPE}-agent.service"
 
 install -d -m 755 "${AGENT_DIR}/src"
 
@@ -126,4 +127,4 @@ systemctl restart "${SERVICE_NAME}"
 sleep 3
 systemctl --no-pager --full status "${SERVICE_NAME}"
 echo "---"
-cat /opt/nelomai/state/tic-agent-daemon-status.json
+cat "/opt/nelomai/state/${TYPE}-agent-daemon-status.json"

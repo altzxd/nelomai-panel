@@ -142,6 +142,10 @@ def main() -> None:
     ssh_password = _required_env("NELOMAI_LIVE_SSH_PASSWORD")
     git_repo = _required_env("NELOMAI_LIVE_GIT_REPO")
     host_key = _required_env("NELOMAI_LIVE_SSH_HOST_KEY")
+    server_type = os.environ.get("NELOMAI_LIVE_SERVER_TYPE", "tic").strip().lower() or "tic"
+    if server_type not in {"tic", "tak"}:
+        raise LiveSafeInitFailure(f"Unsupported NELOMAI_LIVE_SERVER_TYPE: {server_type}")
+    component_name = f"{server_type}-agent"
     ssh_port = int(os.environ.get("NELOMAI_LIVE_SSH_PORT", "22"))
     timeout_seconds = int(os.environ.get("NELOMAI_LIVE_POLL_TIMEOUT", "1800"))
     poll_interval = int(os.environ.get("NELOMAI_LIVE_POLL_INTERVAL", "5"))
@@ -181,7 +185,7 @@ def main() -> None:
     _cleanup_records(prefix)
     try:
         settings.peer_agent_command = f'"{node_bin}" ".\\agents\\node-tic-agent\\src\\index.js"'
-        os.environ["NELOMAI_AGENT_COMPONENT"] = "tic-agent"
+        os.environ["NELOMAI_AGENT_COMPONENT"] = component_name
         os.environ["NELOMAI_AGENT_STATE_FILE"] = str(state_file)
         os.environ["NELOMAI_AGENT_LOG"] = str(log_file)
         os.environ["NELOMAI_AGENT_STUB_MODE"] = ""
@@ -203,7 +207,7 @@ def main() -> None:
             response = client.post(
                 "/api/admin/servers",
                 json={
-                    "server_type": "tic",
+                    "server_type": server_type,
                     "name": server_name,
                     "host": host,
                     "ssh_port": ssh_port,
