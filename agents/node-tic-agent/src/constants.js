@@ -18,27 +18,27 @@ const ACTION_REGISTRY = {
     capabilities: ["agent.bootstrap.v1", "agent.update.v1"]
   },
   restart_server_agent: {
-    components: ["tic-agent", "tak-agent", "storage-agent"],
+    components: ["server-agent", "tic-agent", "tak-agent", "storage-agent"],
     capabilities: ["agent.lifecycle.v1"]
   },
   verify_server_status: {
-    components: ["tic-agent", "tak-agent", "storage-agent"],
+    components: ["server-agent", "tic-agent", "tak-agent", "storage-agent"],
     capabilities: ["agent.status.v1"]
   },
   verify_server_runtime: {
-    components: ["tic-agent", "tak-agent", "storage-agent"],
-    capabilities: ["agent.status.v1"]
+    components: ["server-agent", "tic-agent", "tak-agent", "storage-agent"],
+    capabilities: ["agent.runtime.v1"]
   },
   reboot_server: {
-    components: ["tic-agent", "tak-agent", "storage-agent"],
+    components: ["server-agent", "tic-agent", "tak-agent", "storage-agent"],
     capabilities: ["agent.lifecycle.v1"]
   },
   check_server_agent_update: {
-    components: ["tic-agent", "tak-agent", "storage-agent"],
+    components: ["server-agent", "tic-agent", "tak-agent", "storage-agent"],
     capabilities: ["agent.update.v1"]
   },
   update_server_agent: {
-    components: ["tic-agent", "tak-agent", "storage-agent"],
+    components: ["server-agent", "tic-agent", "tak-agent", "storage-agent"],
     capabilities: ["agent.update.v1"]
   },
   create_server_backup: {
