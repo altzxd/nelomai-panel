@@ -8,6 +8,34 @@ function stateFilePath() {
   return process.env.NELOMAI_AGENT_STATE_FILE || path.join(__dirname, "..", ".data", "state.json");
 }
 
+function daemonStatusFilePath() {
+  const explicit = String(process.env.NELOMAI_AGENT_DAEMON_STATUS_FILE || "").trim();
+  if (explicit) {
+    return explicit;
+  }
+  const stateDir = path.dirname(stateFilePath());
+  const component = String(process.env.NELOMAI_AGENT_COMPONENT || "tic-agent").trim() || "tic-agent";
+  const base = component.replace(/[^a-z0-9._-]+/gi, "-");
+  return path.join(stateDir, `${base}-daemon-status.json`);
+}
+
+function readDaemonStatus() {
+  const filePath = daemonStatusFilePath();
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
+    return null;
+  }
+  try {
+    const raw = fs.readFileSync(filePath, "utf8").trim();
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 function ensureStateDir() {
   fs.mkdirSync(path.dirname(stateFilePath()), { recursive: true });
 }
@@ -347,11 +375,17 @@ function completeBootstrapTaskRecord(state, payload) {
 function refreshServerStatusRecord(state, payload) {
   const serverPayload = payload.server && typeof payload.server === "object" ? payload.server : null;
   const record = ensureServerRecord(state, serverPayload);
-  if (!record.agent_installed) {
+  const daemonStatus = readDaemonStatus();
+  const daemonRunning = daemonStatus && String(daemonStatus.status || "").trim().toLowerCase() === "running";
+  if (!record.agent_installed && !daemonRunning) {
     record.is_active = false;
     record.last_seen_at = null;
   } else {
     record.is_active = true;
+    if (daemonRunning) {
+      record.agent_installed = true;
+      record.current_version = String(daemonStatus.version || record.current_version || process.env.NELOMAI_AGENT_VERSION || "0.1.0");
+    }
     record.last_seen_at = new Date().toISOString();
   }
   touch(record);
