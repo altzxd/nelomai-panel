@@ -346,7 +346,7 @@ function buildTransport(transportMode = bootstrapTransportMode()) {
             `SSH bootstrap waiting for host key confirmation for ${destination}`
           );
         }
-        if (authMode !== "key" && String(server.ssh_password || "").trim() && !String(interactive.ssh_password || "").trim()) {
+        if (authMode !== "key" && !sshPassword) {
           return inputRequired(
             `Введите SSH пароль для ${destination}`,
             "ssh_password",

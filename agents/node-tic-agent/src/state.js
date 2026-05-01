@@ -191,13 +191,14 @@ function ensureServerRecord(state, serverPayload) {
     record = {
       server_id: Number.isInteger(serverId) && serverId > 0 ? serverId : 0,
       name,
-      server_type: serverType,
-      host,
-      ssh_port: Number(serverPayload.ssh_port) || 22,
-      ssh_login: serverPayload.ssh_login == null ? null : String(serverPayload.ssh_login),
-      is_active: false,
-      agent_installed: false,
-      current_version: process.env.NELOMAI_AGENT_VERSION || "0.1.0",
+        server_type: serverType,
+        host,
+        ssh_port: Number(serverPayload.ssh_port) || 22,
+        ssh_login: serverPayload.ssh_login == null ? null : String(serverPayload.ssh_login),
+        ssh_password: serverPayload.ssh_password == null ? null : String(serverPayload.ssh_password),
+        is_active: false,
+        agent_installed: false,
+        current_version: process.env.NELOMAI_AGENT_VERSION || "0.1.0",
       latest_version: process.env.NELOMAI_AGENT_LATEST_VERSION || process.env.NELOMAI_AGENT_VERSION || "0.1.0",
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -213,11 +214,14 @@ function ensureServerRecord(state, serverPayload) {
     if (serverPayload.ssh_port != null) {
       record.ssh_port = Number(serverPayload.ssh_port) || record.ssh_port;
     }
-    if (serverPayload.ssh_login != null) {
-      record.ssh_login = String(serverPayload.ssh_login);
+      if (serverPayload.ssh_login != null) {
+        record.ssh_login = String(serverPayload.ssh_login);
+      }
+      if (serverPayload.ssh_password != null) {
+        record.ssh_password = String(serverPayload.ssh_password);
+      }
+      touch(record);
     }
-    touch(record);
-  }
   return record;
 }
 
