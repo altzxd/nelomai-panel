@@ -273,9 +273,7 @@ function buildPlinkArgs(command, context = {}) {
       password,
       "-hostkey",
       hostKey,
-      "bash",
-      "-lc",
-      command
+      `bash -lc ${shellQuote(command)}`
     ],
     destination,
     summary: `plink ${destination} -P ${sshPort}`
