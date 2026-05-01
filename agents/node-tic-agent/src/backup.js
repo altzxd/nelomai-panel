@@ -248,7 +248,46 @@ function verifyLocalServerSnapshotCopy(snapshot) {
   };
 }
 
+function cleanupLocalServerSnapshots(keepLatestCount) {
+  const keepCount = Number.isInteger(Number(keepLatestCount)) ? Math.max(0, Number(keepLatestCount)) : 0;
+  const root = backupRoot();
+  if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
+    return {
+      deleted_count: 0,
+      message: "no local server backups to delete"
+    };
+  }
+  const backups = fs.readdirSync(root)
+    .filter((name) => name.toLowerCase().endsWith(".zip"))
+    .map((name) => {
+      const fullPath = path.join(root, name);
+      const stat = fs.statSync(fullPath);
+      return {
+        name,
+        path: fullPath,
+        mtime_ms: stat.mtimeMs
+      };
+    })
+    .sort((left, right) => right.mtime_ms - left.mtime_ms || right.name.localeCompare(left.name));
+
+  const toDelete = backups.slice(keepCount);
+  for (const item of toDelete) {
+    if (fs.existsSync(item.path)) {
+      fs.unlinkSync(item.path);
+    }
+    const metadataPath = `${item.path}.json`;
+    if (fs.existsSync(metadataPath) && fs.statSync(metadataPath).isFile()) {
+      fs.unlinkSync(metadataPath);
+    }
+  }
+  return {
+    deleted_count: toDelete.length,
+    message: toDelete.length > 0 ? "old server backups deleted" : "no old server backups deleted"
+  };
+}
+
 module.exports = {
   buildServerSnapshot,
-  verifyLocalServerSnapshotCopy
+  verifyLocalServerSnapshotCopy,
+  cleanupLocalServerSnapshots
 };

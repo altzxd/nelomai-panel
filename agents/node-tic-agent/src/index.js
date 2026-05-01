@@ -32,7 +32,8 @@ const {
 const { createStoredZip } = require("./zip");
 const {
   buildServerSnapshot,
-  verifyLocalServerSnapshotCopy
+  verifyLocalServerSnapshotCopy,
+  cleanupLocalServerSnapshots
 } = require("./backup");
 const {
   peerConfigPath,
@@ -597,6 +598,18 @@ function realServerResponse(payload) {
     }
   }
 
+  if (action === "cleanup_server_backups") {
+    try {
+      const result = cleanupLocalServerSnapshots(payload.keep_latest_count);
+      return ok({
+        deleted_count: result.deleted_count,
+        message: result.message
+      });
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   return null;
 }
 
@@ -646,13 +659,6 @@ function stubSuccessResponse(payload) {
       filename: "stub-interface.zip",
       content_type: "application/zip",
       content_base64: placeholderZipBase64("stub-interface")
-    });
-  }
-
-  if (action === "cleanup_server_backups") {
-    return ok({
-      deleted_count: 0,
-      message: "Stub cleanup completed"
     });
   }
 
