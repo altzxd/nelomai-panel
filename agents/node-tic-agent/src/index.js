@@ -8,6 +8,7 @@ const { validatePayload } = require("./validation");
 const { ok, fail } = require("./response");
 const {
   loadState,
+  saveState,
   findFirstFreePort,
   findFirstFreeAddress,
   createInterfaceRecord,
@@ -42,7 +43,8 @@ const {
   buildRecreatePeerCommands,
   buildDeletePeerCommands,
   inspectRuntimeEnvironment,
-  maybeRunSystemCommands
+  maybeRunSystemCommands,
+  ensureSystemKeyMaterial
 } = require("./runtime");
 
 function readStdin() {
@@ -136,6 +138,9 @@ function realInterfaceResponse(payload) {
   if (action === "create_interface") {
     try {
       const record = createInterfaceRecord(state, payload);
+      if (ensureSystemKeyMaterial(record)) {
+        saveState(state);
+      }
       syncInterfaceArtifacts(record);
       const execution = maybeRunSystemCommands(buildCreateInterfaceCommands(record));
       return ok({
@@ -151,6 +156,9 @@ function realInterfaceResponse(payload) {
   if (action === "toggle_interface") {
     try {
       const record = toggleInterfaceRecord(state, payload);
+      if (record.is_enabled && ensureSystemKeyMaterial(record)) {
+        saveState(state);
+      }
       syncInterfaceArtifacts(record);
       const execution = maybeRunSystemCommands(buildToggleInterfaceCommands(record));
       return ok({
@@ -171,6 +179,9 @@ function realInterfaceResponse(payload) {
   if (action === "update_interface_route_mode") {
     try {
       const record = updateInterfaceRouteModeRecord(state, payload);
+      if (ensureSystemKeyMaterial(record)) {
+        saveState(state);
+      }
       syncInterfaceArtifacts(record);
       const execution = maybeRunSystemCommands(buildRefreshInterfaceCommands(record));
       return ok({
@@ -191,6 +202,9 @@ function realInterfaceResponse(payload) {
   if (action === "update_interface_tak_server") {
     try {
       const record = updateInterfaceTakServerRecord(state, payload);
+      if (ensureSystemKeyMaterial(record)) {
+        saveState(state);
+      }
       syncInterfaceArtifacts(record);
       const execution = maybeRunSystemCommands(buildRefreshInterfaceCommands(record));
       return ok({
@@ -229,6 +243,9 @@ function realInterfaceResponse(payload) {
     try {
       const record = togglePeerRecord(state, payload);
       const persisted = ensurePeerRecordPersisted(state, payload);
+      if (ensureSystemKeyMaterial(persisted.interfaceRecord)) {
+        saveState(state);
+      }
       syncPeerArtifacts(persisted.interfaceRecord, persisted.peerRecord);
       const execution = maybeRunSystemCommands(buildTogglePeerCommands(persisted.interfaceRecord, persisted.peerRecord));
       return ok({
@@ -267,6 +284,9 @@ function realInterfaceResponse(payload) {
     try {
       const record = recreatePeerRecord(state, payload);
       const persisted = ensurePeerRecordPersisted(state, payload);
+      if (ensureSystemKeyMaterial(persisted.interfaceRecord, { rotate_peer_slots: [record.slot] })) {
+        saveState(state);
+      }
       syncPeerArtifacts(persisted.interfaceRecord, record);
       const execution = maybeRunSystemCommands(buildRecreatePeerCommands(persisted.interfaceRecord, record));
       return ok({

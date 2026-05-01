@@ -38,6 +38,14 @@ function placeholderKey(parts) {
   return `${encoded}${"A".repeat(Math.max(0, 44 - encoded.length))}`.slice(0, 44);
 }
 
+function resolvedKey(value, fallbackParts) {
+  const preferred = String(value || "").trim();
+  if (preferred) {
+    return preferred;
+  }
+  return placeholderKey(fallbackParts);
+}
+
 function peerFileName(peerRecord) {
   return `${peerRecord.slot}.conf`;
 }
@@ -62,7 +70,7 @@ function renderInterfaceConfig(interfaceRecord, peerRecords) {
     `# Peer slot: ${peerRecord.slot}`,
     `# Peer revision: ${peerRevision(peerRecord)}`,
     `# Peer artifact: peers/${peerFileName(peerRecord)}`,
-    `PublicKey = ${placeholderKey(["peer-public", interfaceRecord.agent_interface_id, peerRecord.slot, peerRevision(peerRecord)])}`,
+    `PublicKey = ${resolvedKey(peerRecord.public_key, ["peer-public", interfaceRecord.agent_interface_id, peerRecord.slot, peerRevision(peerRecord)])}`,
     `AllowedIPs = ${peerAllowedIps(peerRecord)}`,
     ""
   ]);
@@ -73,7 +81,7 @@ function renderInterfaceConfig(interfaceRecord, peerRecords) {
     `# Agent interface id: ${String(interfaceRecord.agent_interface_id || "")}`,
     `Address = ${configAddress(interfaceRecord.address_v4)}`,
     `ListenPort = ${interfaceRecord.listen_port}`,
-    `PrivateKey = ${placeholderKey(["interface", interfaceRecord.agent_interface_id, interfaceRecord.name])}`,
+    `PrivateKey = ${resolvedKey(interfaceRecord.private_key, ["interface", interfaceRecord.agent_interface_id, interfaceRecord.name])}`,
     "SaveConfig = false",
     "",
     ...peerSections,
@@ -96,12 +104,12 @@ function renderPeerConfig(interfaceRecord, peerRecord) {
     `Address = ${peerTunnelAddress(peerRecord)}`,
     `DNS = 8.8.8.8`,
     `MTU = 1280`,
-    `PrivateKey = ${placeholderKey(["peer", interfaceRecord.agent_interface_id, peerRecord.slot, peerRevision(peerRecord)])}`,
+    `PrivateKey = ${resolvedKey(peerRecord.private_key, ["peer", interfaceRecord.agent_interface_id, peerRecord.slot, peerRevision(peerRecord)])}`,
     ``,
     `[Peer]`,
     `# Route mode: ${routeMode}`,
     `# Exit: ${endpointLabel}`,
-    `PublicKey = ${placeholderKey(["server", interfaceRecord.agent_interface_id, interfaceRecord.name])}`,
+    `PublicKey = ${resolvedKey(interfaceRecord.public_key, ["server", interfaceRecord.agent_interface_id, interfaceRecord.name])}`,
     `AllowedIPs = 0.0.0.0/0`,
     `Endpoint = ${endpointHost(interfaceRecord)}:${interfaceRecord.listen_port}`,
     `PersistentKeepalive = 21`,

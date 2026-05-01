@@ -55,6 +55,34 @@ function writeJsonFile(targetPath, value) {
   writeTextFile(targetPath, JSON.stringify(value, null, 2));
 }
 
+function generateWireGuardKeyPair() {
+  const privateCompleted = childProcess.spawnSync("wg", ["genkey"], {
+    encoding: "utf8"
+  });
+  if (privateCompleted.status !== 0) {
+    throw new Error((privateCompleted.stderr || privateCompleted.stdout || "wg genkey failed").trim());
+  }
+  const privateKey = String(privateCompleted.stdout || "").trim();
+  if (!privateKey) {
+    throw new Error("wg genkey returned empty private key");
+  }
+  const publicCompleted = childProcess.spawnSync("wg", ["pubkey"], {
+    input: `${privateKey}\n`,
+    encoding: "utf8"
+  });
+  if (publicCompleted.status !== 0) {
+    throw new Error((publicCompleted.stderr || publicCompleted.stdout || "wg pubkey failed").trim());
+  }
+  const publicKey = String(publicCompleted.stdout || "").trim();
+  if (!publicKey) {
+    throw new Error("wg pubkey returned empty public key");
+  }
+  return {
+    private_key: privateKey,
+    public_key: publicKey
+  };
+}
+
 function syncInterfaceArtifacts(interfaceRecord) {
   const directory = interfaceDirectory(interfaceRecord);
   ensureDir(directory);
@@ -168,6 +196,39 @@ function ensureSystemEnvironment() {
   };
 }
 
+function ensureSystemKeyMaterial(interfaceRecord, options = {}) {
+  if (executionMode() !== "system") {
+    return false;
+  }
+  ensureSystemEnvironment();
+  let changed = false;
+  const rotatePeerSlots = new Set(
+    Array.isArray(options.rotate_peer_slots)
+      ? options.rotate_peer_slots
+          .map((value) => Number(value))
+          .filter((value) => Number.isInteger(value) && value > 0)
+      : []
+  );
+  if (!String(interfaceRecord.private_key || "").trim() || !String(interfaceRecord.public_key || "").trim()) {
+    Object.assign(interfaceRecord, generateWireGuardKeyPair());
+    changed = true;
+  }
+  const peers = Array.isArray(interfaceRecord.peers) ? interfaceRecord.peers : [];
+  for (const peerRecord of peers) {
+    if (!peerRecord || typeof peerRecord !== "object") {
+      continue;
+    }
+    const slot = Number(peerRecord.slot);
+    const shouldRotate = rotatePeerSlots.has(slot);
+    const missingKeys = !String(peerRecord.private_key || "").trim() || !String(peerRecord.public_key || "").trim();
+    if (shouldRotate || missingKeys) {
+      Object.assign(peerRecord, generateWireGuardKeyPair());
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function inspectRuntimeEnvironment() {
   const mode = executionMode();
   const runtime_root = runtimeRoot();
@@ -277,6 +338,7 @@ function buildTogglePeerCommands(interfaceRecord, peerRecord) {
   const systemPeerDir = systemInterfacePeersRoot(interfaceRecord);
   const systemConfigPath = systemInterfaceConfigPath(interfaceRecord);
   const interfaceName = systemInterfaceName(interfaceRecord);
+  const runtimeConfigPath = interfaceConfigPath(interfaceRecord);
   const runtimePeerPath = peerConfigPath(interfaceRecord, peerRecord);
   const systemPeerPath = systemPeerConfigPath(interfaceRecord, peerRecord);
 
@@ -284,6 +346,7 @@ function buildTogglePeerCommands(interfaceRecord, peerRecord) {
     return [
       `install -d -m 700 ${systemPeersRoot()}`,
       `install -d -m 700 ${systemPeerDir}`,
+      `install -m 600 ${runtimeConfigPath} ${systemConfigPath}`,
       `install -m 600 ${runtimePeerPath} ${systemPeerPath}`,
       `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${systemConfigPath}) && ip link set up dev ${interfaceName}; fi`
     ];
@@ -291,6 +354,7 @@ function buildTogglePeerCommands(interfaceRecord, peerRecord) {
 
   return [
     `rm -f ${systemPeerPath}`,
+    `install -m 600 ${runtimeConfigPath} ${systemConfigPath}`,
     `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${systemConfigPath}) && ip link set up dev ${interfaceName}; fi`
   ];
 }
@@ -318,10 +382,12 @@ function buildRecreatePeerCommands(interfaceRecord, peerRecord) {
   const systemPeerDir = systemInterfacePeersRoot(interfaceRecord);
   const systemConfigPath = systemInterfaceConfigPath(interfaceRecord);
   const interfaceName = systemInterfaceName(interfaceRecord);
+  const runtimeConfigPath = interfaceConfigPath(interfaceRecord);
   return [
     `# recreate peer slot ${peerRecord.slot} for ${interfaceRecord.agent_interface_id}`,
     `install -d -m 700 ${systemPeersRoot()}`,
     `install -d -m 700 ${systemPeerDir}`,
+    `install -m 600 ${runtimeConfigPath} ${systemConfigPath}`,
     `install -m 600 ${peerConfigPath(interfaceRecord, peerRecord)} ${systemPeerConfigPath(interfaceRecord, peerRecord)}`,
     `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${systemConfigPath}) && ip link set up dev ${interfaceName}; fi`
   ];
@@ -330,8 +396,10 @@ function buildRecreatePeerCommands(interfaceRecord, peerRecord) {
 function buildDeletePeerCommands(interfaceRecord, peerRecord) {
   const interfaceName = systemInterfaceName(interfaceRecord);
   const systemConfigPath = systemInterfaceConfigPath(interfaceRecord);
+  const runtimeConfigPath = interfaceConfigPath(interfaceRecord);
   return [
     `rm -f ${systemPeerConfigPath(interfaceRecord, peerRecord)}`,
+    `install -m 600 ${runtimeConfigPath} ${systemConfigPath}`,
     `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${systemConfigPath}) && ip link set up dev ${interfaceName}; fi`
   ];
 }
@@ -362,6 +430,7 @@ function maybeRunSystemCommands(commands) {
 }
 
 module.exports = {
+  ensureSystemKeyMaterial,
   ensureSystemEnvironment,
   inspectRuntimeEnvironment,
   interfaceConfigPath,
