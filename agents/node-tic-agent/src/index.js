@@ -269,6 +269,8 @@ function realInterfaceResponse(payload) {
   if (action === "update_peer_block_filters") {
     try {
       const record = updatePeerBlockFiltersRecord(state, payload);
+      const persisted = ensurePeerRecordPersisted(state, payload);
+      syncPeerArtifacts(persisted.interfaceRecord, persisted.peerRecord);
       return ok({
         status: "updated",
         peer: {
