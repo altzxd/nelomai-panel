@@ -227,6 +227,7 @@ function realInterfaceResponse(payload) {
   if (action === "update_interface_exclusion_filters") {
     try {
       const record = updateInterfaceExclusionFiltersRecord(state, payload);
+      syncInterfaceArtifacts(record);
       return ok({
         status: "updated",
         interface: {
