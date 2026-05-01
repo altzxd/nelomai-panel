@@ -22,7 +22,7 @@ Implemented:
 - internal bootstrap executor with `dry-run` / gated `apply` modes;
 - transport abstraction for bootstrap execution: `noop / local / ssh`;
 - first non-interactive SSH bootstrap transport for key-based auth;
-- interactive bootstrap prompt channel for SSH host key, SSH password auth via `sshpass`, and per-step confirmations;
+- interactive bootstrap prompt channel for SSH host key, SSH password auth via `sshpass` or Windows `plink`, and per-step confirmations;
 - real filesystem artifact lifecycle for interfaces and peers;
 - Linux command scaffolding for `create_interface`, `recreate_peer`, `delete_peer`;
 - dedicated runtime diagnostics action: `verify_server_runtime`;
@@ -63,6 +63,24 @@ Bootstrap assumption:
 node src/index.js < request.json
 ```
 
+## Daemon
+
+`src/index.js` is the request/response CLI entrypoint for panel-side agent calls.
+It is not a long-running service process.
+
+For `systemd`, use:
+
+```bash
+node src/daemon.js
+```
+
+The daemon:
+
+- runs runtime readiness checks on startup;
+- writes heartbeat status to JSON;
+- stays alive under `systemd`;
+- does not replace the CLI contract entrypoint.
+
 ## Bridge Check
 
 There is a dedicated panel-side developer check for this skeleton:
@@ -90,6 +108,11 @@ Behavior:
 - `NELOMAI_AGENT_STATE_FILE`
   optional path to the local JSON state used by `prepare_interface` and
   `create_interface`
+- `NELOMAI_AGENT_DAEMON_STATUS_FILE`
+  optional path to the daemon heartbeat/status JSON file
+- `NELOMAI_AGENT_DAEMON_HEARTBEAT_SEC`
+  default: `30`
+  heartbeat interval for the daemon status file
 - `NELOMAI_AGENT_RUNTIME_ROOT`
   filesystem root where the agent stores interface and peer artifacts
 - `NELOMAI_AGENT_STUB_MODE`
@@ -128,6 +151,9 @@ Behavior:
 - `NELOMAI_AGENT_BOOTSTRAP_SSHPASS_BIN`
   default: `sshpass`
   optional override for the `sshpass` binary used for password-auth SSH bootstrap
+- `NELOMAI_AGENT_BOOTSTRAP_PLINK_BIN`
+  default: `plink`
+  optional override for the Windows PuTTY `plink` binary used for password-auth SSH bootstrap
 - `NELOMAI_AGENT_BOOTSTRAP_SSH_AUTH_MODE`
   default: `auto`
   available values:
@@ -137,6 +163,8 @@ Behavior:
 - `NELOMAI_AGENT_BOOTSTRAP_SSH_STRICT_HOST_KEY_CHECKING`
   default: `accept-new`
   forwarded to `ssh -o StrictHostKeyChecking=...`
+- `NELOMAI_AGENT_BOOTSTRAP_SSH_HOST_KEY`
+  optional pinned SSH host key fingerprint, required for Windows `plink` batch mode
 - `NELOMAI_AGENT_BOOTSTRAP_SSH_CONNECT_TIMEOUT`
   default: `10`
   forwarded to `ssh -o ConnectTimeout=...`
@@ -182,7 +210,8 @@ Behavior:
 - bootstrap executor can now return a dry-run execution report or a gated local apply report
 - bootstrap transport is separated from bootstrap logic, and `ssh` now works as the first real remote transport
   - key-based mode uses `BatchMode=yes`
-  - password-auth mode uses `sshpass -e ssh` when `ssh_password` is present and `sshpass` is available on the agent host
+  - password-auth mode uses `sshpass -e ssh` on Linux-like hosts
+  - password-auth mode uses PuTTY `plink` in Windows environments when it is available
 - bootstrap tasks can now pause with `input_required` on SSH host key confirm, password capture, or explicit per-step command confirmation, then resume from the interrupted step
   - bootstrap responses now include a compact `bootstrap_snapshot` with transport, applied/planned state, current step, and resume pointer
 - Runtime layout is now closer to `/etc/wireguard`:

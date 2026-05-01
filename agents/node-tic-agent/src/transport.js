@@ -50,6 +50,16 @@ function sshpassBinary() {
   return value || "sshpass";
 }
 
+function plinkBinary() {
+  const value = String(process.env.NELOMAI_AGENT_BOOTSTRAP_PLINK_BIN || "plink").trim();
+  return value || "plink";
+}
+
+function sshPinnedHostKey() {
+  const value = String(process.env.NELOMAI_AGENT_BOOTSTRAP_SSH_HOST_KEY || "").trim();
+  return value || null;
+}
+
 function sshAuthMode() {
   const value = String(process.env.NELOMAI_AGENT_BOOTSTRAP_SSH_AUTH_MODE || "auto").trim().toLowerCase();
   if (value === "auto" || value === "key" || value === "password") {
@@ -92,6 +102,12 @@ function firstNonEmpty(...values) {
 function classifySshExecutionFailure(stdout, stderr, exitCode) {
   const detail = firstNonEmpty(stderr, stdout);
   const normalized = detail.toLowerCase();
+  if (normalized.includes("host key is not cached") || normalized.includes("cannot confirm a host key in batch mode")) {
+    return {
+      error_code: "ssh_host_key_mismatch",
+      error_message: `SSH host key verification failed: ${detail}`
+    };
+  }
   if (normalized.includes("host key verification failed")) {
     return {
       error_code: "ssh_host_key_mismatch",
@@ -178,6 +194,16 @@ function sshpassAvailable() {
   return probe.status === 0 || probe.status === 1;
 }
 
+function plinkAvailable() {
+  const probe = childProcess.spawnSync(plinkBinary(), ["-V"], {
+    encoding: "utf8"
+  });
+  if (probe.error) {
+    return false;
+  }
+  return probe.status === 0;
+}
+
 function buildSshArgs(command, context = {}, options = {}) {
   const server = context && context.server ? context.server : {};
   const host = String(server.host || "").trim();
@@ -210,6 +236,49 @@ function buildSshArgs(command, context = {}, options = {}) {
     args,
     destination,
     summary: `${passwordAuth ? "sshpass ssh" : "ssh"} ${destination} -p ${sshPort}`
+  };
+}
+
+function buildPlinkArgs(command, context = {}) {
+  const server = context && context.server ? context.server : {};
+  const interactive = context && context.interactive ? context.interactive : {};
+  const host = String(server.host || "").trim();
+  const login = String(server.ssh_login || "").trim() || "root";
+  const sshPort = Number(server.ssh_port) || 22;
+  const password = resolvedSshPassword(server, interactive);
+  const hostKey = sshPinnedHostKey();
+  if (!host) {
+    throw new Error("Plink bootstrap transport requires server.host");
+  }
+  if (!Number.isInteger(sshPort) || sshPort <= 0) {
+    throw new Error("Plink bootstrap transport requires valid server.ssh_port");
+  }
+  if (!password) {
+    throw new Error("Plink bootstrap transport requires ssh_password");
+  }
+  if (!hostKey) {
+    const error = new Error("Plink bootstrap transport requires NELOMAI_AGENT_BOOTSTRAP_SSH_HOST_KEY");
+    error.error_code = "ssh_host_key_mismatch";
+    throw error;
+  }
+  const destination = `${login}@${host}`;
+  return {
+    args: [
+      "-batch",
+      "-ssh",
+      destination,
+      "-P",
+      String(sshPort),
+      "-pw",
+      password,
+      "-hostkey",
+      hostKey,
+      "bash",
+      "-lc",
+      command
+    ],
+    destination,
+    summary: `plink ${destination} -P ${sshPort}`
   };
 }
 
@@ -302,17 +371,37 @@ function buildTransport(transportMode = bootstrapTransportMode()) {
           error.error_code = "ssh_execution_blocked";
           throw error;
         }
-        if (passwordAuth && !sshpassAvailable()) {
-          const error = new Error("SSH password bootstrap requires sshpass on the agent host");
-          error.error_code = "sshpass_missing";
-          throw error;
+        let spawnCommand = "ssh";
+        let spawnArgs = [];
+        let summary = "";
+        let spawnEnv = process.env;
+        if (passwordAuth) {
+          if (process.platform === "win32" && plinkAvailable()) {
+            const plink = buildPlinkArgs(command, context);
+            spawnCommand = plinkBinary();
+            spawnArgs = plink.args;
+            summary = plink.summary;
+          } else {
+            if (!sshpassAvailable()) {
+              const error = new Error("SSH password bootstrap requires sshpass on the agent host");
+              error.error_code = "sshpass_missing";
+              throw error;
+            }
+            const ssh = buildSshArgs(command, context, { password_auth: true });
+            spawnCommand = sshpassBinary();
+            spawnArgs = ["-e", "ssh", ...ssh.args];
+            summary = ssh.summary;
+            spawnEnv = { ...process.env, SSHPASS: sshPassword };
+          }
+        } else {
+          const ssh = buildSshArgs(command, context, { password_auth: false });
+          spawnCommand = "ssh";
+          spawnArgs = ssh.args;
+          summary = ssh.summary;
         }
-        const { args, summary } = buildSshArgs(command, context, { password_auth: passwordAuth });
-        const spawnCommand = passwordAuth ? sshpassBinary() : "ssh";
-        const spawnArgs = passwordAuth ? ["-e", "ssh", ...args] : args;
         const completed = childProcess.spawnSync(spawnCommand, spawnArgs, {
           encoding: "utf8",
-          env: passwordAuth ? { ...process.env, SSHPASS: sshPassword } : process.env
+          env: spawnEnv
         });
         const stdout = String(completed.stdout || "").trim();
         const stderr = String(completed.stderr || "").trim();
