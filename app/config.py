@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+pysqlite:///./nelomai-panel.db"
     peer_agent_command: str | None = None
     peer_agent_timeout_seconds: int = 20
+    peer_agent_bootstrap_timeout_seconds: int = 1800
 
 
 @lru_cache

@@ -1555,6 +1555,12 @@ def run_panel_diagnostics(db: Session, actor: User) -> DiagnosticsPageView:
 def _run_tic_executor(payload: dict[str, object]) -> dict[str, object]:
     if not settings.peer_agent_command:
         raise ServerOperationUnavailableError("Peer server executor is not configured")
+    action = str(payload.get("action") or "")
+    timeout_seconds = (
+        settings.peer_agent_bootstrap_timeout_seconds
+        if action in {"bootstrap_server", "bootstrap_server_status", "bootstrap_server_input"}
+        else settings.peer_agent_timeout_seconds
+    )
 
     try:
         completed = subprocess.run(
@@ -1562,7 +1568,7 @@ def _run_tic_executor(payload: dict[str, object]) -> dict[str, object]:
             input=json.dumps(payload),
             capture_output=True,
             text=True,
-            timeout=settings.peer_agent_timeout_seconds,
+            timeout=timeout_seconds,
             check=False,
             shell=True,
         )
@@ -1593,13 +1599,19 @@ def _run_tic_executor(payload: dict[str, object]) -> dict[str, object]:
 def _run_tic_executor_interactive(payload: dict[str, object]) -> dict[str, object]:
     if not settings.peer_agent_command:
         raise ServerOperationUnavailableError("Peer server executor is not configured")
+    action = str(payload.get("action") or "")
+    timeout_seconds = (
+        settings.peer_agent_bootstrap_timeout_seconds
+        if action in {"bootstrap_server", "bootstrap_server_status", "bootstrap_server_input"}
+        else settings.peer_agent_timeout_seconds
+    )
     try:
         completed = subprocess.run(
             settings.peer_agent_command,
             input=json.dumps(payload),
             capture_output=True,
             text=True,
-            timeout=settings.peer_agent_timeout_seconds,
+            timeout=timeout_seconds,
             check=False,
             shell=True,
         )
