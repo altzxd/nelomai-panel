@@ -31,6 +31,10 @@ const {
 } = require("./state");
 const { createStoredZip } = require("./zip");
 const {
+  buildServerSnapshot,
+  verifyLocalServerSnapshotCopy
+} = require("./backup");
+const {
   peerConfigPath,
   syncInterfaceArtifacts,
   syncAllPeerArtifacts,
@@ -565,6 +569,34 @@ function realServerResponse(payload) {
     }
   }
 
+  if (action === "create_server_backup") {
+    try {
+      const snapshot = buildServerSnapshot(payload.server && typeof payload.server === "object" ? payload.server : null);
+      return ok({
+        filename: snapshot.filename,
+        content_type: snapshot.content_type,
+        content_base64: snapshot.content_base64,
+        sha256: snapshot.sha256,
+        size_bytes: snapshot.size_bytes
+      });
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (action === "verify_server_backup_copy") {
+    try {
+      const result = verifyLocalServerSnapshotCopy(payload.snapshot && typeof payload.snapshot === "object" ? payload.snapshot : null);
+      return ok({
+        matches: result.matches,
+        message: result.message,
+        local_snapshot: result.local_snapshot || null
+      });
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   return null;
 }
 
@@ -614,21 +646,6 @@ function stubSuccessResponse(payload) {
       filename: "stub-interface.zip",
       content_type: "application/zip",
       content_base64: placeholderZipBase64("stub-interface")
-    });
-  }
-
-  if (action === "create_server_backup") {
-    return ok({
-      filename: "stub-server-snapshot.zip",
-      content_type: "application/zip",
-      content_base64: placeholderZipBase64("stub-server-snapshot")
-    });
-  }
-
-  if (action === "verify_server_backup_copy") {
-    return ok({
-      matches: true,
-      message: "Stub snapshot matches"
     });
   }
 
