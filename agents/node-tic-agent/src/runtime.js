@@ -97,6 +97,17 @@ function syncPeerArtifacts(interfaceRecord, peerRecord) {
   writeTextFile(peerConfigPath(interfaceRecord, peerRecord), renderPeerConfig(interfaceRecord, peerRecord));
 }
 
+function syncAllPeerArtifacts(interfaceRecord) {
+  syncInterfaceArtifacts(interfaceRecord);
+  const peerRecords = Array.isArray(interfaceRecord.peers) ? interfaceRecord.peers : [];
+  for (const peerRecord of peerRecords) {
+    if (!peerRecord || typeof peerRecord !== "object" || peerRecord.config_exists === false) {
+      continue;
+    }
+    writeTextFile(peerConfigPath(interfaceRecord, peerRecord), renderPeerConfig(interfaceRecord, peerRecord));
+  }
+}
+
 function removePeerArtifacts(interfaceRecord, peerRecord) {
   const peerPath = peerConfigPath(interfaceRecord, peerRecord);
   if (fs.existsSync(peerPath) && fs.statSync(peerPath).isFile()) {
@@ -436,6 +447,7 @@ module.exports = {
   interfaceConfigPath,
   peerConfigPath,
   syncInterfaceArtifacts,
+  syncAllPeerArtifacts,
   syncPeerArtifacts,
   removePeerArtifacts,
   collectInterfaceBundleEntries,

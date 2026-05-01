@@ -33,6 +33,7 @@ const { createStoredZip } = require("./zip");
 const {
   peerConfigPath,
   syncInterfaceArtifacts,
+  syncAllPeerArtifacts,
   syncPeerArtifacts,
   removePeerArtifacts,
   collectInterfaceBundleEntries,
@@ -182,7 +183,7 @@ function realInterfaceResponse(payload) {
       if (ensureSystemKeyMaterial(record)) {
         saveState(state);
       }
-      syncInterfaceArtifacts(record);
+      syncAllPeerArtifacts(record);
       const execution = maybeRunSystemCommands(buildRefreshInterfaceCommands(record));
       return ok({
         status: "updated",
@@ -205,7 +206,7 @@ function realInterfaceResponse(payload) {
       if (ensureSystemKeyMaterial(record)) {
         saveState(state);
       }
-      syncInterfaceArtifacts(record);
+      syncAllPeerArtifacts(record);
       const execution = maybeRunSystemCommands(buildRefreshInterfaceCommands(record));
       return ok({
         status: "updated",
