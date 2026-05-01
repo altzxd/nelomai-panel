@@ -4,8 +4,27 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { buildBootstrapPlan, bootstrapExecutionMode, executeBootstrapPlan } = require("./bootstrap");
 
+function deployedStateRoot() {
+  const nodeAgentRoot = path.resolve(__dirname, "..");
+  const agentsRoot = path.dirname(nodeAgentRoot);
+  const currentRoot = path.dirname(agentsRoot);
+  if (path.basename(currentRoot) !== "current") {
+    return null;
+  }
+  return path.join(path.dirname(currentRoot), "state");
+}
+
 function stateFilePath() {
-  return process.env.NELOMAI_AGENT_STATE_FILE || path.join(__dirname, "..", ".data", "state.json");
+  const explicit = String(process.env.NELOMAI_AGENT_STATE_FILE || "").trim();
+  if (explicit) {
+    return explicit;
+  }
+  const deployedRoot = deployedStateRoot();
+  if (deployedRoot) {
+    const component = String(process.env.NELOMAI_AGENT_COMPONENT || "tic-agent").trim() || "tic-agent";
+    return path.join(deployedRoot, `${component}-state.json`);
+  }
+  return path.join(__dirname, "..", ".data", "state.json");
 }
 
 function daemonStatusFilePath() {
@@ -13,8 +32,12 @@ function daemonStatusFilePath() {
   if (explicit) {
     return explicit;
   }
-  const stateDir = path.dirname(stateFilePath());
   const component = String(process.env.NELOMAI_AGENT_COMPONENT || "tic-agent").trim() || "tic-agent";
+  const deployedRoot = deployedStateRoot();
+  if (deployedRoot) {
+    return path.join(deployedRoot, `${component}-daemon-status.json`);
+  }
+  const stateDir = path.dirname(stateFilePath());
   const base = component.replace(/[^a-z0-9._-]+/gi, "-");
   return path.join(stateDir, `${base}-daemon-status.json`);
 }
