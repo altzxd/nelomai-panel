@@ -1,0 +1,828 @@
+{% extends "base.html" %}
+{% block body %}
+<main class="app-shell admin-shell" data-admin-page data-active-tab="{{ active_tab }}">
+    <aside class="sidebar icon-sidebar">
+        <div class="sidebar-logo-shell" aria-label="Nelomai">
+            <img class="sidebar-brand-logo" src="{{ url_for('static', path='/logo.svg') }}" alt="Nelomai">
+        </div>
+        <nav class="sidebar-nav sidebar-nav-icons">
+            <a class="nav-icon-pill {% if active_tab == 'overview' %}active{% endif %}" href="/admin?tab=overview" title="Панель" aria-label="Панель">
+                <span class="nav-icon">⌂</span>
+            </a>
+            <a class="nav-icon-pill {% if active_tab == 'settings' %}active{% endif %}" href="/admin?tab=settings&settings_view=basic" title="Настройки" aria-label="Настройки">
+                <span class="nav-icon">⚙</span>
+            </a>
+            <a class="nav-icon-pill {% if active_tab == 'clients' %}active{% endif %}" href="/admin?tab=clients" title="Клиенты" aria-label="Клиенты">
+                <span class="nav-icon">◫</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/servers" title="Сервера" aria-label="Сервера">
+                <span class="nav-icon">▣</span>
+            </a>
+            <a class="nav-icon-pill {% if has_problem_jobs %}is-problem{% endif %}" href="/admin/jobs" title="Задачи" aria-label="Задачи">
+                <span class="nav-icon">⏱</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/logs" title="Логи" aria-label="Логи">
+                <span class="nav-icon">≡</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/diagnostics" title="Диагностика" aria-label="Диагностика">
+                <span class="nav-icon">+</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/agent-contract" title="Контракт агента" aria-label="Контракт агента">
+                <span class="nav-icon">⇄</span>
+            </a>
+        </nav>
+    </aside>
+
+    <section class="main-shell">
+        <header class="topbar">
+            <div>
+                <div class="brand-inline">
+                    <span class="brand-inline-title">Nelomai</span>
+                </div>
+                <p class="eyebrow">Главная админская страница</p>
+                <h2>Управление WireGuard-инфраструктурой</h2>
+            </div>
+            <div class="topbar-actions">
+                <span class="role-chip">Администратор</span>
+                <form method="post" action="/logout">
+                    <button type="submit" class="ghost-button">Выйти</button>
+                </form>
+            </div>
+        </header>
+
+        <section class="server-strip">
+            <article class="server-card server-card-fixed">
+                <div class="server-card-head">
+                    <div>
+                        <p class="eyebrow">Сервер панели</p>
+                        <h3>{{ admin_page.panel_server.name }}</h3>
+                    </div>
+                    <span class="availability {% if admin_page.panel_server.status == 'online' %}is-online{% else %}is-offline{% endif %}">
+                        {{ admin_page.panel_server.status }}
+                    </span>
+                </div>
+                <p class="server-host">{{ admin_page.panel_server.host }}</p>
+                <p class="server-metrics-note">
+                    {{ admin_page.panel_server.metrics_note }}
+                    {% if admin_page.panel_server.status == 'online' and admin_page.panel_server.last_seen_at %}
+                    · {{ admin_page.panel_server.last_seen_at|datetime_moscow }}
+                    {% endif %}
+                </p>
+                {% if admin_page.panel_server.available %}
+                <div class="metric-stack">
+                    <div class="metric-row">
+                        <span>CPU</span>
+                        <div class="metric-bar"><span style="width: {{ admin_page.panel_server.cpu_percent }}%"></span></div>
+                        <strong>{{ admin_page.panel_server.cpu_percent }}%</strong>
+                    </div>
+                    <div class="metric-row">
+                        <span>RAM</span>
+                        <div class="metric-bar"><span style="width: {{ admin_page.panel_server.ram_percent }}%"></span></div>
+                        <strong>{{ admin_page.panel_server.ram_percent }}%</strong>
+                    </div>
+                    <div class="metric-row">
+                        <span>Disk</span>
+                        <div class="metric-bar"><span style="width: {{ admin_page.panel_server.disk_percent }}%"></span></div>
+                        <strong>{{ admin_page.panel_server.disk_used_gb }} / {{ admin_page.panel_server.disk_total_gb }} ГБ</strong>
+                    </div>
+                </div>
+                {% else %}
+                <div class="server-metrics-empty">
+                    <p>{{ admin_page.panel_server.metrics_note }}</p>
+                </div>
+                {% endif %}
+            </article>
+
+            {% for server_card in [admin_page.tic_server, admin_page.tak_server] %}
+            <article class="server-card">
+                <form class="server-card-head" method="get" action="/admin">
+                    <input type="hidden" name="tab" value="{{ active_tab }}">
+                    <input type="hidden" name="settings_view" value="{{ settings_view }}">
+                    <input type="hidden" name="filter_scope" value="{{ filter_scope }}">
+                    <input type="hidden" name="{{ 'tak_server_id' if server_card.key == 'tic' else 'tic_server_id' }}" value="{{ admin_page.tak_server.selected_id if server_card.key == 'tic' else admin_page.tic_server.selected_id }}">
+                    <div>
+                        <p class="eyebrow">{{ server_card.key|upper }} сервер</p>
+                        <select name="{{ server_card.key }}_server_id" onchange="this.form.submit()">
+                            {% for option in server_card.options %}
+                            <option value="{{ option.id }}" {% if option.id == server_card.selected_id %}selected{% endif %}>{{ option.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <span class="availability {% if server_card.status == 'online' %}is-online{% elif server_card.status == 'excluded' %}is-invalid{% else %}is-offline{% endif %}">
+                        {{ server_card.status }}
+                    </span>
+                </form>
+                <p class="server-host">{{ server_card.host }}</p>
+                <p class="server-metrics-note">
+                    {{ server_card.metrics_note }}
+                    {% if server_card.status == 'online' and server_card.last_seen_at %}
+                    · {{ server_card.last_seen_at|datetime_moscow }}
+                    {% endif %}
+                </p>
+                {% if server_card.available %}
+                <div class="metric-stack">
+                    <div class="metric-row">
+                        <span>CPU</span>
+                        <div class="metric-bar"><span style="width: {{ server_card.cpu_percent }}%"></span></div>
+                        <strong>{{ server_card.cpu_percent }}%</strong>
+                    </div>
+                    <div class="metric-row">
+                        <span>RAM</span>
+                        <div class="metric-bar"><span style="width: {{ server_card.ram_percent }}%"></span></div>
+                        <strong>{{ server_card.ram_percent }}%</strong>
+                    </div>
+                    <div class="metric-row">
+                        <span>Disk</span>
+                        <div class="metric-bar"><span style="width: {{ server_card.disk_percent }}%"></span></div>
+                        <strong>{{ server_card.disk_used_gb }} / {{ server_card.disk_total_gb }} ГБ</strong>
+                    </div>
+                    <div class="metric-row">
+                        <span>Трафик</span>
+                        <div class="metric-bar"><span style="width: {{ ((server_card.traffic_mbps or 0) * 4) }}%"></span></div>
+                        <strong>{{ server_card.traffic_mbps or 0 }} МБ/с</strong>
+                    </div>
+                </div>
+                {% else %}
+                <div class="server-metrics-empty">
+                    <p>{{ server_card.metrics_note }}</p>
+                </div>
+                {% endif %}
+            </article>
+            {% endfor %}
+        </section>
+
+        <section class="tabs admin-tabs">
+            <div class="tab-list tab-list-stretch">
+                <a class="tab-button tab-link {% if active_tab == 'overview' %}active{% endif %}" href="/admin?tab=overview">Главная</a>
+                <a class="tab-button tab-link {% if active_tab == 'settings' %}active{% endif %}" href="/admin?tab=settings&settings_view={{ settings_view }}&filter_scope={{ filter_scope }}">Настройки</a>
+                <a class="tab-button tab-link {% if active_tab == 'clients' %}active{% endif %}" href="/admin?tab=clients">Клиенты</a>
+            </div>
+
+            {% if active_tab == 'overview' %}
+            <div class="tab-panel active">
+                <section class="admin-hero-actions">
+                    <button class="primary-button" type="button" data-open-interface-modal>Создать новый интерфейс</button>
+                    <form class="overview-filter-form" method="get" action="/admin">
+                        <input type="hidden" name="tab" value="overview">
+                        <input type="hidden" name="tic_server_id" value="{{ admin_page.tic_server.selected_id or '' }}">
+                        <input type="hidden" name="tak_server_id" value="{{ admin_page.tak_server.selected_id or '' }}">
+                        <label>
+                            <span>Фильтр по Tic</span>
+                            <select name="interface_tic_server_id" onchange="this.form.submit()">
+                                <option value="" {% if not interface_tic_server_id %}selected{% endif %}>Все Tic</option>
+                                {% for option in admin_page.available_tic_servers %}
+                                <option value="{{ option.id }}" {% if interface_tic_server_id == option.id %}selected{% endif %}>{{ option.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+                    </form>
+                    <p>Плитки ниже показывают все интерфейсы, их суммарный трафик и текущий статус включения.</p>
+                </section>
+                <section class="admin-interface-grid">
+                    {% set visible_interfaces = admin_page.interfaces | selectattr("tic_server_id", "equalto", interface_tic_server_id) | list if interface_tic_server_id else admin_page.interfaces %}
+                    {% for interface in visible_interfaces %}
+                    <article class="admin-interface-card {% if not interface.is_enabled %}is-disabled{% endif %}" {% if not interface.owner_id %}data-owner-state="pending"{% endif %}>
+                        <div class="admin-interface-head">
+                            {% if interface.owner_id %}
+                            <a class="admin-interface-link" href="/dashboard?target_user_id={{ interface.owner_id }}">
+                                <h3>{{ interface.name }}</h3>
+                                <p>{{ interface.owner_name }} · {{ interface.tic_server_name.split(' ')[0] }} · {{ interface.route_mode.value }}</p>
+                            </a>
+                            {% else %}
+                            <div class="admin-interface-link admin-interface-link-static">
+                                <h3>{{ interface.name }}</h3>
+                                <p>{{ interface.owner_name }} · {{ interface.tic_server_name.split(' ')[0] }} · {{ interface.route_mode.value }}</p>
+                            </div>
+                            {% endif %}
+                            <label class="switch">
+                                <input type="checkbox" data-interface-toggle="{{ interface.id }}" {% if interface.is_enabled %}checked{% endif %}>
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div class="interface-status-line">
+                            <span class="availability {% if interface.is_invalid %}is-invalid{% elif interface.is_enabled %}is-online{% else %}is-offline{% endif %}">
+                                {{ "включён" if interface.is_enabled else "выключен" }}
+                            </span>
+                        </div>
+                        <dl class="admin-interface-metrics">
+                            <div><dt>Трафик за 30 дней</dt><dd>{{ interface.traffic_30d_gb }} ГБ</dd></div>
+                            <div><dt>Активных пиров</dt><dd>{{ interface.active_peers }} / {{ interface.peer_limit }}</dd></div>
+                        </dl>
+                        {% if not interface.owner_id and not interface.is_enabled %}
+                        <div class="admin-interface-actions">
+                            <button class="ghost-button small danger" type="button" data-interface-delete="{{ interface.id }}">Удалить интерфейс</button>
+                        </div>
+                        {% endif %}
+                    </article>
+                    {% endfor %}
+                    {% if not visible_interfaces %}
+                    <article class="admin-interface-card is-disabled">
+                        <div class="admin-interface-link admin-interface-link-static">
+                            <h3>Интерфейсов нет</h3>
+                            <p>Для выбранного Tic сервера пока нет созданных интерфейсов.</p>
+                        </div>
+                    </article>
+                    {% endif %}
+                </section>
+            </div>
+            {% endif %}
+
+            {% if active_tab == 'settings' %}
+            <div class="tab-panel active">
+                <section class="settings-layout">
+                    <div class="subtabs">
+                        <div class="tab-list settings-subtab-list settings-subtab-list-wide">
+                            <a class="tab-button tab-link {% if settings_view == 'basic' %}active{% endif %}" href="/admin?tab=settings&settings_view=basic&filter_scope={{ filter_scope }}">Основные</a>
+                            <a class="tab-button tab-link {% if settings_view == 'logs' %}active{% endif %}" href="/admin?tab=settings&settings_view=logs&filter_scope={{ filter_scope }}">Логи</a>
+                            <a class="tab-button tab-link {% if settings_view == 'updates' %}active{% endif %}" href="/admin?tab=settings&settings_view=updates&filter_scope={{ filter_scope }}">Обновления</a>
+                            <a class="tab-button tab-link {% if settings_view == 'backups' %}active{% endif %}" href="/admin?tab=settings&settings_view=backups&filter_scope={{ filter_scope }}">Бэкапы</a>
+                            <a class="tab-button tab-link {% if settings_view == 'shared_peers' %}active{% endif %}" href="/admin?tab=settings&settings_view=shared_peers&filter_scope={{ filter_scope }}">Расшаренные пиры</a>
+                            <a class="tab-button tab-link exclusion-subtab {% if settings_view == 'filters' %}active{% endif %} {% if not exclusion_filters_enabled %}is-disabled-state{% endif %}" href="/admin?tab=settings&settings_view=filters&filter_scope={{ filter_scope }}">Фильтры исключения</a>
+                            <a class="tab-button tab-link block-subtab {% if settings_view == 'block_filters' %}active{% endif %} {% if not block_filters_enabled %}is-disabled-state{% endif %}" href="/admin?tab=settings&settings_view=block_filters&filter_scope={{ filter_scope }}">Фильтры блока</a>
+                        </div>
+
+                        {% if settings_view == 'basic' %}
+                        <div class="tab-panel active">
+                            <form class="settings-card" data-basic-settings-form>
+                                <h3>Общие параметры новых пиров</h3>
+                                <div class="settings-grid">
+                                    <label>
+                                        <span>DNS сервер</span>
+                                        <input type="text" name="dns_server" value="{{ admin_page.settings.dns_server }}">
+                                    </label>
+                                    <label>
+                                        <span>MTU</span>
+                                        <input type="text" name="mtu" value="{{ admin_page.settings.mtu }}">
+                                    </label>
+                                    <label>
+                                        <span>Keepalive</span>
+                                        <input type="text" name="keepalive" value="{{ admin_page.settings.keepalive }}">
+                                    </label>
+                                    <label class="settings-toggle-row">
+                                        <span>Фильтры исключения</span>
+                                        <span class="settings-toggle-control">
+                                            <span class="switch">
+                                            <input type="checkbox" name="exclusion_filters_enabled" value="1" {% if admin_page.settings.exclusion_filters_enabled %}checked{% endif %}>
+                                                <span class="slider"></span>
+                                            </span>
+                                            <span class="settings-toggle-state">
+                                                <span class="settings-toggle-on">Вкл</span>
+                                                <span class="settings-toggle-off">Выкл</span>
+                                            </span>
+                                        </span>
+                                    </label>
+                                    <label class="settings-toggle-row">
+                                        <span>Фильтры блока</span>
+                                        <span class="settings-toggle-control">
+                                            <span class="switch">
+                                            <input type="checkbox" name="block_filters_enabled" value="1" {% if admin_page.settings.block_filters_enabled %}checked{% endif %}>
+                                                <span class="slider"></span>
+                                            </span>
+                                            <span class="settings-toggle-state">
+                                                <span class="settings-toggle-on">Вкл</span>
+                                                <span class="settings-toggle-off">Выкл</span>
+                                            </span>
+                                        </span>
+                                    </label>
+                                    <label>
+                                        <span>Telegram администратора</span>
+                                        <input type="text" name="admin_telegram_url" value="{{ admin_page.settings.admin_telegram_url }}">
+                                    </label>
+                                    <label>
+                                        <span>ВКонтакте администратора</span>
+                                        <input type="text" name="admin_vk_url" value="{{ admin_page.settings.admin_vk_url }}">
+                                    </label>
+                                    <label>
+                                        <span>Электронная почта</span>
+                                        <input type="text" name="admin_email_url" value="{{ admin_page.settings.admin_email_url }}">
+                                    </label>
+                                    <label>
+                                        <span>Группа в Telegram</span>
+                                        <input type="text" name="admin_group_url" value="{{ admin_page.settings.admin_group_url }}">
+                                    </label>
+                                </div>
+                                <div class="toolbar-row">
+                                    <button class="primary-button small" type="submit">Сохранить настройки</button>
+                                    <span class="status-text" data-basic-settings-status></span>
+                                </div>
+                            </form>
+                        </div>
+                        {% endif %}
+
+                        {% if settings_view == 'updates' %}
+                        <div class="tab-panel active">
+                            <form class="settings-card" data-update-settings-form>
+                                <h3>Git и обновления</h3>
+                                <div class="settings-grid">
+                                    <label>
+                                        <span>Git репозиторий Nelomai</span>
+                                        <input type="text" name="nelomai_git_repo" value="{{ admin_page.settings.nelomai_git_repo }}" placeholder="https://github.com/owner/nelomai">
+                                    </label>
+                                    <label>
+                                        <span>Текущая версия панели</span>
+                                        <input type="text" value="{{ admin_page.settings.current_version }}" readonly>
+                                    </label>
+                                </div>
+                                <div class="toolbar-row">
+                                    <button class="primary-button small" type="submit">Сохранить Git-настройки</button>
+                                    <button class="ghost-button small" type="button" data-panel-update-check>Проверить панель</button>
+                                    <span class="status-text" data-update-settings-status></span>
+                                </div>
+                                <div class="update-check-result" data-panel-update-result hidden></div>
+                            </form>
+
+                            <section class="settings-card">
+                                <h3>Обновления агентов серверов</h3>
+                                <p>Панель проверяет все добавленные Tic/Tak серверы и передаёт будущему Node-agent общий Git-репозиторий Nelomai и нужный component.</p>
+                                <div class="toolbar-row">
+                                    <button class="ghost-button small" type="button" data-agent-updates-check>Проверить все серверы</button>
+                                    <button class="primary-button small" type="button" data-agent-updates-apply-all>Обновить все</button>
+                                    <span class="status-text" data-agent-updates-status></span>
+                                </div>
+                                <div class="agent-update-list" data-agent-updates-result></div>
+                            </section>
+                        </div>
+                        {% endif %}
+
+                        {% if settings_view == 'backups' and backups_page %}
+                        <div class="tab-panel active">
+                            <section class="settings-card">
+                                <h3>Настройки бэкапов</h3>
+                                <form data-backup-settings-form>
+                                    <div class="settings-grid">
+                                        <label class="settings-toggle-row">
+                                            <span>Автоматические бэкапы</span>
+                                            <span class="settings-toggle-control">
+                                                <span class="switch">
+                                                    <input type="checkbox" name="backups_enabled" value="1" {% if backups_page.settings.backups_enabled %}checked{% endif %}>
+                                                    <span class="slider"></span>
+                                                </span>
+                                            </span>
+                                        </label>
+                                        <label>
+                                            <span>Частота</span>
+                                            <select name="backup_frequency">
+                                                <option value="daily" {% if backups_page.settings.backup_frequency == 'daily' %}selected{% endif %}>Каждый день</option>
+                                                <option value="every_3_days" {% if backups_page.settings.backup_frequency == 'every_3_days' %}selected{% endif %}>Раз в три дня</option>
+                                                <option value="weekly" {% if backups_page.settings.backup_frequency == 'weekly' %}selected{% endif %}>Раз в неделю</option>
+                                            </select>
+                                        </label>
+                                        <label>
+                                            <span>Время</span>
+                                            <input type="time" name="backup_time" value="{{ backups_page.settings.backup_time }}">
+                                        </label>
+                                        <label>
+                                            <span>Срок хранения, дней</span>
+                                            <input type="number" min="1" max="365" name="backup_retention_days" value="{{ backups_page.settings.backup_retention_days }}">
+                                        </label>
+                                        <label>
+                                            <span>Путь хранения</span>
+                                            <input type="text" name="backup_storage_path" value="{{ backups_page.settings.backup_storage_path }}">
+                                        </label>
+                                        <label>
+                                            <span>Серверные копии: срок хранения, дней</span>
+                                            <input type="number" min="1" max="365" name="server_backup_retention_days" value="{{ backups_page.settings.server_backup_retention_days }}">
+                                        </label>
+                                        <label>
+                                            <span>Серверные копии: лимит места, МБ</span>
+                                            <input type="number" min="100" max="102400" name="server_backup_size_limit_mb" value="{{ backups_page.settings.server_backup_size_limit_mb }}">
+                                        </label>
+                                        <label>
+                                            <span>Месячные копии: срок хранения, дней</span>
+                                            <input type="number" min="30" max="1825" name="server_backup_monthly_retention_days" value="{{ backups_page.settings.server_backup_monthly_retention_days }}">
+                                        </label>
+                                        <label>
+                                            <span>Месячные копии: лимит места, МБ</span>
+                                            <input type="number" min="100" max="102400" name="server_backup_monthly_size_limit_mb" value="{{ backups_page.settings.server_backup_monthly_size_limit_mb }}">
+                                        </label>
+                                        <label>
+                                            <span>Удалённое хранилище</span>
+                                            <select name="backup_remote_storage_server_id">
+                                                <option value="">Не выбрано</option>
+                                                {% for server in backups_page.storage_server_options %}
+                                                <option value="{{ server.id }}" {% if backups_page.settings.backup_remote_storage_server_id == server.id %}selected{% endif %}>{{ server.name }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </label>
+                                    </div>
+                                    <div class="toolbar-row">
+                                        <button class="primary-button small" type="submit">Сохранить настройки бэкапов</button>
+                                        <span class="status-text" data-backup-settings-status></span>
+                                    </div>
+                                </form>
+                                <p class="muted-note">Автоматически создаётся только полный snapshot.</p>
+                                <div class="backup-schedule-summary">
+                                    <span>Последний запуск: {% if backups_page.settings.backup_last_run_at %}{{ backups_page.settings.backup_last_run_at|datetime_moscow }}{% else %}нет данных{% endif %}</span>
+                                    <span>Следующий запуск: {% if backups_page.settings.backup_next_run_at %}{{ backups_page.settings.backup_next_run_at|datetime_moscow }}{% else %}выключено{% endif %}</span>
+                                </div>
+                                <div class="toolbar-row">
+                                    <button class="ghost-button small" type="button" data-backup-scheduled-run-now>Запустить плановый бэкап сейчас</button>
+                                    <button class="ghost-button small" type="button" data-backup-verify-server-copies>Проверить BackUp на свежесть</button>
+                                    <a class="ghost-button small" href="/api/admin/backups/download-all">Скачать все бэкапы</a>
+                                    <button class="ghost-button small danger" type="button" data-backup-cleanup-servers>Очистить сервера от бэкапов</button>
+                                    <button class="ghost-button small danger" type="button" data-backup-delete-panel-all>Удалить все бэкапы</button>
+                                    <span class="status-text" data-backup-scheduled-status></span>
+                                </div>
+                                <div class="backup-verify-result" data-backup-verify-result hidden></div>
+                            </section>
+
+                            <section class="settings-card">
+                                <h3>Создать бэкап вручную</h3>
+                                <p>Бэкапы содержат секретные данные: SSH-пароли, password hashes и конфиги пиров, если агент доступен.</p>
+                                <form class="toolbar-row" data-backup-create-form>
+                                    <select name="backup_type">
+                                        <option value="users">Пользовательский</option>
+                                        <option value="system">Системный</option>
+                                        <option value="full">Полный snapshot</option>
+                                    </select>
+                                    <button class="primary-button small" type="submit">Создать бэкап</button>
+                                    <span class="status-text" data-backup-create-status></span>
+                                </form>
+                            </section>
+
+                            <section class="settings-card">
+                                <h3>Созданные бэкапы</h3>
+                                <div class="toolbar-row">
+                                    <label class="inline-filter">
+                                        <span>Тип бэкапа</span>
+                                        <select data-backup-type-filter>
+                                            <option value="all">Все</option>
+                                            <option value="users">Пользовательские</option>
+                                            <option value="system">Системные</option>
+                                            <option value="full">Полные</option>
+                                        </select>
+                                    </label>
+                                </div>
+                                <div class="backup-list" data-backup-list>
+                                    {% for backup in backups_page.backups %}
+                                    <article class="backup-row" data-backup-type="{{ backup.backup_type.value }}">
+                                        <div>
+                                            <strong>{{ backup.filename }}</strong>
+                                            <p>{{ backup.backup_type.value }} · {{ backup.status }} · {{ backup.size_label }} · {{ backup.created_label }}</p>
+                                            {% if backup.error_message %}<p class="status-text is-error">{{ backup.error_message }}</p>{% endif %}
+                                        </div>
+                                        <span class="availability {% if backup.status == 'completed' %}is-online{% elif backup.status == 'failed' %}is-offline{% else %}is-invalid{% endif %}">
+                                            {{ backup.status }}
+                                        </span>
+                                        <div class="backup-actions">
+                                            <a class="ghost-button small" href="/api/admin/backups/{{ backup.id }}/download">Скачать</a>
+                                            <button class="ghost-button small" type="button" data-backup-restore-plan="{{ backup.id }}">Проверить восстановление</button>
+                                            <button class="ghost-button small danger" type="button" data-backup-delete="{{ backup.id }}">Удалить</button>
+                                        </div>
+                                    </article>
+                                    {% endfor %}
+                                    {% if not backups_page.backups %}
+                                    <p class="muted-note">Бэкапов пока нет.</p>
+                                    {% endif %}
+                                </div>
+                                <div class="backup-restore-plan" data-backup-restore-plan-result hidden></div>
+                            </section>
+                        </div>
+                        {% endif %}
+
+                        {% if settings_view == 'shared_peers' and shared_peers_page %}
+                        <div class="tab-panel active">
+                            <section class="settings-card">
+                                <h3>Расшаренные пиры</h3>
+                                <p class="muted-note">Ссылка живёт до срока жизни пира. Если срок жизни пира не задан, ссылка бессрочная, пока администратор её не отзовёт.</p>
+                                <div class="backup-schedule-summary">
+                                    <span>Активных ссылок: {{ shared_peers_page.active_count }}</span>
+                                    <span>Бессрочных активных ссылок: {{ shared_peers_page.lifetime_count }}</span>
+                                </div>
+                                <div class="toolbar-row">
+                                    <button class="ghost-button small danger" type="button" data-peer-links-revoke-all>Отозвать все ссылки</button>
+                                    <button class="ghost-button small danger" type="button" data-peer-links-revoke-lifetime>Отозвать ссылки без срока жизни</button>
+                                    <span class="status-text" data-peer-links-status></span>
+                                </div>
+                            </section>
+
+                            <section class="settings-card">
+                                <h3>Выданные ссылки</h3>
+                                <div class="backup-list">
+                                    {% for link in shared_peers_page.links %}
+                                    <article class="backup-row">
+                                        <div>
+                                            <strong>{{ link.interface_name }} · Пир {{ link.peer_slot }}</strong>
+                                            <p>{{ link.user_login }} · {{ link.user_display_name }} · создана {{ link.created_at|datetime_moscow }}</p>
+                                            <p>
+                                                Срок пира:
+                                                {% if link.peer_expires_at %}{{ link.peer_expires_at|datetime_moscow }}{% else %}не задан{% endif %}
+                                                · Срок ссылки:
+                                                {% if link.link_expires_at %}{{ link.link_expires_at|datetime_moscow }}{% else %}бессрочно{% endif %}
+                                            </p>
+                                        </div>
+                                        <span class="availability {% if link.is_revoked or link.is_expired %}is-offline{% else %}is-online{% endif %}">
+                                            {% if link.is_revoked %}отозвана{% elif link.is_expired %}истекла{% else %}активна{% endif %}
+                                        </span>
+                                        <div class="backup-actions">
+                                            {% if not link.is_revoked %}
+                                            <button class="ghost-button small danger" type="button" data-peer-link-revoke="{{ link.id }}">Отозвать ссылку</button>
+                                            {% else %}
+                                            <span class="muted-note">Отозвана {{ link.revoked_at|datetime_moscow if link.revoked_at else '' }}</span>
+                                            {% endif %}
+                                        </div>
+                                    </article>
+                                    {% endfor %}
+                                    {% if not shared_peers_page.links %}
+                                    <p class="muted-note">Расшаренных ссылок пока нет.</p>
+                                    {% endif %}
+                                </div>
+                            </section>
+                        </div>
+                        {% endif %}
+
+                        {% if settings_view == 'logs' %}
+                        <div class="tab-panel active">
+                            <section class="settings-card">
+                                <h3>Настройки хранения логов</h3>
+                                <form data-audit-log-settings-form>
+                                    <div class="settings-grid">
+                                        <label>
+                                            <span>Срок хранения</span>
+                                            <input type="number" min="1" max="365" name="retention_days" value="{{ admin_page.settings.audit_log_retention_days }}">
+                                        </label>
+                                    </div>
+                                    <div class="toolbar-row">
+                                        <button class="primary-button small" type="submit">Сохранить срок хранения</button>
+                                        <span class="status-text" data-audit-log-settings-status></span>
+                                    </div>
+                                </form>
+                            </section>
+
+                            <section class="settings-card">
+                                <h3>Принудительная очистка логов</h3>
+                                <form data-audit-log-cleanup-form>
+                                    <div class="settings-grid">
+                                        <label>
+                                            <span>Удалить старые логи и оставить за последние</span>
+                                            <select name="keep_days">
+                                                <option value="1">1 день</option>
+                                                <option value="3">3 дня</option>
+                                                <option value="7">7 дней</option>
+                                                <option value="14">14 дней</option>
+                                                <option value="30" selected>30 дней</option>
+                                            </select>
+                                        </label>
+                                    </div>
+                                    <div class="toolbar-row">
+                                        <button class="ghost-button small danger" type="submit">Удалить</button>
+                                        <span class="status-text" data-audit-log-cleanup-status></span>
+                                    </div>
+                                </form>
+                            </section>
+
+                            <section class="settings-card danger-zone">
+                                <h3>Удалить все логи</h3>
+                                <p>Действие удалит все записи журнала панели без возможности восстановления.</p>
+                                <form class="toolbar-row" method="post" action="/admin/logs/delete-all" data-audit-log-delete-all-form>
+                                    <button class="ghost-button small danger" type="submit">Удалить все логи</button>
+                                    <span class="status-text" data-audit-log-delete-all-status></span>
+                                </form>
+                            </section>
+                        </div>
+                        {% endif %}
+
+                        {% if settings_view in ['filters', 'block_filters'] %}
+                        <div class="tab-panel active {% if (filter_kind == 'exclusion' and not exclusion_filters_enabled) or (filter_kind == 'block' and not block_filters_enabled) %}exclusion-settings-disabled{% endif %}">
+                            {% if filter_kind == 'exclusion' and not exclusion_filters_enabled %}
+                            <div class="settings-warning">
+                                Фильтры исключения выключены. На пользовательской странице вкладка скрыта.
+                            </div>
+                            {% endif %}
+                            {% if filter_kind == 'block' and not block_filters_enabled %}
+                            <div class="settings-warning">
+                                Фильтры блока выключены. На пользовательской странице вкладка скрыта.
+                            </div>
+                            {% endif %}
+                            <div class="create-filter-card filter-toolbar-card">
+                                <form class="filter-toolbar" method="get" action="/admin">
+                                    <input type="hidden" name="tab" value="settings">
+                                    <input type="hidden" name="settings_view" value="{{ settings_view }}">
+                                    <label>
+                                        <span>Показывать</span>
+                                        <select name="filter_scope" onchange="this.form.submit()">
+                                            <option value="all" {% if filter_scope == 'all' %}selected{% endif %}>все</option>
+                                            <option value="global" {% if filter_scope == 'global' %}selected{% endif %}>global</option>
+                                            <option value="user" {% if filter_scope == 'user' %}selected{% endif %}>user</option>
+                                        </select>
+                                    </label>
+                                </form>
+                            </div>
+
+                            <form class="create-filter-card" data-admin-global-filter-form data-filter-kind="{{ filter_kind }}">
+                                <h3>{% if filter_kind == 'block' %}Добавить глобальную блокировку{% else %}Добавить глобальное исключение{% endif %}</h3>
+                                <div class="create-filter-grid">
+                                    <input type="text" name="name" placeholder="Название" required>
+                                    <select name="filter_type">
+                                        <option value="ip">ip</option>
+                                        <option value="link">link</option>
+                                    </select>
+                                    <input type="text" name="value" placeholder="Значение" required>
+                                </div>
+                                <div class="toolbar-row">
+                                    <button class="primary-button small" type="submit">{% if filter_kind == 'block' %}Добавить глобальную блокировку{% else %}Добавить глобальное исключение{% endif %}</button>
+                                    <span class="status-text" data-filter-status></span>
+                                </div>
+                            </form>
+
+                            <section class="filters-table">
+                                <div class="filter-head filter-head-admin">
+                                    <span>Название</span>
+                                    <span>Тип</span>
+                                    <span>Источник</span>
+                                    <span>Значение</span>
+                                </div>
+                                {% for item in admin_page.filters %}
+                                <div class="filter-row filter-row-body" data-filter-id="{{ item.id }}">
+                                    {% if item.scope.value == "global" %}
+                                    <input type="text" value="{{ item.name }}" data-filter-field="name">
+                                    <select data-filter-field="filter_type">
+                                        <option value="ip" {% if item.filter_type.value == "ip" %}selected{% endif %}>ip</option>
+                                        <option value="link" {% if item.filter_type.value == "link" %}selected{% endif %}>link</option>
+                                    </select>
+                                    <span class="filter-source">{{ item.scope.value }}</span>
+                                    <div class="filter-edit-cell">
+                                        <input type="text" value="{{ item.value }}" data-filter-field="value">
+                                        <div class="filter-actions">
+                                            <button class="ghost-button small" type="button" data-filter-save>Сохранить</button>
+                                            <button class="ghost-button small danger" type="button" data-filter-delete>Удалить</button>
+                                        </div>
+                                    </div>
+                                    {% else %}
+                                    <strong>{{ item.name }}</strong>
+                                    <span>{{ item.filter_type.value }}</span>
+                                    <div class="filter-source-stack">
+                                        <span class="filter-source">{{ item.scope.value }}</span>
+                                        <div class="filter-owners">
+                                            {% for owner in item.owner_users %}
+                                            <a href="/dashboard?target_user_id={{ owner.id }}" class="filter-owner-link">{{ owner.display_name }}</a>
+                                            {% endfor %}
+                                        </div>
+                                    </div>
+                                    <div class="filter-readonly-cell">
+                                        <span>{{ item.value }}{% if item.peer_label %}<small class="filter-peer-label">{{ item.peer_label }}</small>{% endif %}</span>
+                                        <div class="filter-actions">
+                                            <button class="ghost-button small danger" type="button" data-admin-filter-delete='{{ item.delete_ids|tojson }}'>Удалить</button>
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                                {% endfor %}
+                            </section>
+                        </div>
+                        {% endif %}
+                    </div>
+                </section>
+            </div>
+            {% endif %}
+
+            {% if active_tab == 'clients' %}
+            <div class="tab-panel active">
+                <section class="clients-layout">
+                    <form class="settings-card" data-client-create-form>
+                        <h3>Создать пользователя</h3>
+                        <div class="settings-grid client-grid">
+                            <label>
+                                <span>Логин</span>
+                                <input type="text" name="login" required>
+                            </label>
+                            <label>
+                                <span>Пароль</span>
+                                <input type="password" name="password" required>
+                            </label>
+                            <label class="client-interfaces-field">
+                                <span>Свободные интерфейсы</span>
+                                <select name="interface_ids" multiple size="5">
+                                    {% for option in admin_page.client_interface_options %}
+                                    <option value="{{ option.id }}">{{ option.name }} · {{ option.owner_name }}</option>
+                                    {% endfor %}
+                                </select>
+                            </label>
+                            <label>
+                                <span>Имя</span>
+                                <input type="text" name="display_name" placeholder="Иван">
+                            </label>
+                            <label>
+                                <span>Канал связи</span>
+                                <input type="text" name="communication_channel" placeholder="https://t.me/...">
+                            </label>
+                        </div>
+                        <div class="toolbar-row">
+                            <button class="primary-button small" type="submit">Создать пользователя</button>
+                            <span class="status-text" data-client-status></span>
+                        </div>
+                    </form>
+
+                    <div class="client-search-row">
+                        <label class="client-search-field">
+                            <span>Поиск по имени</span>
+                            <input type="search" placeholder="Начните вводить имя" data-client-search>
+                        </label>
+                    </div>
+
+                    <section class="client-list">
+                        {% for client in admin_page.clients %}
+                        <article class="client-card" data-client-card data-client-card-name="{{ (client.display_name or '-')|lower }}">
+                            <a class="client-card-header" href="/dashboard?target_user_id={{ client.id }}">
+                                <h3>{{ client.login }}</h3>
+                                <p>{{ client.login }} · Имя: {{ client.display_name or "-" }}</p>
+                            </a>
+                            <dl class="client-metrics">
+                                <div><dt>Интерфейсы</dt><dd>{{ client.interface_count }}</dd></div>
+                                <div><dt>Имя</dt><dd>{{ client.display_name or "-" }}</dd></div>
+                                <div><dt>Канал связи</dt><dd>{{ client.communication_channel or "Не задан" }}</dd></div>
+                            </dl>
+                            <div class="channel-editor">
+                                <input type="text" value="{{ client.display_name or '-' }}" data-client-name-input="{{ client.id }}" placeholder="Имя">
+                                <button class="ghost-button small" type="button" data-client-name-save="{{ client.id }}">Изменить Имя</button>
+                            </div>
+                            <div class="channel-editor">
+                                <input type="text" value="{{ client.communication_channel or '' }}" data-client-channel-input="{{ client.id }}" placeholder="https://t.me/...">
+                                <button class="ghost-button small" type="button" data-client-channel-save="{{ client.id }}">Сохранить</button>
+                            </div>
+                            <div class="client-actions">
+                                {% if client.can_delete %}
+                                <button class="ghost-button small danger" type="button" data-client-delete="{{ client.id }}">Удалить</button>
+                                {% else %}
+                                <span class="availability is-online">удаление запрещено</span>
+                                {% endif %}
+                            </div>
+                        </article>
+                        {% endfor %}
+                    </section>
+                </section>
+            </div>
+            {% endif %}
+        </section>
+    </section>
+</main>
+
+<div class="modal-backdrop" data-interface-modal hidden>
+    <div class="modal-card modal-card-wide">
+        <div class="section-header">
+            <div>
+                <p class="eyebrow">Новый интерфейс</p>
+                <h3>Создание интерфейса на Tic сервере</h3>
+            </div>
+            <button class="ghost-button small" type="button" data-close-interface-modal>Закрыть</button>
+        </div>
+        <form class="interface-create-form" data-interface-create-form>
+            <div class="interface-step" data-interface-step="1">
+                <div class="settings-grid">
+                    <label>
+                        <span>Tic сервер</span>
+                        <select name="tic_server_id" required>
+                            {% for option in admin_page.available_tic_servers %}
+                            <option value="{{ option.id }}">{{ option.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <label>
+                        <span>Tak endpoint</span>
+                        <select name="tak_server_id">
+                            <option value="">standalone</option>
+                            {% for option in admin_page.available_tak_servers %}
+                            <option value="{{ option.id }}">{{ option.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <label>
+                        <span>Название интерфейса</span>
+                        <input type="text" name="name" required>
+                    </label>
+                </div>
+                <div class="toolbar-row interface-step-actions">
+                    <button class="primary-button small" type="button" data-interface-next>Далее</button>
+                </div>
+            </div>
+
+            <div class="interface-step" data-interface-step="2" hidden>
+                <div class="settings-grid">
+                    <label>
+                        <span>Порт</span>
+                        <input type="text" name="listen_port" placeholder="Авто от 10001">
+                    </label>
+                    <label>
+                        <span>IPv4 адрес</span>
+                        <input type="text" name="address_v4" placeholder="Авто">
+                    </label>
+                    <label>
+                        <span>Лимит пиров</span>
+                        <select name="peer_limit">
+                            <option value="5">5</option>
+                            <option value="10">10</option>
+                            <option value="15">15</option>
+                            <option value="20">20</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="toolbar-row interface-step-actions">
+                    <button class="ghost-button small" type="button" data-interface-back>Назад</button>
+                    <button class="primary-button small" type="submit">Создать интерфейс</button>
+                    <span class="status-text" data-interface-status></span>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

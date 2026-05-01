@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block body %}
+<main class="app-shell admin-shell">
+    <aside class="sidebar icon-sidebar">
+        <div class="sidebar-logo-shell" aria-label="Nelomai">
+            <img class="sidebar-brand-logo" src="{{ url_for('static', path='/logo.svg') }}" alt="Nelomai">
+        </div>
+        <nav class="sidebar-nav sidebar-nav-icons">
+            <a class="nav-icon-pill" href="/admin?tab=overview" title="Панель" aria-label="Панель">
+                <span class="nav-icon">⌂</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin?tab=settings&settings_view=basic" title="Настройки" aria-label="Настройки">
+                <span class="nav-icon">⚙</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin?tab=clients" title="Клиенты" aria-label="Клиенты">
+                <span class="nav-icon">◫</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/servers" title="Сервера" aria-label="Сервера">
+                <span class="nav-icon">▣</span>
+            </a>
+            <a class="nav-icon-pill {% if has_problem_jobs %}is-problem{% endif %}" href="/admin/jobs" title="Задачи" aria-label="Задачи">
+                <span class="nav-icon">⏱</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/logs" title="Логи" aria-label="Логи">
+                <span class="nav-icon">≡</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/diagnostics" title="Диагностика" aria-label="Диагностика">
+                <span class="nav-icon">+</span>
+            </a>
+            <a class="nav-icon-pill active" href="/admin/agent-contract" title="Контракт агента" aria-label="Контракт агента">
+                <span class="nav-icon">⇄</span>
+            </a>
+        </nav>
+    </aside>
+
+    <section class="main-shell">
+        <header class="topbar">
+            <div>
+                <div class="brand-inline">
+                    <span class="brand-inline-title">Nelomai</span>
+                </div>
+                <p class="eyebrow">panel ↔ node-agent</p>
+                <h2>Контракт агента</h2>
+            </div>
+            <div class="topbar-actions">
+                <a class="ghost-button" href="/api/admin/agent-contract" target="_blank" rel="noopener noreferrer">JSON</a>
+                <form method="post" action="/logout">
+                    <button type="submit" class="ghost-button">Выйти</button>
+                </form>
+            </div>
+        </header>
+
+        <section class="server-list-grid">
+            <article class="settings-card">
+                <p class="eyebrow">version</p>
+                <h3>{{ contract_page.contract_version }}</h3>
+                <p>Поддерживаемые версии: {{ contract_page.supported_contracts|join(", ") }}</p>
+                <p>Версия панели: {{ contract_page.panel_version }}</p>
+            </article>
+            <article class="settings-card">
+                <p class="eyebrow">components</p>
+                <h3>Компоненты</h3>
+                <ul class="diagnostics-details">
+                    {% for component in contract_page.components %}
+                    <li><strong>{{ component.key }}</strong> — {{ component.label }}</li>
+                    {% endfor %}
+                </ul>
+            </article>
+        </section>
+
+        <section class="settings-card contract-actions-card">
+            <div class="server-list-head">
+                <div>
+                    <p class="eyebrow">actions</p>
+                    <h3>Поддерживаемые действия</h3>
+                </div>
+            </div>
+            <div class="contract-actions-grid">
+                {% for action in contract_page.actions %}
+                <article class="contract-action-item">
+                    <div class="contract-action-head">
+                        <h4>{{ action.action }}</h4>
+                        <span class="availability is-online">{{ action.component_label }}</span>
+                    </div>
+                    <p class="server-metrics-note">{{ action.component }}</p>
+                    <ul class="diagnostics-details">
+                        {% for capability in action.capabilities %}
+                        <li>{{ capability }}</li>
+                        {% endfor %}
+                    </ul>
+                </article>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="settings-card">
+            <div class="server-list-head">
+                <div>
+                    <p class="eyebrow">source of truth</p>
+                    <h3>Текущий документ контракта</h3>
+                </div>
+                <span class="server-metrics-note">{{ contract_page.doc_path }}</span>
+            </div>
+            <pre class="contract-doc-block">{{ contract_page.raw_markdown }}</pre>
+        </section>
+    </section>
+</main>
+{% endblock %}

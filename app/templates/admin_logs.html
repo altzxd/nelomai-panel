@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block body %}
+<main class="app-shell admin-shell">
+    <aside class="sidebar icon-sidebar">
+        <div class="sidebar-logo-shell" aria-label="Nelomai">
+            <img class="sidebar-brand-logo" src="{{ url_for('static', path='/logo.svg') }}" alt="Nelomai">
+        </div>
+        <nav class="sidebar-nav sidebar-nav-icons">
+            <a class="nav-icon-pill" href="/admin?tab=overview" title="Панель" aria-label="Панель">
+                <span class="nav-icon">⌂</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin?tab=settings&settings_view=basic" title="Настройки" aria-label="Настройки">
+                <span class="nav-icon">⚙</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin?tab=clients" title="Клиенты" aria-label="Клиенты">
+                <span class="nav-icon">◫</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/servers" title="Сервера" aria-label="Сервера">
+                <span class="nav-icon">▣</span>
+            </a>
+            <a class="nav-icon-pill {% if has_problem_jobs %}is-problem{% endif %}" href="/admin/jobs" title="Задачи" aria-label="Задачи">
+                <span class="nav-icon">⏱</span>
+            </a>
+            <a class="nav-icon-pill active" href="/admin/logs" title="Логи" aria-label="Логи">
+                <span class="nav-icon">≡</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/diagnostics" title="Диагностика" aria-label="Диагностика">
+                <span class="nav-icon">+</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/agent-contract" title="Контракт агента" aria-label="Контракт агента">
+                <span class="nav-icon">⇄</span>
+            </a>
+        </nav>
+    </aside>
+
+    <section class="main-shell">
+        <header class="topbar">
+            <div>
+                <div class="brand-inline">
+                    <span class="brand-inline-title">Nelomai</span>
+                </div>
+                <p class="eyebrow">Логи панели</p>
+                <h2>События и ошибки</h2>
+            </div>
+            <div class="topbar-actions">
+                <form method="post" action="/logout">
+                    <button type="submit" class="ghost-button">Выйти</button>
+                </form>
+            </div>
+        </header>
+
+        <section class="logs-layout">
+            <form class="settings-card logs-filter-card" method="get" action="/admin/logs">
+                <h3>Фильтры логов</h3>
+                <div class="settings-grid logs-filter-grid">
+                    <label>
+                        <span>Тип ошибки</span>
+                        <select name="severity">
+                            <option value="all" {% if logs_page.selected_severity == "all" %}selected{% endif %}>Все</option>
+                            <option value="error" {% if logs_page.selected_severity == "error" %}selected{% endif %}>Ошибки</option>
+                            <option value="warning" {% if logs_page.selected_severity == "warning" %}selected{% endif %}>Предупреждения</option>
+                            <option value="info" {% if logs_page.selected_severity == "info" %}selected{% endif %}>Информация</option>
+                        </select>
+                    </label>
+                    <label>
+                        <span>Событие</span>
+                        <select name="event_type">
+                            <option value="all" {% if logs_page.selected_event_type == "all" %}selected{% endif %}>Все события</option>
+                            {% for item in logs_page.event_types %}
+                            <option value="{{ item }}" {% if logs_page.selected_event_type == item %}selected{% endif %}>{{ logs_page.event_type_labels.get(item, item) }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <label>
+                        <span>Пользователь</span>
+                        <select name="user_id">
+                            <option value="" {% if not logs_page.selected_user_id %}selected{% endif %}>Все пользователи</option>
+                            {% for user in logs_page.users %}
+                            <option value="{{ user.id }}" {% if logs_page.selected_user_id == user.id %}selected{% endif %}>{{ user.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <label>
+                        <span>Сервер</span>
+                        <select name="server_id">
+                            <option value="" {% if not logs_page.selected_server_id %}selected{% endif %}>Все серверы</option>
+                            {% for server in logs_page.servers %}
+                            <option value="{{ server.id }}" {% if logs_page.selected_server_id == server.id %}selected{% endif %}>{{ server.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+                    <label>
+                        <span>Сортировка</span>
+                        <select name="sort">
+                            <option value="newest" {% if logs_page.selected_sort == "newest" %}selected{% endif %}>Сначала новые</option>
+                            <option value="event_type" {% if logs_page.selected_sort == "event_type" %}selected{% endif %}>По типу события</option>
+                            <option value="user" {% if logs_page.selected_sort == "user" %}selected{% endif %}>По пользователю</option>
+                            <option value="server" {% if logs_page.selected_sort == "server" %}selected{% endif %}>По серверу</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="toolbar-row">
+                    <button class="primary-button small" type="submit">Применить</button>
+                    <a class="ghost-button small" href="/admin/logs">Сбросить</a>
+                </div>
+            </form>
+
+            <section class="logs-table">
+                <div class="logs-head">
+                    <span>Время</span>
+                    <span>Тип</span>
+                    <span>Пользователь</span>
+                    <span>Сервер</span>
+                    <span>Сообщение</span>
+                </div>
+                {% if logs_page.logs %}
+                    {% for log in logs_page.logs %}
+                    <article class="logs-row severity-{{ log.severity }}">
+                        <span>{{ log.created_at|datetime_moscow }}</span>
+                        <span class="log-severity">{{ log.severity }} · {{ log.event_type_label }}</span>
+                        <span>{{ log.actor_login or log.target_login or "—" }}</span>
+                        <span>{{ log.server_name or "—" }}</span>
+                        <div>
+                            <strong>{{ log.message_ru }}</strong>
+                            {% if log.details_ru %}
+                            <p>{{ log.details_ru }}</p>
+                            {% elif log.details %}
+                            <p>{{ log.details }}</p>
+                            {% endif %}
+                        </div>
+                    </article>
+                    {% endfor %}
+                {% else %}
+                <div class="logs-empty">
+                    <strong>Логов пока нет</strong>
+                    <span>События появятся здесь после действий в панели.</span>
+                </div>
+                {% endif %}
+            </section>
+        </section>
+    </section>
+</main>
+{% endblock %}

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block body %}
+<main class="login-shell">
+    <section class="login-card">
+        <div class="brand-lockup">
+            <img class="brand-logo" src="{{ url_for('static', path='/logo.svg') }}" alt="Nelomai">
+            <div>
+                <p class="eyebrow">WireGuard Infrastructure</p>
+                <h1>Nelomai Panel</h1>
+            </div>
+        </div>
+        <p class="login-copy">Стабильная панель управления доступом, интерфейсами и ресурсами пользователей.</p>
+        <form method="post" action="/login" class="login-form">
+            <label>
+                <span>Логин</span>
+                <input type="text" name="login" autocomplete="username" required>
+            </label>
+            <label>
+                <span>Пароль</span>
+                <input type="password" name="password" autocomplete="current-password" required>
+            </label>
+            {% if error %}
+            <div class="form-error">{{ error }}</div>
+            {% endif %}
+            <button type="submit" class="primary-button">Войти</button>
+        </form>
+        <p class="demo-hint">Демо: `admin/admin` и `demo/demo`</p>
+    </section>
+</main>
+{% endblock %}

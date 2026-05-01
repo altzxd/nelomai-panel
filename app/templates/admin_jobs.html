@@ -1,0 +1,222 @@
+{% extends "base.html" %}
+{% block body %}
+<main class="app-shell admin-shell" data-admin-jobs-page data-auto-refresh="{% if jobs_page.has_active_jobs %}1{% else %}0{% endif %}">
+    <aside class="sidebar icon-sidebar">
+        <div class="sidebar-logo-shell" aria-label="Nelomai">
+            <img class="sidebar-brand-logo" src="{{ url_for('static', path='/logo.svg') }}" alt="Nelomai">
+        </div>
+        <nav class="sidebar-nav sidebar-nav-icons">
+            <a class="nav-icon-pill" href="/admin?tab=overview" title="Панель" aria-label="Панель">
+                <span class="nav-icon">⌂</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin?tab=settings&settings_view=basic" title="Настройки" aria-label="Настройки">
+                <span class="nav-icon">⚙</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin?tab=clients" title="Клиенты" aria-label="Клиенты">
+                <span class="nav-icon">◫</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/servers" title="Сервера" aria-label="Сервера">
+                <span class="nav-icon">▣</span>
+            </a>
+            <a class="nav-icon-pill active {% if has_problem_jobs %}is-problem{% endif %}" href="/admin/jobs" title="Задачи" aria-label="Задачи">
+                <span class="nav-icon">⏱</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/logs" title="Логи" aria-label="Логи">
+                <span class="nav-icon">≡</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/diagnostics" title="Диагностика" aria-label="Диагностика">
+                <span class="nav-icon">+</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/agent-contract" title="Контракт агента" aria-label="Контракт агента">
+                <span class="nav-icon">⇄</span>
+            </a>
+        </nav>
+    </aside>
+
+    <section class="main-shell">
+        <header class="topbar">
+            <div>
+                <div class="brand-inline">
+                    <span class="brand-inline-title">Nelomai</span>
+                </div>
+                <p class="eyebrow">Задачи панели</p>
+                <h2>Фоновые и долгие процессы</h2>
+            </div>
+            <div class="topbar-actions">
+                <button class="primary-button" type="button" data-run-expired-peers-job>Очистить истёкшие пиры</button>
+                <form method="post" action="/logout">
+                    <button type="submit" class="ghost-button">Выйти</button>
+                </form>
+            </div>
+        </header>
+
+        <section class="admin-hero-actions">
+            <form class="server-toolbar" method="get" action="/admin/jobs">
+                <label>
+                    <span>Статус</span>
+                    <select name="status" onchange="this.form.submit()">
+                        <option value="all" {% if jobs_page.selected_status == 'all' %}selected{% endif %}>Все</option>
+                        <option value="queued" {% if jobs_page.selected_status == 'queued' %}selected{% endif %}>В очереди</option>
+                        <option value="running" {% if jobs_page.selected_status == 'running' %}selected{% endif %}>Выполняется</option>
+                        <option value="completed" {% if jobs_page.selected_status == 'completed' %}selected{% endif %}>Завершена</option>
+                        <option value="failed" {% if jobs_page.selected_status == 'failed' %}selected{% endif %}>Ошибка</option>
+                        <option value="cancelled" {% if jobs_page.selected_status == 'cancelled' %}selected{% endif %}>Остановлена</option>
+                        <option value="stuck" {% if jobs_page.selected_status == 'stuck' %}selected{% endif %}>Зависла</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Тип</span>
+                    <select name="type" onchange="this.form.submit()">
+                        <option value="all" {% if jobs_page.selected_type == 'all' %}selected{% endif %}>Все</option>
+                        <option value="server_bootstrap" {% if jobs_page.selected_type == 'server_bootstrap' %}selected{% endif %}>Добавление сервера</option>
+                        <option value="expired_peers_cleanup" {% if jobs_page.selected_type == 'expired_peers_cleanup' %}selected{% endif %}>Очистка истёкших пиров</option>
+                        <option value="backup_create" {% if jobs_page.selected_type == 'backup_create' %}selected{% endif %}>Создание бэкапа</option>
+                        <option value="backup_restore_plan" {% if jobs_page.selected_type == 'backup_restore_plan' %}selected{% endif %}>Проверка восстановления</option>
+                        <option value="backup_restore_users" {% if jobs_page.selected_type == 'backup_restore_users' %}selected{% endif %}>Восстановление пользователей</option>
+                        <option value="backup_verify_freshness" {% if jobs_page.selected_type == 'backup_verify_freshness' %}selected{% endif %}>Проверка свежести BackUp</option>
+                        <option value="backup_cleanup_server_copies" {% if jobs_page.selected_type == 'backup_cleanup_server_copies' %}selected{% endif %}>Очистка бэкапов на серверах</option>
+                        <option value="agent_updates_check" {% if jobs_page.selected_type == 'agent_updates_check' %}selected{% endif %}>Проверка обновлений агентов</option>
+                        <option value="agent_updates_apply" {% if jobs_page.selected_type == 'agent_updates_apply' %}selected{% endif %}>Обновление агентов</option>
+                    </select>
+                </label>
+            </form>
+            <p>Остановка на этом этапе отменяет задачу в панели. Если команда уже ушла агенту, реальное agent-side прерывание появится отдельным контрактом.</p>
+            <span class="status-text" data-panel-jobs-status></span>
+        </section>
+
+        <section class="logs-table jobs-table">
+            <div class="logs-head jobs-head">
+                <span>Время</span>
+                <span>Тип</span>
+                <span>Статус</span>
+                <span>Запустил</span>
+                <span>Лог</span>
+            </div>
+            {% if jobs_page.jobs %}
+                {% for job in jobs_page.jobs %}
+                <article id="panel-job-{{ job.id }}" class="logs-row severity-{% if job.status.value in ['failed', 'stuck'] %}error{% elif job.status.value == 'cancelled' %}warning{% else %}info{% endif %} {% if jobs_page.selected_job_id == job.id %}is-selected-panel-job{% endif %}">
+                    <span>{{ job.created_at|datetime_moscow }}</span>
+                    <span>{{ job.job_type_label }}</span>
+                    <span class="availability {% if job.status.value == 'completed' %}is-online{% elif job.status.value in ['failed', 'stuck'] %}is-offline{% elif job.status.value == 'cancelled' %}is-invalid{% else %}is-unknown{% endif %}">
+                        {{ job.status_label }}
+                    </span>
+                    <span>{{ job.created_by_login or "—" }}</span>
+                    <div>
+                        <div class="job-progress">
+                            <span class="job-progress-bar" style="width: {{ job.progress_percent }}%"></span>
+                        </div>
+                        <p class="job-stage">{{ job.progress_percent }}% · {{ job.current_stage }}</p>
+                        {% if job.bootstrap_snapshot %}
+                        <p class="job-bootstrap-meta">
+                            {% if job.bootstrap_snapshot.transport %}
+                            <span>
+                                Транспорт:
+                                {% if job.bootstrap_snapshot.transport == "ssh" %}SSH
+                                {% elif job.bootstrap_snapshot.transport == "local" %}локально
+                                {% elif job.bootstrap_snapshot.transport == "noop" %}без выполнения
+                                {% else %}{{ job.bootstrap_snapshot.transport }}{% endif %}
+                            </span>
+                            {% endif %}
+                            {% if job.bootstrap_snapshot.mode %}
+                            <span>
+                                Режим:
+                                {% if job.bootstrap_snapshot.mode == "apply" %}применение
+                                {% elif job.bootstrap_snapshot.mode == "dry-run" %}проверка
+                                {% else %}{{ job.bootstrap_snapshot.mode }}{% endif %}
+                            </span>
+                            {% endif %}
+                            {% if job.bootstrap_snapshot.current_step_index %}<span>Шаг {{ job.bootstrap_snapshot.current_step_index }}</span>{% endif %}
+                            <span>{{ job.bootstrap_snapshot.executed_step_count }}/{{ job.bootstrap_snapshot.command_count }}</span>
+                            {% if job.bootstrap_snapshot.resume_from_step %}<span>Возврат: шаг {{ job.bootstrap_snapshot.resume_from_step }}</span>{% endif %}
+                            <span>{% if job.bootstrap_snapshot.applied %}Применение{% else %}План{% endif %}</span>
+                        </p>
+                        {% if job.bootstrap_snapshot.command_count > 0 %}
+                        <div class="job-step-progress">
+                            <div class="mini-progress job-step-progress-bar">
+                                <i style="width: {{ (job.bootstrap_snapshot.executed_step_count * 100 / job.bootstrap_snapshot.command_count) if job.bootstrap_snapshot.command_count else 0 }}%"></i>
+                            </div>
+                            <span>Выполнено шагов: {{ job.bootstrap_snapshot.executed_step_count }} из {{ job.bootstrap_snapshot.command_count }}</span>
+                        </div>
+                        {% endif %}
+                        {% if job.bootstrap_command_profile %}
+                        <div class="bootstrap-profile-block">
+                            <strong>Профиль bootstrap: {{ job.bootstrap_command_profile }}</strong>
+                            <span>Пакеты: {{ job.bootstrap_safe_init_packages|length }} в safe-init{% if job.bootstrap_full_only_packages %} + {{ job.bootstrap_full_only_packages|length }} в full-delta{% endif %}</span>
+                            {% if job.bootstrap_safe_init_packages %}
+                            <span>Safe-init: {{ job.bootstrap_safe_init_packages | join(", ") }}</span>
+                            {% endif %}
+                            {% if job.bootstrap_full_only_packages %}
+                            <span>Delta full: {{ job.bootstrap_full_only_packages | join(", ") }}</span>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                        {% if job.bootstrap_snapshot.pending_input %}
+                        <p class="job-bootstrap-pending">
+                            <strong>Ожидание ввода</strong>
+                            <span>
+                                {% if job.bootstrap_snapshot.pending_input.key == "ssh_password" %}SSH-пароль
+                                {% elif job.bootstrap_snapshot.pending_input.key == "ssh_host_key_confirm" %}Подтверждение SSH host key
+                                {% elif job.bootstrap_snapshot.pending_input.key and "bootstrap_step_" in job.bootstrap_snapshot.pending_input.key %}Подтверждение шага bootstrap
+                                {% else %}{{ job.bootstrap_snapshot.pending_input.key or "unknown" }}{% endif %}
+                                {% if job.bootstrap_snapshot.pending_input.kind %}
+                                ·
+                                {% if job.bootstrap_snapshot.pending_input.kind == "confirm" %}подтверждение
+                                {% elif job.bootstrap_snapshot.pending_input.kind == "password" %}пароль
+                                {% elif job.bootstrap_snapshot.pending_input.kind == "text" %}текст
+                                {% else %}{{ job.bootstrap_snapshot.pending_input.kind }}{% endif %}
+                                {% endif %}
+                                {% if job.bootstrap_snapshot.pending_input.step_index %}· шаг {{ job.bootstrap_snapshot.pending_input.step_index }}{% endif %}
+                            </span>
+                            {% if job.bootstrap_pending_command %}
+                            <span>Команда шага: {{ job.bootstrap_pending_command }}</span>
+                            {% endif %}
+                            {% if job.bootstrap_snapshot.pending_input.prompt %}
+                            <span>{{ job.bootstrap_snapshot.pending_input.prompt }}</span>
+                            {% endif %}
+                        </p>
+                        {% endif %}
+                        {% if job.bootstrap_steps %}
+                        <div class="bootstrap-step-list">
+                            {% for step in job.bootstrap_steps %}
+                            <div class="bootstrap-step-row is-{{ step.status }}">
+                                <span class="bootstrap-step-badge">{{ step.index }}</span>
+                                <div class="bootstrap-step-body">
+                                    <strong>{{ step.command }}</strong>
+                                    <span>Статус: {{ step.status_label }}</span>
+                                    {% if step.note %}<span>Примечание: {{ step.note }}</span>{% endif %}
+                                    {% if step.stderr %}<span class="bootstrap-step-error-text">Ошибка: {{ step.stderr }}</span>{% endif %}
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                        {% if job.bootstrap_last_step_error %}
+                        <div class="bootstrap-step-error">
+                            <strong>Последняя ошибка шага</strong>
+                            <span>{{ job.bootstrap_last_step_error }}</span>
+                        </div>
+                        {% endif %}
+                        {% endif %}
+                        <strong>{{ job.logs[-1] if job.logs else "Логов пока нет" }}</strong>
+                        {% if job.error_message %}<p>{{ job.error_message }}</p>{% endif %}
+                        <div class="job-actions">
+                            {% if job.source_url %}
+                            <a class="ghost-button small" href="{{ job.source_url }}">{{ job.source_label or "Открыть источник" }}</a>
+                            {% endif %}
+                        {% if job.can_cancel %}
+                        <button class="ghost-button small danger" type="button" data-panel-job-cancel="{{ job.id }}">Убить</button>
+                        {% endif %}
+                        </div>
+                    </div>
+                </article>
+                {% endfor %}
+            {% else %}
+            <div class="logs-empty">
+                <strong>Задач пока нет</strong>
+                <span>Запусти первую очистку истёкших пиров, чтобы увидеть процесс здесь.</span>
+            </div>
+            {% endif %}
+        </section>
+    </section>
+</main>
+{% endblock %}

@@ -1,0 +1,37 @@
+[project]
+name = "nelomai-panel"
+version = "0.1.0"
+description = "WireGuard management panel"
+requires-python = ">=3.11"
+dependencies = [
+    "alembic>=1.14,<2.0",
+    "fastapi>=0.115,<1.0",
+    "httpx>=0.28,<1.0",
+    "jinja2>=3.1,<4.0",
+    "passlib>=1.7,<2.0",
+    "psycopg[binary]>=3.2,<4.0",
+    "pydantic-settings>=2.6,<3.0",
+    "pyjwt>=2.10,<3.0",
+    "python-multipart>=0.0.18,<0.1",
+    "sqlalchemy>=2.0,<3.0",
+    "uvicorn[standard]>=0.32,<1.0",
+]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "."}
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.nelomai]
+smoke-check = "python scripts/smoke_check.py"
+agent-contract-check = "python scripts/agent_contract_check.py"
+integrity-check = "python scripts/integrity_check.py"
+config-check = "python scripts/config_check.py"
+route-inventory = "python scripts/route_inventory.py"
+migration-check = "python scripts/migration_check.py"
+preflight-check = "python scripts/preflight_check.py"

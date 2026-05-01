@@ -1,0 +1,461 @@
+{% extends "base.html" %}
+{% block body %}
+<main class="app-shell admin-shell">
+    <aside class="sidebar icon-sidebar">
+        <div class="sidebar-logo-shell" aria-label="Nelomai">
+            <img class="sidebar-brand-logo" src="{{ url_for('static', path='/logo.svg') }}" alt="Nelomai">
+        </div>
+        <nav class="sidebar-nav sidebar-nav-icons">
+            <a class="nav-icon-pill" href="/admin?tab=overview" title="Панель" aria-label="Панель">
+                <span class="nav-icon">⌂</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin?tab=settings&settings_view=basic" title="Настройки" aria-label="Настройки">
+                <span class="nav-icon">⚙</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin?tab=clients" title="Клиенты" aria-label="Клиенты">
+                <span class="nav-icon">◫</span>
+            </a>
+            <a class="nav-icon-pill active" href="/admin/servers" title="Сервера" aria-label="Сервера">
+                <span class="nav-icon">▣</span>
+            </a>
+            <a class="nav-icon-pill {% if has_problem_jobs %}is-problem{% endif %}" href="/admin/jobs" title="Задачи" aria-label="Задачи">
+                <span class="nav-icon">⏱</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/logs" title="Логи" aria-label="Логи">
+                <span class="nav-icon">≡</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/diagnostics" title="Диагностика" aria-label="Диагностика">
+                <span class="nav-icon">+</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/agent-contract" title="Контракт агента" aria-label="Контракт агента">
+                <span class="nav-icon">⇄</span>
+            </a>
+        </nav>
+    </aside>
+
+    <section class="main-shell" data-admin-servers-page>
+        <header class="topbar">
+            <div>
+                <div class="brand-inline">
+                    <span class="brand-inline-title">Nelomai</span>
+                </div>
+                <p class="eyebrow">Сервера панели</p>
+                <h2>Управление Tic и Tak серверами</h2>
+            </div>
+            <div class="topbar-actions">
+                <button class="ghost-button" type="button" data-server-refresh>Обновить статус</button>
+                <button class="primary-button" type="button" data-open-server-modal>Добавить новый сервер</button>
+                <form method="post" action="/logout">
+                    <button type="submit" class="ghost-button">Выйти</button>
+                </form>
+            </div>
+        </header>
+
+        <section class="tabs">
+            <div class="tab-list tab-list-stretch">
+                <a class="tab-button tab-link {% if servers_page.selected_bucket == 'active' %}active{% endif %}" href="/admin/servers?bucket=active&server_type={{ servers_page.selected_type }}&sort={{ servers_page.selected_sort }}">Активные</a>
+                <a class="tab-button tab-link {% if servers_page.selected_bucket == 'excluded' %}active{% endif %}" href="/admin/servers?bucket=excluded&server_type={{ servers_page.selected_type }}&sort={{ servers_page.selected_sort }}">Исключённые</a>
+            </div>
+        </section>
+
+        <section class="admin-hero-actions">
+            <form class="server-toolbar" method="get" action="/admin/servers">
+                <input type="hidden" name="bucket" value="{{ servers_page.selected_bucket }}">
+                {% if servers_page.selected_server %}
+                <input type="hidden" name="selected_server_id" value="{{ servers_page.selected_server.id }}">
+                {% endif %}
+                <label>
+                    <span>Тип сервера</span>
+                    <select name="server_type" onchange="this.form.submit()">
+                        <option value="all" {% if servers_page.selected_type == 'all' %}selected{% endif %}>Все</option>
+                        <option value="tic" {% if servers_page.selected_type == 'tic' %}selected{% endif %}>Tic</option>
+                        <option value="tak" {% if servers_page.selected_type == 'tak' %}selected{% endif %}>Tak</option>
+                        <option value="storage" {% if servers_page.selected_type == 'storage' %}selected{% endif %}>Storage</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Сортировка</span>
+                    <select name="sort" onchange="this.form.submit()">
+                        <option value="load_desc" {% if servers_page.selected_sort == 'load_desc' %}selected{% endif %}>Загрузка: больше → меньше</option>
+                        <option value="load_asc" {% if servers_page.selected_sort == 'load_asc' %}selected{% endif %}>Загрузка: меньше → больше</option>
+                    </select>
+                </label>
+            </form>
+            <p>Новый сервер сначала проходит bootstrap как пустая Ubuntu 22.04. До подтверждения агента он отображается как unknown, а не online.</p>
+        </section>
+
+        {% if servers_page.selected_server %}
+        <section class="settings-card server-detail-card">
+            <div class="server-list-head">
+                <div>
+                    <p class="eyebrow">{{ servers_page.selected_server.server_type|upper }} сервер</p>
+                    <h3>{{ servers_page.selected_server.name }}</h3>
+                    <p>{{ servers_page.selected_server.host }} · SSH {{ servers_page.selected_server.ssh_login or "не задан" }}:{{ servers_page.selected_server.ssh_port }}</p>
+                </div>
+                <span class="availability {% if servers_page.selected_server.status == 'online' %}is-online{% elif servers_page.selected_server.status == 'offline' %}is-offline{% elif servers_page.selected_server.status == 'excluded' %}is-invalid{% else %}is-unknown{% endif %}">
+                    {{ servers_page.selected_server.status }}
+                </span>
+            </div>
+            <p class="server-metrics-note">
+                {{ servers_page.selected_server.metrics_note }}
+                {% if servers_page.selected_server.status == 'online' and servers_page.selected_server.last_seen_at %}
+                · {{ servers_page.selected_server.last_seen_at|datetime_moscow }}
+                {% endif %}
+            </p>
+            {% if servers_page.selected_server.available %}
+            <div class="metric-stack">
+                <div class="metric-row">
+                    <span>CPU</span>
+                    <div class="metric-bar"><span style="width: {{ servers_page.selected_server.cpu_percent }}%"></span></div>
+                    <strong>{{ servers_page.selected_server.cpu_percent }}%</strong>
+                </div>
+                <div class="metric-row">
+                    <span>RAM</span>
+                    <div class="metric-bar"><span style="width: {{ servers_page.selected_server.ram_percent }}%"></span></div>
+                    <strong>{{ servers_page.selected_server.ram_percent }}%</strong>
+                </div>
+                <div class="metric-row">
+                    <span>Disk</span>
+                    <div class="metric-bar"><span style="width: {{ servers_page.selected_server.disk_percent }}%"></span></div>
+                    <strong>{{ servers_page.selected_server.disk_used_gb }} / {{ servers_page.selected_server.disk_total_gb }} ГБ</strong>
+                </div>
+                {% if servers_page.selected_server.traffic_mbps is not none %}
+                <div class="metric-row">
+                    <span>Трафик</span>
+                    <div class="metric-bar"><span style="width: {{ ((servers_page.selected_server.traffic_mbps or 0) * 4) }}%"></span></div>
+                    <strong>{{ servers_page.selected_server.traffic_mbps }} МБ/с</strong>
+                </div>
+                {% endif %}
+            </div>
+            {% else %}
+            <div class="server-metrics-empty">
+                <p>{{ servers_page.selected_server.metrics_note }}</p>
+            </div>
+            {% endif %}
+            <dl class="server-facts">
+                <div><dt>Интерфейсов на сервере</dt><dd>{{ servers_page.selected_server.interface_count }}</dd></div>
+                <div><dt>Endpoint для интерфейсов</dt><dd>{{ servers_page.selected_server.endpoint_count }}</dd></div>
+                <div><dt>Пиров на Tic</dt><dd>{{ servers_page.selected_server.peer_count }}</dd></div>
+            </dl>
+            <div class="server-detail-lists">
+                <div>
+                    <h4>Созданные интерфейсы</h4>
+                    <ul>
+                        {% for name in servers_page.selected_server.owner_interface_names %}
+                        <li>{{ name }}</li>
+                        {% else %}
+                        <li>Нет интерфейсов</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                <div>
+                    <h4>Используется как endpoint</h4>
+                    <ul>
+                        {% for name in servers_page.selected_server.endpoint_interface_names %}
+                        <li>{{ name }}</li>
+                        {% else %}
+                        <li>Не используется</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+            <div class="bootstrap-input-wrap" data-bootstrap-input-wrap hidden>
+                <p class="bootstrap-input-prompt" data-bootstrap-input-prompt></p>
+                <div class="bootstrap-input-row">
+                    <input type="text" data-bootstrap-input autocomplete="off">
+                    <button class="primary-button small" type="button" data-bootstrap-input-submit>Продолжить</button>
+                </div>
+            </div>
+            <div class="toolbar-row">
+                <button class="ghost-button small" type="button" data-server-verify="{{ servers_page.selected_server.id }}">Перепроверить сервер</button>
+                <button class="ghost-button small" type="button" data-server-runtime-check="{{ servers_page.selected_server.id }}">Проверить runtime</button>
+                <button class="ghost-button small" type="button" data-server-restart-agent="{{ servers_page.selected_server.id }}">Перезагрузить агент</button>
+                <button class="ghost-button small" type="button" data-server-reboot="{{ servers_page.selected_server.id }}">Перезагрузить сервер</button>
+                {% if not servers_page.selected_server.is_excluded %}
+                <button class="ghost-button small warning" type="button" data-server-exclude="{{ servers_page.selected_server.id }}">Исключить сервер</button>
+                {% else %}
+                <button class="ghost-button small" type="button" data-server-restore="{{ servers_page.selected_server.id }}">Восстановить</button>
+                <button class="ghost-button small danger" type="button" data-server-delete="{{ servers_page.selected_server.id }}">Удалить</button>
+                {% endif %}
+            </div>
+            <section class="server-runtime-card" data-server-runtime-result hidden>
+                <div class="server-runtime-head">
+                    <div>
+                        <p class="eyebrow">Runtime агента</p>
+                        <h4 data-runtime-summary>Проверка ещё не запускалась</h4>
+                    </div>
+                    <span class="availability is-unknown" data-runtime-badge>unknown</span>
+                </div>
+                <dl class="server-runtime-paths" data-runtime-paths hidden>
+                    <div><dt>Mode</dt><dd data-runtime-mode>—</dd></div>
+                    <div><dt>Runtime root</dt><dd data-runtime-root>—</dd></div>
+                    <div><dt>WireGuard root</dt><dd data-runtime-wg-root>—</dd></div>
+                    <div><dt>Peers root</dt><dd data-runtime-peers-root>—</dd></div>
+                </dl>
+                <div class="server-runtime-list" data-runtime-checks></div>
+                <div class="job-actions">
+                    <a class="ghost-button small" href="/admin/diagnostics">Открыть диагностику</a>
+                </div>
+            </section>
+        </section>
+        {% endif %}
+
+        {% set server_cards = servers_page.excluded_servers if servers_page.selected_bucket == 'excluded' else servers_page.servers %}
+        {% if servers_page.selected_bucket == 'active' and servers_page.pending_bootstrap_tasks %}
+        <section class="pending-server-section">
+            <div class="section-header">
+                <div>
+                    <p class="eyebrow">Bootstrap задачи</p>
+                    <h3>Серверы в процессе подключения</h3>
+                </div>
+            </div>
+            <div class="server-list-grid">
+                {% for task in servers_page.pending_bootstrap_tasks %}
+                <article id="bootstrap-task-{{ task.id }}" class="server-list-card pending-server-card {% if servers_page.selected_bootstrap_task_id == task.id %}is-selected-bootstrap-task{% endif %}">
+                    <div class="server-list-head">
+                        <div>
+                            <h3>{{ task.name }}</h3>
+                            <p>{{ task.host }} · {{ task.server_type }} · SSH {{ task.ssh_port }}</p>
+                        </div>
+                        <span class="availability {% if task.status == 'bootstrapping' or task.status == 'running' %}is-bootstrapping{% elif task.status == 'confirmation_required' %}is-confirmation{% else %}is-offline{% endif %}">
+                            {{ task.status_label }}
+                        </span>
+                    </div>
+                    <div class="bootstrap-task-preview">
+                        {% set last_log = task.logs[-1] if task.logs else '' %}
+                        <p>{{ last_log or 'Ожидание следующего шага bootstrap...' }}</p>
+                        {% if task.bootstrap_snapshot %}
+                        <p class="job-bootstrap-meta bootstrap-task-meta">
+                            {% if task.bootstrap_snapshot.transport %}
+                            <span>
+                                Транспорт:
+                                {% if task.bootstrap_snapshot.transport == "ssh" %}SSH
+                                {% elif task.bootstrap_snapshot.transport == "local" %}локально
+                                {% elif task.bootstrap_snapshot.transport == "noop" %}без выполнения
+                                {% else %}{{ task.bootstrap_snapshot.transport }}{% endif %}
+                            </span>
+                            {% endif %}
+                            {% if task.bootstrap_snapshot.mode %}
+                            <span>
+                                Режим:
+                                {% if task.bootstrap_snapshot.mode == "apply" %}применение
+                                {% elif task.bootstrap_snapshot.mode == "dry-run" %}проверка
+                                {% else %}{{ task.bootstrap_snapshot.mode }}{% endif %}
+                            </span>
+                            {% endif %}
+                            {% if task.bootstrap_snapshot.current_step_index %}<span>Шаг {{ task.bootstrap_snapshot.current_step_index }}</span>{% endif %}
+                            <span>{{ task.bootstrap_snapshot.executed_step_count }}/{{ task.bootstrap_snapshot.command_count }}</span>
+                            {% if task.bootstrap_snapshot.resume_from_step %}<span>Возврат: шаг {{ task.bootstrap_snapshot.resume_from_step }}</span>{% endif %}
+                            <span>{% if task.bootstrap_snapshot.applied %}Применение{% else %}План{% endif %}</span>
+                        </p>
+                        {% if task.bootstrap_snapshot.command_count > 0 %}
+                        <div class="bootstrap-step-progress">
+                            <div class="mini-progress bootstrap-step-progress-bar">
+                                <i style="width: {{ (task.bootstrap_snapshot.executed_step_count * 100 / task.bootstrap_snapshot.command_count) if task.bootstrap_snapshot.command_count else 0 }}%"></i>
+                            </div>
+                            <span>Выполнено шагов: {{ task.bootstrap_snapshot.executed_step_count }} из {{ task.bootstrap_snapshot.command_count }}</span>
+                        </div>
+                        {% endif %}
+                        {% if task.bootstrap_command_profile %}
+                        <div class="bootstrap-profile-block">
+                            <strong>Профиль bootstrap: {{ task.bootstrap_command_profile }}</strong>
+                            <span>Пакеты: {{ task.bootstrap_safe_init_packages|length }} в safe-init{% if task.bootstrap_full_only_packages %} + {{ task.bootstrap_full_only_packages|length }} в full-delta{% endif %}</span>
+                            {% if task.bootstrap_safe_init_packages %}
+                            <span>Safe-init: {{ task.bootstrap_safe_init_packages | join(", ") }}</span>
+                            {% endif %}
+                            {% if task.bootstrap_full_only_packages %}
+                            <span>Delta full: {{ task.bootstrap_full_only_packages | join(", ") }}</span>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                        {% if task.bootstrap_snapshot.pending_input %}
+                        <p class="job-bootstrap-pending bootstrap-task-pending">
+                            <strong>Ожидание ввода</strong>
+                            <span>
+                                {% if task.bootstrap_snapshot.pending_input.key == "ssh_password" %}SSH-пароль
+                                {% elif task.bootstrap_snapshot.pending_input.key == "ssh_host_key_confirm" %}Подтверждение SSH host key
+                                {% elif task.bootstrap_snapshot.pending_input.key and "bootstrap_step_" in task.bootstrap_snapshot.pending_input.key %}Подтверждение шага bootstrap
+                                {% else %}{{ task.bootstrap_snapshot.pending_input.key or "unknown" }}{% endif %}
+                                {% if task.bootstrap_snapshot.pending_input.kind %}
+                                ·
+                                {% if task.bootstrap_snapshot.pending_input.kind == "confirm" %}подтверждение
+                                {% elif task.bootstrap_snapshot.pending_input.kind == "password" %}пароль
+                                {% elif task.bootstrap_snapshot.pending_input.kind == "text" %}текст
+                                {% else %}{{ task.bootstrap_snapshot.pending_input.kind }}{% endif %}
+                                {% endif %}
+                                {% if task.bootstrap_snapshot.pending_input.step_index %}· шаг {{ task.bootstrap_snapshot.pending_input.step_index }}{% endif %}
+                            </span>
+                            {% if task.bootstrap_pending_command %}
+                            <span>Команда шага: {{ task.bootstrap_pending_command }}</span>
+                            {% endif %}
+                            {% if task.bootstrap_snapshot.pending_input.prompt %}
+                            <span>{{ task.bootstrap_snapshot.pending_input.prompt }}</span>
+                            {% endif %}
+                        </p>
+                        {% endif %}
+                        {% if task.bootstrap_steps %}
+                        <div class="bootstrap-step-list">
+                            {% for step in task.bootstrap_steps %}
+                            <div class="bootstrap-step-row is-{{ step.status }}">
+                                <span class="bootstrap-step-badge">{{ step.index }}</span>
+                                <div class="bootstrap-step-body">
+                                    <strong>{{ step.command }}</strong>
+                                    <span>Статус: {{ step.status_label }}</span>
+                                    {% if step.note %}<span>Примечание: {{ step.note }}</span>{% endif %}
+                                    {% if step.stderr %}<span class="bootstrap-step-error-text">Ошибка: {{ step.stderr }}</span>{% endif %}
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                        {% if task.bootstrap_last_step_error %}
+                        <div class="bootstrap-step-error">
+                            <strong>Последняя ошибка шага</strong>
+                            <span>{{ task.bootstrap_last_step_error }}</span>
+                        </div>
+                        {% endif %}
+                        {% endif %}
+                        {% if task.panel_job_id %}
+                        <div class="bootstrap-job-link">
+                            <div>
+                                <span>Задача #{{ task.panel_job_id }}</span>
+                                <strong>{{ task.panel_job_stage or task.panel_job_status }}</strong>
+                            </div>
+                            {% if task.panel_job_progress is not none %}
+                            <span class="mini-progress"><i style="width: {{ task.panel_job_progress }}%"></i></span>
+                            {% endif %}
+                            <a class="ghost-button small" href="/admin/jobs?type=server_bootstrap&selected_job_id={{ task.panel_job_id }}#panel-job-{{ task.panel_job_id }}">Открыть в задачах</a>
+                        </div>
+                        {% endif %}
+                        {% if task.last_error %}
+                        <p class="status-text is-error">{{ task.last_error }}</p>
+                        {% endif %}
+                    </div>
+                </article>
+                {% endfor %}
+            </div>
+        </section>
+        {% endif %}
+        <section class="server-list-grid">
+            {% for server in server_cards %}
+            <a class="server-list-card server-list-link {% if servers_page.selected_server and servers_page.selected_server.id == server.id %}is-selected{% endif %}" href="/admin/servers?bucket={{ servers_page.selected_bucket }}&server_type={{ servers_page.selected_type }}&sort={{ servers_page.selected_sort }}&selected_server_id={{ server.id }}">
+                <div class="server-list-head">
+                    <div>
+                        <h3>{{ server.name }}</h3>
+                        <p>{{ server.host }} · {{ server.server_type }} · SSH {{ server.ssh_port }}</p>
+                    </div>
+                    <span class="availability {% if server.status == 'online' %}is-online{% elif server.status == 'offline' %}is-offline{% elif server.status == 'excluded' %}is-invalid{% else %}is-unknown{% endif %}">
+                        {{ server.status }}
+                    </span>
+                </div>
+                <p class="server-metrics-note">
+                    {{ server.metrics_note }}
+                    {% if server.status == 'online' and server.last_seen_at %}
+                    · {{ server.last_seen_at|datetime_moscow }}
+                    {% endif %}
+                </p>
+                {% if server.available %}
+                <div class="metric-stack">
+                    <div class="metric-row">
+                        <span>CPU</span>
+                        <div class="metric-bar"><span style="width: {{ server.cpu_percent }}%"></span></div>
+                        <strong>{{ server.cpu_percent }}%</strong>
+                    </div>
+                    <div class="metric-row">
+                        <span>RAM</span>
+                        <div class="metric-bar"><span style="width: {{ server.ram_percent }}%"></span></div>
+                        <strong>{{ server.ram_percent }}%</strong>
+                    </div>
+                    <div class="metric-row">
+                        <span>Disk</span>
+                        <div class="metric-bar"><span style="width: {{ server.disk_percent }}%"></span></div>
+                        <strong>{{ server.disk_used_gb }} / {{ server.disk_total_gb }} ГБ</strong>
+                    </div>
+                    {% if server.traffic_mbps is not none %}
+                    <div class="metric-row">
+                        <span>Трафик</span>
+                        <div class="metric-bar"><span style="width: {{ ((server.traffic_mbps or 0) * 4) }}%"></span></div>
+                        <strong>{{ server.traffic_mbps }} МБ/с</strong>
+                    </div>
+                    {% endif %}
+                </div>
+                {% else %}
+                <div class="server-metrics-empty">
+                    <p>{{ server.metrics_note }}</p>
+                </div>
+                {% endif %}
+                <dl class="server-facts">
+                    <div><dt>Интерфейсов на сервере</dt><dd>{{ server.interface_count }}</dd></div>
+                    <div><dt>Endpoint для интерфейсов</dt><dd>{{ server.endpoint_count }}</dd></div>
+                    <div><dt>Пиров на Tic</dt><dd>{{ server.peer_count }}</dd></div>
+                </dl>
+                <div class="server-card-actions">
+                    <button class="ghost-button small" type="button" data-server-verify="{{ server.id }}">Перепроверить</button>
+                    <button class="ghost-button small" type="button" data-server-restart-agent="{{ server.id }}">Перезагрузить агент</button>
+                    <button class="ghost-button small" type="button" data-server-reboot="{{ server.id }}">Перезагрузить сервер</button>
+                    {% if not server.is_excluded %}
+                    <button class="ghost-button small warning" type="button" data-server-exclude="{{ server.id }}">Исключить сервер</button>
+                    {% else %}
+                    <button class="ghost-button small" type="button" data-server-restore="{{ server.id }}">Восстановить</button>
+                    <button class="ghost-button small danger" type="button" data-server-delete="{{ server.id }}">Удалить</button>
+                    {% endif %}
+                </div>
+            </a>
+            {% endfor %}
+        </section>
+    </section>
+</main>
+
+<div class="modal-backdrop" data-server-modal hidden>
+    <div class="modal-card modal-card-wide">
+        <div class="section-header">
+            <div>
+                <p class="eyebrow">Новый сервер</p>
+                <h3>Добавление Tic или Tak сервера</h3>
+            </div>
+            <button class="ghost-button small" type="button" data-close-server-modal>Закрыть</button>
+        </div>
+        <form class="settings-card" data-server-create-form>
+            <p class="modal-note">Панель передаёт Node-agent базовые SSH-данные и тип сервера. Если во время bootstrap понадобится подтверждение или дополнительный ввод, следующим шагом это можно будет показать прямо здесь, без выхода из панели.</p>
+            <div class="settings-grid">
+                <label>
+                    <span>Тип сервера</span>
+                    <select name="server_type">
+                        <option value="tic">Tic</option>
+                        <option value="tak">Tak</option>
+                        <option value="storage">Storage</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Название в панели</span>
+                    <input type="text" name="name" required>
+                </label>
+                <label>
+                    <span>IP или host</span>
+                    <input type="text" name="host" required>
+                </label>
+                <label>
+                    <span>SSH порт</span>
+                    <input type="number" name="ssh_port" min="1" max="65535" value="22" required>
+                </label>
+                <label>
+                    <span>SSH логин</span>
+                    <input type="text" name="ssh_login" required>
+                </label>
+                <label>
+                    <span>SSH пароль</span>
+                    <input type="password" name="ssh_password" required>
+                </label>
+            </div>
+            <div class="bootstrap-console">
+                <div class="bootstrap-console-head">Ход настройки</div>
+                <pre class="bootstrap-console-body" data-bootstrap-console>Ожидание запуска bootstrap…</pre>
+            </div>
+            <div class="toolbar-row">
+                <button class="primary-button small" type="submit">Добавить сервер</button>
+                <span class="status-text" data-server-status></span>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

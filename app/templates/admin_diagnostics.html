@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+{% block body %}
+<main class="app-shell admin-shell">
+    <aside class="sidebar icon-sidebar">
+        <div class="sidebar-logo-shell" aria-label="Nelomai">
+            <img class="sidebar-brand-logo" src="{{ url_for('static', path='/logo.svg') }}" alt="Nelomai">
+        </div>
+        <nav class="sidebar-nav sidebar-nav-icons">
+            <a class="nav-icon-pill" href="/admin?tab=overview" title="Панель" aria-label="Панель">
+                <span class="nav-icon">⌂</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin?tab=settings&settings_view=basic" title="Настройки" aria-label="Настройки">
+                <span class="nav-icon">⚙</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin?tab=clients" title="Клиенты" aria-label="Клиенты">
+                <span class="nav-icon">◫</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/servers" title="Сервера" aria-label="Сервера">
+                <span class="nav-icon">▣</span>
+            </a>
+            <a class="nav-icon-pill {% if has_problem_jobs %}is-problem{% endif %}" href="/admin/jobs" title="Задачи" aria-label="Задачи">
+                <span class="nav-icon">⏱</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/logs" title="Логи" aria-label="Логи">
+                <span class="nav-icon">≡</span>
+            </a>
+            <a class="nav-icon-pill active" href="/admin/diagnostics" title="Диагностика" aria-label="Диагностика">
+                <span class="nav-icon">+</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/agent-contract" title="Контракт агента" aria-label="Контракт агента">
+                <span class="nav-icon">⇄</span>
+            </a>
+        </nav>
+    </aside>
+
+    <section class="main-shell">
+        <header class="topbar">
+            <div>
+                <div class="brand-inline">
+                    <span class="brand-inline-title">Nelomai</span>
+                </div>
+                <p class="eyebrow">Самодиагностика панели</p>
+                <h2>Проверка узлов и сервисов</h2>
+            </div>
+            <div class="topbar-actions">
+                <form method="post" action="/admin/diagnostics/run">
+                    <button type="submit" class="primary-button">Запустить проверку</button>
+                </form>
+            </div>
+        </header>
+
+        <section class="settings-card diagnostics-summary {% if diagnostics_page.overall_status == 'error' %}is-error{% elif diagnostics_page.overall_status == 'warning' %}is-warning{% endif %}">
+            <h3>Итог</h3>
+            <p>{{ diagnostics_page.summary }}</p>
+            {% if diagnostics_page.problem_nodes %}
+            <div class="diagnostics-problem-list">
+                {% for item in diagnostics_page.problem_nodes %}
+                <span class="diagnostics-problem-pill">{{ item }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+            {% if not diagnostics_page.has_report %}
+            <p class="server-metrics-note">Проверка запускается вручную и не меняет состояние панели или серверов.</p>
+            {% endif %}
+        </section>
+
+        {% if diagnostics_page.recommendations %}
+        <section class="settings-card diagnostics-recommendations">
+            <div class="server-list-head">
+                <div>
+                    <p class="eyebrow">next actions</p>
+                    <h3>Рекомендации</h3>
+                </div>
+            </div>
+            <div class="diagnostics-recommendation-list">
+                {% for recommendation in diagnostics_page.recommendations %}
+                <article class="diagnostics-recommendation diagnostics-{{ recommendation.severity }}">
+                    <div class="diagnostics-incident-head">
+                        <h4>{{ recommendation.title }}</h4>
+                        <span class="availability {% if recommendation.severity == 'info' %}is-online{% elif recommendation.severity == 'warning' %}is-confirmation{% else %}is-offline{% endif %}">
+                            {{ recommendation.severity }}
+                        </span>
+                    </div>
+                    <p>{{ recommendation.message }}</p>
+                    {% if recommendation.action_url %}
+                    <div class="job-actions">
+                        <a class="ghost-button small" href="{{ recommendation.action_url }}">{{ recommendation.action_label or "Открыть" }}</a>
+                    </div>
+                    {% endif %}
+                </article>
+                {% endfor %}
+            </div>
+        </section>
+        {% endif %}
+
+        {% if diagnostics_page.checks %}
+        <section class="server-list-grid diagnostics-grid">
+            {% for check in diagnostics_page.checks %}
+            <article class="server-list-card diagnostics-card diagnostics-{{ check.status }}">
+                <div class="server-list-head">
+                    <div>
+                        <p class="eyebrow">{{ check.key }}</p>
+                        <h3>{{ check.title }}</h3>
+                    </div>
+                    <span class="availability {% if check.status == 'ok' %}is-online{% elif check.status == 'warning' %}is-confirmation{% else %}is-offline{% endif %}">
+                        {{ check.status }}
+                    </span>
+                </div>
+                <p>{{ check.message }}</p>
+                {% if check.details %}
+                <ul class="diagnostics-details">
+                    {% for item in check.details %}
+                    <li>{{ item }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+                {% if check.source_url %}
+                <div class="job-actions">
+                    <a class="ghost-button small" href="{{ check.source_url }}">{{ check.source_label or "Открыть" }}</a>
+                </div>
+                {% endif %}
+            </article>
+            {% endfor %}
+        </section>
+        {% endif %}
+
+        {% if diagnostics_page.recent_incidents %}
+        <section class="settings-card diagnostics-incidents">
+            <div class="server-list-head">
+                <div>
+                    <p class="eyebrow">incident feed</p>
+                    <h3>Последние инциденты</h3>
+                </div>
+                <a class="ghost-button small" href="/admin/logs?severity=error">Открыть логи</a>
+            </div>
+            <div class="diagnostics-incident-list">
+                {% for incident in diagnostics_page.recent_incidents %}
+                <article class="diagnostics-incident">
+                    <div class="diagnostics-incident-head">
+                        <span class="log-severity">{{ incident.severity }} · {{ incident.event_type_label }}</span>
+                        <span class="server-metrics-note">{{ incident.created_at.strftime('%d.%m.%Y %H:%M:%S') }}</span>
+                    </div>
+                    <p>{{ incident.message_ru }}</p>
+                    {% if incident.details_ru %}
+                    <p class="server-metrics-note">{{ incident.details_ru }}</p>
+                    {% endif %}
+                    <div class="diagnostics-incident-meta">
+                        {% if incident.server_name %}
+                        <span>Сервер: {{ incident.server_name }}</span>
+                        {% endif %}
+                        {% if incident.actor_login %}
+                        <span>Инициатор: {{ incident.actor_login }}</span>
+                        {% endif %}
+                        {% if incident.target_login %}
+                        <span>Пользователь: {{ incident.target_login }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="job-actions">
+                        <a class="ghost-button small" href="/admin/logs?event_type={{ incident.event_type }}">Открыть событие</a>
+                    </div>
+                </article>
+                {% endfor %}
+            </div>
+        </section>
+        {% endif %}
+
+        {% if diagnostics_page.run_history %}
+        <section class="settings-card diagnostics-history">
+            <div class="server-list-head">
+                <div>
+                    <p class="eyebrow">run history</p>
+                    <h3>История запусков</h3>
+                </div>
+                <a class="ghost-button small" href="/admin/logs?event_type=diagnostics.run">Открыть в логах</a>
+            </div>
+            <div class="diagnostics-incident-list">
+                {% for item in diagnostics_page.run_history %}
+                <article class="diagnostics-incident">
+                    <div class="diagnostics-incident-head">
+                        <span class="log-severity">{{ item.severity }} · {{ item.event_type_label }}</span>
+                        <span class="server-metrics-note">{{ item.created_at.strftime('%d.%m.%Y %H:%M:%S') }}</span>
+                    </div>
+                    <p>{{ item.message_ru }}</p>
+                    {% if item.details_ru %}
+                    <p class="server-metrics-note">{{ item.details_ru }}</p>
+                    {% endif %}
+                    <div class="diagnostics-incident-meta">
+                        {% if item.actor_login %}
+                        <span>Запустил: {{ item.actor_login }}</span>
+                        {% endif %}
+                    </div>
+                </article>
+                {% endfor %}
+            </div>
+        </section>
+        {% endif %}
+    </section>
+</main>
+{% endblock %}

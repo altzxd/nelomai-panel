@@ -1,0 +1,608 @@
+{% extends "base.html" %}
+{% block body %}
+<main
+    class="app-shell"
+    data-dashboard
+    data-target-user-id="{{ target_user_id }}"
+    data-preview-mode="{{ '1' if preview_mode else '0' }}"
+>
+    <aside class="sidebar icon-sidebar">
+        <div class="sidebar-logo-shell" aria-label="Nelomai">
+            <img class="sidebar-brand-logo" src="{{ url_for('static', path='/logo.svg') }}" alt="Nelomai">
+        </div>
+        <nav class="sidebar-nav sidebar-nav-icons">
+            {% if current_user.role.value == "admin" and not preview_mode %}
+            <a class="nav-icon-pill" href="/admin?tab=overview" title="Панель" aria-label="Панель">
+                <span class="nav-icon">⌂</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin?tab=settings&settings_view=basic" title="Настройки" aria-label="Настройки">
+                <span class="nav-icon">⚙</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin?tab=clients" title="Клиенты" aria-label="Клиенты">
+                <span class="nav-icon">◫</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/servers" title="Сервера" aria-label="Сервера">
+                <span class="nav-icon">▣</span>
+            </a>
+            <a class="nav-icon-pill {% if has_problem_jobs %}is-problem{% endif %}" href="/admin/jobs" title="Задачи" aria-label="Задачи">
+                <span class="nav-icon">⏱</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/logs" title="Логи" aria-label="Логи">
+                <span class="nav-icon">≡</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/diagnostics" title="Диагностика" aria-label="Диагностика">
+                <span class="nav-icon">+</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/agent-contract" title="Контракт агента" aria-label="Контракт агента">
+                <span class="nav-icon">⇄</span>
+            </a>
+            {% else %}
+            <a class="nav-icon-pill active" href="/dashboard" title="Дом" aria-label="Дом">
+                <span class="nav-icon">⌂</span>
+            </a>
+            <button class="nav-icon-pill nav-icon-button" type="button" title="Связь" aria-label="Связь" data-open-contact>
+                <span class="nav-icon">✉</span>
+            </button>
+            {% endif %}
+        </nav>
+    </aside>
+
+    <section class="main-shell">
+        <header class="topbar">
+            <div>
+                <div class="brand-inline">
+                    <span class="brand-inline-title">Nelomai</span>
+                </div>
+                <p class="eyebrow">Личная страница</p>
+                <h2>{{ dashboard.login }}</h2>
+                <p class="dashboard-user-name">{{ dashboard.display_name or "-" }}</p>
+            </div>
+            <div class="topbar-actions">
+                {% if current_user.role.value == "admin" %}
+                <form method="get" action="/dashboard" class="preview-switch">
+                    <span>Смотреть как: пользователь</span>
+                    <input type="hidden" name="target_user_id" value="{{ target_user_id }}">
+                    <label class="switch">
+                        <input type="checkbox" name="preview" value="1" onchange="this.form.submit()" {% if preview_mode %}checked{% endif %}>
+                        <span class="slider"></span>
+                    </label>
+                </form>
+                {% endif %}
+                <form method="post" action="/logout">
+                    <button type="submit" class="ghost-button">Выйти</button>
+                </form>
+            </div>
+        </header>
+
+        <section class="hero-panel">
+            <div class="hero-card">
+                <span class="eyebrow hero-eyebrow">Действует до</span>
+                {% if is_admin_view %}
+                <label class="expires-input">
+                    <input
+                        type="datetime-local"
+                        value="{{ dashboard.interfaces[0].expires_at.strftime('%Y-%m-%dT%H:%M') if dashboard.interfaces and dashboard.interfaces[0].expires_at else '' }}"
+                        data-user-expires-input="{{ target_user_id }}"
+                    >
+                </label>
+                <div class="toolbar-row compact">
+                    <button class="ghost-button small" type="button" data-user-expires-save="{{ target_user_id }}">Сохранить</button>
+                    <span class="status-text" data-user-expires-status></span>
+                </div>
+                {% else %}
+                <div class="expires-text">{{ dashboard.interfaces[0].expires_at.strftime('%d.%m.%Y %H:%M') if dashboard.interfaces and dashboard.interfaces[0].expires_at else 'Не задано' }}</div>
+                {% endif %}
+            </div>
+
+            <div class="hero-card stats-card">
+                <span class="eyebrow">Режимы</span>
+                <div class="stats-line"><span>Пользовательских интерфейсов</span><strong>{{ dashboard.interfaces|length }}</strong></div>
+                <div class="stats-line"><span>Часовой пояс handshake</span><strong>{{ moscow_now }}</strong></div>
+                <div class="stats-line"><span>Preview</span><strong>{{ "read-only" if preview_mode else "live" }}</strong></div>
+            </div>
+        </section>
+
+        {% if preview_mode %}
+        <section class="preview-banner">
+            <span class="availability is-preview">preview</span>
+            <strong>Режим просмотра активен</strong>
+            <span>Все действия на этой странице доступны только для чтения.</span>
+        </section>
+        {% endif %}
+
+        <section class="tabs" data-tabs>
+            <div class="tab-list">
+                <button class="tab-button active" type="button" data-tab-target="primary">Основные ресурсы</button>
+                <button class="tab-button" type="button" data-tab-target="secondary">Прочие ресурсы</button>
+                {% if show_exclusion_filters_tab %}
+                <button class="tab-button {% if warn_exclusion_filters_tab %}is-warning-state{% endif %}" type="button" data-tab-target="filters">Фильтры исключения</button>
+                {% endif %}
+                {% if block_filters_enabled %}
+                <button class="tab-button" type="button" data-tab-target="block-filters">Фильтры блока</button>
+                {% endif %}
+            </div>
+
+            <div class="tab-panel active" data-tab-panel="primary">
+                {% if dashboard.interfaces %}
+                    {% for interface in dashboard.interfaces %}
+                    <section class="interface-section">
+                        <div class="section-header interface-header">
+                            <div>
+                                <h3>{{ interface.name }}</h3>
+                                <p>
+                                    Выход в сеть из:
+                                    {% if is_admin_view %}
+                                    <select data-interface-route-mode="{{ interface.id }}">
+                                        <option value="standalone" {% if interface.route_mode.value == "standalone" %}selected{% endif %}>Россия</option>
+                                        <option value="via_tak" {% if interface.route_mode.value == "via_tak" %}selected{% endif %}>Не Россия</option>
+                                    </select>
+                                    {% else %}
+                                    <span class="route-mode">{{ "Не Россия" if interface.route_mode.value == "via_tak" else "Россия" }}</span>
+                                    {% endif %}
+                                </p>
+                                {% if preview_mode %}
+                                <span class="availability is-preview">read-only</span>
+                                {% endif %}
+                                {% if is_admin_view %}
+                                <p class="interface-filter-control">
+                                    <span>Фильтры исключения:</span>
+                                    <label class="switch">
+                                        <input
+                                            type="checkbox"
+                                            data-interface-exclusion-filters="{{ interface.id }}"
+                                            {% if exclusion_filters_enabled and interface.exclusion_filters_enabled %}checked{% endif %}
+                                            {% if not exclusion_filters_enabled %}disabled{% endif %}
+                                        >
+                                        <span class="slider"></span>
+                                    </label>
+                                </p>
+                                {% elif exclusion_filters_enabled and not interface.exclusion_filters_enabled %}
+                                <p class="interface-filter-disabled">Фильтрация отключена</p>
+                                {% endif %}
+                                {% if is_admin_view %}
+                                <p>
+                                    Tak endpoint:
+                                    <select data-interface-tak-server="{{ interface.id }}">
+                                        <option value="">standalone</option>
+                                        {% for option in interface.available_tak_options %}
+                                        <option value="{{ option.id }}" {% if interface.tak_server_id == option.id %}selected{% endif %}>{{ option.name }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </p>
+                                {% endif %}
+                            </div>
+                            <div class="interface-header-actions">
+                                <div class="interface-status-block">
+                                    <span class="availability {% if interface.is_invalid %}is-invalid{% elif interface.is_enabled %}is-online{% else %}is-offline{% endif %}">
+                                        {{ "включён" if interface.is_enabled else "выключен" }}
+                                    </span>
+                                    {% if is_admin_view %}
+                                    <label class="switch">
+                                        <input type="checkbox" data-interface-toggle="{{ interface.id }}" {% if interface.is_enabled %}checked{% endif %}>
+                                        <span class="slider"></span>
+                                    </label>
+                                    {% endif %}
+                                </div>
+                                {% if is_admin_view %}
+                                <button class="primary-button small" type="button" data-peer-create="{{ interface.id }}">Создать пир</button>
+                                {% elif not preview_mode and interface.peers|length < interface.peer_limit %}
+                                <button class="primary-button small" type="button" data-peer-create="{{ interface.id }}">Создать пир</button>
+                                {% endif %}
+                                <a class="ghost-button small" href="/api/interfaces/{{ interface.id }}/download-all{% if preview_mode %}?preview=1{% endif %}">Скачать всё</a>
+                                {% if is_admin_view %}
+                                <button class="ghost-button small danger" type="button" data-interface-detach="{{ interface.id }}">Отвязать интерфейс</button>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <div class="interface-meta-row">
+                            <div class="interface-meta-item" data-interface-peer-count="{{ interface.peers|length }}/{{ interface.peer_limit }}">
+                                <span>Число пиров</span>
+                                <strong>{{ interface.peers|length }}/{{ interface.peer_limit }}</strong>
+                            </div>
+                            {% if is_admin_view %}
+                            <div class="interface-meta-item">
+                                <span>Status</span>
+                                <strong>
+                                    {% if interface.is_invalid %}
+                                    invalid
+                                    {% elif interface.is_enabled %}
+                                    enabled
+                                    {% else %}
+                                    disabled
+                                    {% endif %}
+                                </strong>
+                            </div>
+                            <div class="interface-meta-item">
+                                <span>Tic server</span>
+                                <strong>{{ interface.tic_server_name }}</strong>
+                            </div>
+                            <div class="interface-meta-item">
+                                <span>Tak endpoint</span>
+                                <strong>{{ interface.tak_server_name or "standalone" }}</strong>
+                            </div>
+                            {% endif %}
+                            {% if is_admin_view %}
+                            <label class="interface-limit-control">
+                                <span>Лимит пиров</span>
+                                <select data-interface-peer-limit="{{ interface.id }}">
+                                    {% for value in [5, 10, 15, 20] %}
+                                    <option value="{{ value }}" {% if interface.peer_limit == value %}selected{% endif %}>{{ value }}</option>
+                                    {% endfor %}
+                                </select>
+                            </label>
+                            {% endif %}
+                        </div>
+
+                        <div class="peer-grid">
+                            {% for peer in interface.peers %}
+                            <article class="peer-card">
+                                <div class="peer-card-top">
+                                    <div>
+                                        <span class="peer-name">Пир {{ peer.slot }}</span>
+                                        <p>{{ peer.comment or "Без комментария" }}</p>
+                                    </div>
+                                    <label class="switch">
+                                        <input
+                                            type="checkbox"
+                                            {% if peer.is_enabled %}checked{% endif %}
+                                            {% if preview_mode %}disabled{% else %}data-peer-toggle="{{ peer.id }}"{% endif %}
+                                        >
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                                {% if is_admin_view %}
+                                <div class="peer-block-filter-control">
+                                    <span>Фильтры блока</span>
+                                    <label class="switch">
+                                        <input
+                                            type="checkbox"
+                                            {% if block_filters_enabled and peer.block_filters_enabled %}checked{% endif %}
+                                            {% if block_filters_enabled %}data-peer-block-filters="{{ peer.id }}"{% else %}disabled{% endif %}
+                                        >
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                                {% elif block_filters_enabled and not peer.block_filters_enabled %}
+                                <p class="peer-block-disabled">Блоки выключены</p>
+                                {% endif %}
+                                <dl class="peer-metrics">
+                                    <div><dt>Handshake</dt><dd>{{ peer.handshake_at|handshake_moscow }}</dd></div>
+                                    <div><dt>Трафик 7 дней</dt><dd>{{ "%.1f"|format(peer.traffic_7d_mb / 1024) }} ГБ</dd></div>
+                                    <div><dt>Трафик 30 дней</dt><dd>{{ "%.1f"|format(peer.traffic_30d_mb / 1024) }} ГБ</dd></div>
+                                </dl>
+                                {% if not preview_mode %}
+                                <div class="peer-comment-editor">
+                                    <input type="text" value="{{ peer.comment or '' }}" maxlength="255" placeholder="Комментарий" data-peer-comment-input="{{ peer.id }}">
+                                    <button class="ghost-button small" type="button" data-peer-comment-save="{{ peer.id }}">Сохранить комментарий</button>
+                                </div>
+                                {% endif %}
+                                {% if is_admin_view %}
+                                <div class="peer-expiry-editor">
+                                    <input type="datetime-local" value="{{ peer.expires_at.strftime('%Y-%m-%dT%H:%M') if peer.expires_at else '' }}" data-peer-expiry-input="{{ peer.id }}">
+                                    <button class="ghost-button small" type="button" data-peer-expiry-save="{{ peer.id }}">Срок жизни</button>
+                                </div>
+                                {% endif %}
+                                {% if is_admin_view %}
+                                <div class="peer-link-action">
+                                    <button class="ghost-button small" type="button" data-peer-link-copy="{{ peer.id }}">Ссылка</button>
+                                </div>
+                                {% endif %}
+                                <div class="peer-actions">
+                                    {% if preview_mode %}
+                                    <span class="availability is-preview">preview read-only</span>
+                                    {% endif %}
+                                    <button class="ghost-button small" type="button" {% if not preview_mode %}data-peer-recreate="{{ peer.id }}"{% else %}disabled{% endif %}>Пересоздать</button>
+                                    <a class="ghost-button small" href="/api/peers/{{ peer.id }}/download{% if preview_mode %}?preview=1{% endif %}">Скачать</a>
+                                    <button class="ghost-button small danger" type="button" {% if not preview_mode %}data-peer-delete="{{ peer.id }}"{% else %}disabled{% endif %}>Удалить</button>
+                                </div>
+                            </article>
+                            {% endfor %}
+                        </div>
+                    </section>
+                    {% endfor %}
+                {% else %}
+                <section class="interface-section empty-state">
+                    <h3>Интерфейсы пока не созданы</h3>
+                    <p>Когда появятся интерфейсы пользователя, они будут показаны отдельными блоками на этой странице.</p>
+                </section>
+                {% endif %}
+
+                {% if is_admin_view and pending_interfaces %}
+                <section class="interface-section">
+                    <div class="section-header">
+                        <div>
+                            <h3>Привязать дополнительный интерфейс</h3>
+                            <p>Доступны только интерфейсы в статусе ожидания владельца.</p>
+                        </div>
+                    </div>
+                    <div class="pending-interface-list">
+                        {% for pending in pending_interfaces %}
+                        <div class="pending-interface-row">
+                            <div>
+                                <strong>{{ pending.name }}</strong>
+                                <p>{{ pending.tic_server.name.split(' ')[0] }}</p>
+                                <span class="availability is-pending">owner pending</span>
+                            </div>
+                            <button class="primary-button small" type="button" data-assign-interface="{{ pending.id }}">Привязать</button>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </section>
+                {% endif %}
+            </div>
+
+            <div class="tab-panel" data-tab-panel="secondary">
+                <section class="resource-list">
+                    {% if can_manage_resources %}
+                    <form class="resource-editor" data-resource-form>
+                        {% for item in dashboard.resources %}
+                        <article class="resource-row resource-row-edit">
+                            <div>
+                                <h3>{{ item.label }}</h3>
+                                <p>{{ item.value or "Не заполнено" }}</p>
+                            </div>
+                            <label class="resource-control">
+                                <textarea rows="2" name="{{ item.key }}" placeholder="Введите значение">{{ item.value or "" }}</textarea>
+                            </label>
+                        </article>
+                        {% endfor %}
+                        <div class="toolbar-row">
+                            <button class="primary-button small" type="submit">Сохранить ресурсы</button>
+                            <button class="ghost-button small" type="button" data-resource-clear>Очистить</button>
+                            <span class="status-text" data-resource-status></span>
+                        </div>
+                    </form>
+                    {% else %}
+                        {% for item in dashboard.resources %}
+                        <article class="resource-row">
+                            <div>
+                                <h3>{{ item.label }}</h3>
+                                <p>{{ item.value or "Не заполнено" }}</p>
+                            </div>
+                            {% if item.key == "yandex_disk_url" %}
+                            <a class="primary-button small" href="{{ item.value or '#' }}" target="_blank" rel="noreferrer">Открыть</a>
+                            {% else %}
+                            <button class="primary-button small" type="button" data-copy="{{ item.value or '' }}">Копировать</button>
+                            {% endif %}
+                        </article>
+                        {% endfor %}
+                    {% endif %}
+                </section>
+            </div>
+
+            {% if show_exclusion_filters_tab %}
+            <div class="tab-panel filter-tab-layout" data-tab-panel="filters">
+                {% set exclusion_filters = dashboard.filters | selectattr("kind.value", "equalto", "exclusion") | list %}
+                {% set user_filters = exclusion_filters | selectattr("scope.value", "equalto", "user") | list %}
+                {% set global_filters = exclusion_filters | selectattr("scope.value", "equalto", "global") | list %}
+
+                {% if can_manage_user_filters %}
+                <form class="create-filter-card" data-filter-create-form data-filter-scope="user" data-filter-kind="exclusion">
+                    <h3>Новое пользовательское исключение</h3>
+                    <div class="create-filter-grid">
+                        <input type="text" name="name" placeholder="Название" required>
+                        <select name="filter_type">
+                            <option value="ip">ip</option>
+                            <option value="link">link</option>
+                        </select>
+                        <input type="text" name="value" placeholder="Значение" required>
+                    </div>
+                    <div class="toolbar-row">
+                        <button class="primary-button small" type="submit">Добавить пользовательское исключение</button>
+                        <span class="status-text" data-filter-status></span>
+                    </div>
+                </form>
+                {% endif %}
+
+                <div class="section-header filter-section-header">
+                    <div>
+                        <h3>Пользовательские фильтры</h3>
+                        <p>Здесь находятся только личные правила текущего пользователя.</p>
+                    </div>
+                </div>
+                <section class="filters-table">
+                    <div class="filter-head">
+                        <span>Название</span>
+                        <span>Тип</span>
+                        <span>Источник</span>
+                        <span>Значение</span>
+                    </div>
+                    {% if user_filters %}
+                        {% for item in user_filters %}
+                        <div class="filter-row filter-row-body" data-filter-id="{{ item.id }}">
+                            {% if can_manage_user_filters %}
+                            <input type="text" value="{{ item.name }}" data-filter-field="name">
+                            <select data-filter-field="filter_type">
+                                <option value="ip" {% if item.filter_type.value == "ip" %}selected{% endif %}>ip</option>
+                                <option value="link" {% if item.filter_type.value == "link" %}selected{% endif %}>link</option>
+                            </select>
+                            <span class="filter-source">{{ item.scope.value }}</span>
+                            <div class="filter-edit-cell">
+                                <input type="text" value="{{ item.value }}" data-filter-field="value">
+                                <div class="filter-actions">
+                                    <button class="ghost-button small" type="button" data-filter-save>Сохранить</button>
+                                    <button class="ghost-button small danger" type="button" data-filter-delete>Удалить</button>
+                                </div>
+                            </div>
+                            {% else %}
+                            <strong>{{ item.name }}</strong>
+                            <span>{{ item.filter_type.value }}</span>
+                            <span class="filter-source">{{ item.scope.value }}</span>
+                            <span>{{ item.value }}{% if item.peer_label %}<small class="filter-peer-label">{{ item.peer_label }}</small>{% endif %}</span>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                    <div class="filter-row filter-row-empty">
+                        <strong>Пользовательских фильтров пока нет</strong>
+                        <span>Новые правила будут появляться здесь после создания.</span>
+                    </div>
+                    {% endif %}
+                </section>
+
+                <div class="section-header filter-section-header filter-section-bottom">
+                    <div>
+                        <h3>Глобальные фильтры</h3>
+                        <p>Они задаются в админской панели и здесь доступны только для просмотра.</p>
+                    </div>
+                </div>
+                <section class="filters-table filter-table-global">
+                    <div class="filter-head">
+                        <span>Название</span>
+                        <span>Тип</span>
+                        <span>Источник</span>
+                        <span>Значение</span>
+                    </div>
+                    {% if global_filters %}
+                        {% for item in global_filters %}
+                        <div class="filter-row filter-row-body">
+                            <strong>{{ item.name }}</strong>
+                            <span>{{ item.filter_type.value }}</span>
+                            <span class="filter-source">{{ item.scope.value }}</span>
+                            <span>{{ item.value }}{% if item.peer_label %}<small class="filter-peer-label">{{ item.peer_label }}</small>{% endif %}</span>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                    <div class="filter-row filter-row-empty">
+                        <strong>Глобальные фильтры пока не заданы</strong>
+                        <span>Они появятся после настройки в административной панели.</span>
+                    </div>
+                    {% endif %}
+                </section>
+            </div>
+            {% endif %}
+            {% if block_filters_enabled %}
+            <div class="tab-panel filter-tab-layout" data-tab-panel="block-filters">
+                {% set block_filters = dashboard.filters | selectattr("kind.value", "equalto", "block") | list %}
+                {% set user_filters = block_filters | selectattr("scope.value", "equalto", "user") | list %}
+                {% set global_filters = block_filters | selectattr("scope.value", "equalto", "global") | list %}
+
+                {% if can_manage_user_filters %}
+                <form class="create-filter-card" data-filter-create-form data-filter-scope="user" data-filter-kind="block">
+                    <h3>Новая пользовательская блокировка</h3>
+                    <div class="create-filter-grid">
+                        <input type="text" name="name" placeholder="Название" required>
+                        <select name="peer_id" required>
+                            <option value="">Выберите пир</option>
+                            {% for interface in dashboard.interfaces %}
+                                {% for peer in interface.peers %}
+                            <option value="{{ peer.id }}">{{ interface.name }} / Пир {{ peer.slot }}</option>
+                                {% endfor %}
+                            {% endfor %}
+                        </select>
+                        <select name="filter_type">
+                            <option value="ip">ip</option>
+                            <option value="link">link</option>
+                        </select>
+                        <input type="text" name="value" placeholder="Значение" required>
+                    </div>
+                    <div class="toolbar-row">
+                        <button class="primary-button small" type="submit">Добавить пользовательскую блокировку</button>
+                        <span class="status-text" data-filter-status></span>
+                    </div>
+                </form>
+                {% endif %}
+
+                <div class="section-header filter-section-header">
+                    <div>
+                        <h3>Пользовательские блокировки</h3>
+                        <p>Трафик к этим адресам не должен проходить вовсе.</p>
+                    </div>
+                </div>
+                <section class="filters-table">
+                    <div class="filter-head">
+                        <span>Название</span>
+                        <span>Тип</span>
+                        <span>Источник</span>
+                        <span>Значение</span>
+                    </div>
+                    {% if user_filters %}
+                        {% for item in user_filters %}
+                        <div class="filter-row filter-row-body" data-filter-id="{{ item.id }}">
+                            {% if can_manage_user_filters %}
+                            <input type="text" value="{{ item.name }}" data-filter-field="name">
+                            <select data-filter-field="filter_type">
+                                <option value="ip" {% if item.filter_type.value == "ip" %}selected{% endif %}>ip</option>
+                                <option value="link" {% if item.filter_type.value == "link" %}selected{% endif %}>link</option>
+                            </select>
+                            <span class="filter-source">{{ item.scope.value }}</span>
+                            <div class="filter-edit-cell">
+                                <input type="text" value="{{ item.value }}" data-filter-field="value">
+                                <div class="filter-actions">
+                                    <button class="ghost-button small" type="button" data-filter-save>Сохранить</button>
+                                    <button class="ghost-button small danger" type="button" data-filter-delete>Удалить</button>
+                                </div>
+                            </div>
+                            {% else %}
+                            <strong>{{ item.name }}</strong>
+                            <span>{{ item.filter_type.value }}</span>
+                            <span class="filter-source">{{ item.scope.value }}</span>
+                            <span>{{ item.value }}{% if item.peer_label %}<small class="filter-peer-label">{{ item.peer_label }}</small>{% endif %}</span>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                    <div class="filter-row filter-row-empty">
+                        <strong>Пользовательских блокировок пока нет</strong>
+                        <span>Новые правила будут появляться здесь после создания.</span>
+                    </div>
+                    {% endif %}
+                </section>
+
+                <div class="section-header filter-section-header filter-section-bottom">
+                    <div>
+                        <h3>Глобальные блокировки</h3>
+                        <p>Они задаются в админской панели и доступны здесь только для просмотра.</p>
+                    </div>
+                </div>
+                <section class="filters-table filter-table-global">
+                    <div class="filter-head">
+                        <span>Название</span>
+                        <span>Тип</span>
+                        <span>Источник</span>
+                        <span>Значение</span>
+                    </div>
+                    {% if global_filters %}
+                        {% for item in global_filters %}
+                        <div class="filter-row filter-row-body">
+                            <strong>{{ item.name }}</strong>
+                            <span>{{ item.filter_type.value }}</span>
+                            <span class="filter-source">{{ item.scope.value }}</span>
+                            <span>{{ item.value }}{% if item.peer_label %}<small class="filter-peer-label">{{ item.peer_label }}</small>{% endif %}</span>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                    <div class="filter-row filter-row-empty">
+                        <strong>Глобальные блокировки пока не заданы</strong>
+                        <span>Они появятся после настройки в административной панели.</span>
+                    </div>
+                    {% endif %}
+                </section>
+            </div>
+            {% endif %}
+        </section>
+    </section>
+</main>
+
+{% if current_user.role.value != "admin" or preview_mode %}
+<div class="modal-backdrop" data-contact-modal hidden>
+    <div class="modal-card">
+        <div class="section-header">
+            <div>
+                <p class="eyebrow">Связь</p>
+                <h3>Контакты администратора</h3>
+            </div>
+            <button class="ghost-button small" type="button" data-close-contact>Закрыть</button>
+        </div>
+        <div class="contact-links">
+            <a href="{{ contact_links.telegram or '#' }}" class="contact-link {% if not contact_links.telegram %}disabled{% endif %}" {% if contact_links.telegram %}target="_blank" rel="noreferrer"{% endif %}>Telegram администратора</a>
+            <a href="{{ contact_links.vk or '#' }}" class="contact-link {% if not contact_links.vk %}disabled{% endif %}" {% if contact_links.vk %}target="_blank" rel="noreferrer"{% endif %}>ВКонтакте администратора</a>
+            <a href="{{ contact_links.email or '#' }}" class="contact-link {% if not contact_links.email %}disabled{% endif %}" {% if contact_links.email %}target="_blank" rel="noreferrer"{% endif %}>Электронная почта</a>
+            <a href="{{ contact_links.group or '#' }}" class="contact-link {% if not contact_links.group %}disabled{% endif %}" {% if contact_links.group %}target="_blank" rel="noreferrer"{% endif %}>Группа в Telegram</a>
+        </div>
+        <p class="modal-note">Ссылки берутся из общих настроек администратора.</p>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

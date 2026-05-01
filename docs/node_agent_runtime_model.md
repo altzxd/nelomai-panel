@@ -1,0 +1,252 @@
+# Nelomai Node-agent Runtime Model
+
+This document fixes the target production model for the future Tic server
+agent. The same bootstrap assumption must later be mirrored for the Tak agent:
+both Tic and Tak servers are treated as blank Ubuntu 22.04 hosts at the start
+of provisioning. It is the reference point for replacing the current
+filesystem/runtime scaffold with real Ubuntu 22.04 and WireGuard operations.
+
+## 1. Responsibility Split
+
+Panel:
+
+- owns users, interfaces, peers, peer limits, filters, assignments, audit,
+  jobs, backups orchestration, diagnostics, and access control;
+- decides when an agent action must run;
+- persists panel-side state only after successful agent response.
+
+Node Tic-agent:
+
+- executes server-side operations for WireGuard and related system tasks;
+- prepares and validates runtime environment on the target server;
+- writes and updates WireGuard-compatible files;
+- invokes system commands such as `wg`, `wg-quick`, `ip`, and `systemctl`;
+- returns structured stdout JSON according to the panel contract.
+
+WireGuard itself is not reimplemented inside the agent. The agent is only an
+orchestrator around the official Linux WireGuard tooling.
+
+## 2. Target Host
+
+Target server profile:
+
+- OS: `Ubuntu 22.04`
+- role: `Tic server`
+- initial state: blank host, reachable over SSH
+
+The same initial-state rule must be used for Tak servers:
+
+- OS: `Ubuntu 22.04`
+- role: `Tak server`
+- initial state: blank host, reachable over SSH
+
+The bootstrap path must assume the host may not yet have:
+
+- Node.js
+- WireGuard
+- iptables/nftables tooling
+- zip/tar/archive tooling
+- curl/git/ca-certificates
+- runtime directories
+- systemd service files for the agent
+
+Bootstrap must install every required runtime dependency itself. It must not
+assume that a fresh Ubuntu 22.04 host already contains networking tools,
+WireGuard, Node.js, archive utilities, or agent-specific directories.
+
+The first safe bootstrap slice may install only the base operating packages
+needed for later provisioning, for example:
+
+- `ca-certificates`
+- `curl`
+- `git`
+- `iproute2`
+- `iptables`
+- `jq`
+- `nftables`
+- `tar`
+- `unzip`
+- `wireguard`
+- `wireguard-tools`
+- `zip`
+
+This safe slice is intentionally smaller than the final full bootstrap.
+It may already include installation of `nodejs` as the last package/runtime
+layer before repository rollout, and may also perform the first `git clone` /
+`git pull` into the working tree, `npm install` for the agent module,
+systemd unit file generation with `daemon-reload`, `systemctl enable`,
+`systemctl restart`, and a first service status check.
+
+If a separate `full` profile exists, it should not fork into a second large
+bootstrap path. It should only add the remaining delta over `safe-init` for
+the selected server type.
+
+## 3. Installation Source of Truth
+
+Official platform components should come from Ubuntu package sources, not from
+ad-hoc GitHub installers.
+
+Use package manager for:
+
+- `wireguard`
+- `iproute2`
+- `iptables` and/or `nftables`
+- `curl`
+- `git`
+- `ca-certificates`
+- `tar`
+- `zip`
+- `bash`
+- `systemd`
+- other Linux runtime dependencies
+
+Use GitHub/monorepo only for:
+
+- Nelomai panel codebase
+- Node agents
+- bootstrap scripts and service scaffolding
+
+This keeps WireGuard standard and reduces custom failure surface.
+
+## 4. Agent Runtime Modes
+
+The current design keeps two modes:
+
+- `filesystem`
+  - safe default
+  - writes runtime artifacts only
+  - returns planned commands
+- `system`
+  - uses the same artifact model
+  - additionally executes real Linux commands
+
+`filesystem` remains the fallback/debug mode even after `system` becomes
+production-ready.
+
+## 5. Runtime Layout
+
+Panel-side scaffold already uses a WireGuard-oriented layout and should converge
+to this model:
+
+- runtime metadata root:
+  - agent-owned state and metadata
+- WireGuard file root:
+  - `/etc/wireguard`
+- per interface:
+  - interface config file
+  - peer config files
+  - agent metadata file
+
+Target structure:
+
+```text
+/var/lib/nelomai-agent/
+  state.json
+  interfaces/
+    <agent_interface_id>/
+      interface.json
+
+/etc/wireguard/
+  <agent_interface_id>.conf
+  peers/
+    <agent_interface_id>/
+      <slot>.conf
+```
+
+Notes:
+
+- panel `interface.id` is not enough as a Linux identity;
+- `agent_interface_id` must be the stable server-side identity;
+- the agent should not rely on interface display name as the only unique key.
+
+## 6. System Dependencies to Expect
+
+The runtime preflight for production `system` mode should treat these as
+required:
+
+- Linux platform
+- `bash`
+- `ip`
+- `wg`
+- `wg-quick`
+- writable runtime root
+- writable `/etc/wireguard`
+- required peer subdirectories
+
+Optional but likely needed later:
+
+- `systemctl`
+- `journalctl`
+- backup tooling if package names differ on the target image
+
+## 6.1 Panel Server Note
+
+The panel server is different from Tic/Tak servers:
+
+- for Tic/Tak bootstrap we must assume a blank Ubuntu 22.04 host;
+- for the panel server we should not assume a blank host retroactively.
+
+Before the first release, the panel server needs a separate inventory pass:
+
+- list what is already installed;
+- compare it against the real panel runtime requirements;
+- define which packages/services must be added to the panel install guide.
+
+## 7. Service Model
+
+The agent itself should run as a managed system service.
+
+Target expectation:
+
+- one systemd unit for Node Tic-agent
+- panel can restart it through agent/bootstrap lifecycle
+- service logs remain available through normal Linux tools
+
+WireGuard lifecycle should use standard Linux behavior:
+
+- config file written by the agent
+- interface applied by `wg-quick` or an equivalent explicit `ip` + `wg`
+  sequence
+- state changes reflected back to the panel through contract responses
+
+## 8. What the Agent Must Not Own
+
+The agent must not take over panel business rules such as:
+
+- peer limit enforcement
+- user ownership logic
+- preview-mode rules
+- dashboard visibility
+- admin vs user permissions
+- deciding which filters belong to which user in the database
+
+It may receive effective runtime flags, but it must not become the source of
+truth for those business rules.
+
+## 9. Transition Rule From Current Scaffold
+
+The scaffold is acceptable as long as every next step follows this migration
+pattern:
+
+1. keep existing action names and payloads stable;
+2. keep `filesystem` mode working;
+3. replace planned/mock command paths with real `system` execution gradually;
+4. keep stdout JSON contract unchanged from the panel point of view;
+5. prefer standard Linux/WireGuard behavior over custom logic.
+
+This means the current partial implementation is not a dead end. It is a
+controlled scaffold that must now converge toward real Ubuntu/WireGuard
+execution.
+
+## 10. Immediate Next Technical Step
+
+The next production-oriented step should be:
+
+- keep `prepare_interface` computational;
+- upgrade `create_interface` in `system` mode first;
+- write final config into the WireGuard-compatible layout;
+- validate runtime preconditions before applying anything;
+- only then execute the first real Linux/WireGuard command path.
+
+Do not try to make the whole agent fully live in one step. The correct path is
+one vertical slice at a time.
