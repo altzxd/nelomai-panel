@@ -102,7 +102,7 @@ function removePeerArtifacts(interfaceRecord, peerRecord) {
   if (fs.existsSync(peerPath) && fs.statSync(peerPath).isFile()) {
     fs.unlinkSync(peerPath);
   }
-  writeJsonFile(interfaceMetaPath(interfaceRecord), interfaceRecord);
+  syncInterfaceArtifacts(interfaceRecord);
 }
 
 function collectInterfaceBundleEntries(interfaceRecord) {
