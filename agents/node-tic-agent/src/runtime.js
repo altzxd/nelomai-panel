@@ -276,7 +276,14 @@ function systemPeersRoot() {
 }
 
 function systemInterfaceName(interfaceRecord) {
-  return String(interfaceRecord.agent_interface_id || interfaceRecord.name || "interface").trim();
+  const preferred = String(interfaceRecord.agent_interface_id || interfaceRecord.name || "interface").trim();
+  if (/^[A-Za-z0-9_=+.-]{1,15}$/.test(preferred)) {
+    return preferred;
+  }
+  const ticTail = String(Number(interfaceRecord.tic_server_id) || 0).slice(-3).padStart(3, "0");
+  const sequenceMatch = preferred.match(/-(\d+)$/);
+  const sequence = sequenceMatch ? String(sequenceMatch[1]).padStart(5, "0").slice(-5) : "00000";
+  return `wg${ticTail}${sequence}`;
 }
 
 function systemInterfaceConfigPath(interfaceRecord) {
