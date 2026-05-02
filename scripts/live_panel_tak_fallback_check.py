@@ -194,20 +194,16 @@ def main() -> None:
             except LivePanelFallbackFailure:
                 pass
 
-            prepare = client.post(
-                "/api/admin/interfaces/prepare",
-                json={"name": interface_name, "tic_server_id": tic_id},
-                headers=headers,
-            )
-            _assert_status(prepare, 200, "prepare live via_tak interface")
-            prepared = prepare.json()
+            listen_port = 30000 + (numeric_suffix % 10000)
+            subnet_octet = 100 + (numeric_suffix % 100)
+            address_v4 = f"10.250.{subnet_octet}.1/24"
             create = client.post(
                 "/api/admin/interfaces",
                 json={
                     "name": interface_name,
                     "tic_server_id": tic_id,
-                    "listen_port": prepared["listen_port"],
-                    "address_v4": prepared["address_v4"],
+                    "listen_port": listen_port,
+                    "address_v4": address_v4,
                     "peer_limit": 5,
                 },
                 headers=headers,
