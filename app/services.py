@@ -1061,10 +1061,6 @@ def _reconcile_tak_tunnel_routes(db: Session) -> None:
         )[:32]
 
         if not bool(tunnel_status.get("is_active")) and blocked_status is None:
-            focused_pair_state = _load_tak_tunnel_repair_state(db).get(
-                _tak_tunnel_pair_key(focused_tic_server_id, focused_tak_server_id),
-                {},
-            )
             try:
                 _provision_and_attach_tak_tunnel(
                     db,
