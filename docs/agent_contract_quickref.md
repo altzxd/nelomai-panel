@@ -238,6 +238,13 @@ Planned first payload/result minimums:
 
 - `provision_tak_tunnel` -> `tunnel_id`, `listen_port`, `network_cidr`,
   `tak_address_v4`, `tic_address_v4`, `amnezia_config`
+- `amnezia_config` is currently a server-generated adapter payload:
+  - `endpoint`
+  - `addressing`
+  - `keys`
+  - `awg_parameters`
+- Production target: replace this adapter with artifacts/metadata coming from
+  the official `AmneziaWG` tooling as the source of truth.
 - `attach_tak_tunnel` -> `ok`, `tunnel_id`, optional `is_active`
 - `verify_tak_tunnel_status` -> `ok`, `exists`, `is_active`, `tunnel_id`
 - `detach_tak_tunnel` -> `ok`, `tunnel_id`, optional `detached`

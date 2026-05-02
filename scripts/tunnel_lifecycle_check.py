@@ -84,6 +84,10 @@ def run() -> None:
     require(bool(tunnel_id), "provision_tak_tunnel must return tunnel_id")
     amnezia_config = provision.get("amnezia_config")
     require(isinstance(amnezia_config, dict), "provision_tak_tunnel must return amnezia_config")
+    require(isinstance(amnezia_config.get("endpoint"), dict), "amnezia_config must include endpoint")
+    require(isinstance(amnezia_config.get("addressing"), dict), "amnezia_config must include addressing")
+    require(isinstance(amnezia_config.get("keys"), dict), "amnezia_config must include keys")
+    require(isinstance(amnezia_config.get("awg_parameters"), dict), "amnezia_config must include awg_parameters")
 
     verify_tak_payload = {
         **payload_base("verify_tak_tunnel_status", "tak-agent", "tunnel.tak.status.v1"),
@@ -132,8 +136,10 @@ def run() -> None:
     require(verify_after_detach.get("ok") is True, "verify after detach must succeed")
     final_status = verify_after_detach.get("tunnel_status") or {}
     require(final_status.get("status") == "detached", "Tunnel must report detached status after detach")
+    require(final_status.get("is_active") is False, "Tunnel must not stay active after detach")
     final_artifacts = final_status.get("runtime_artifacts") or {}
-    require(final_artifacts.get("directory_exists") is False, "Tunnel runtime artifacts must be removed after detach")
+    require(final_artifacts.get("system_interface_exists") is False, "Detached tunnel must not keep a live system interface")
+    require(final_artifacts.get("system_config_exists") is False, "Detached tunnel must not keep a live system config")
 
     print("OK: tunnel lifecycle check passed")
 

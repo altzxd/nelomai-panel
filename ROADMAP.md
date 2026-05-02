@@ -159,6 +159,10 @@ The future Tic Node-agent should handle:
   - `attach_tak_tunnel`
   - `verify_tak_tunnel_status`
   - `detach_tak_tunnel`
+- After the first live slice, replace the temporary structured
+  `amnezia_config` bridge with integration to the official `AmneziaWG`
+  tooling/repository so server/client tunnel artifacts come from the canonical
+  generator/runtime.
 
 The panel owns:
 

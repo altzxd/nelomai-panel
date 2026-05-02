@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import shlex
 import subprocess
 import sys
 import uuid
@@ -47,6 +48,10 @@ def _remote_run(*, host: str, port: int, password: str, host_key: str, remote_co
     )
 
 
+def _shell_quote(value: str) -> str:
+    return shlex.quote(str(value))
+
+
 def _assert_remote_ok(result: subprocess.CompletedProcess[str], label: str) -> None:
     if result.returncode == 0:
         return
@@ -65,15 +70,21 @@ def _agent_call(
     component: str,
     exec_mode: str,
     payload: dict[str, object],
+    extra_env: dict[str, str] | None = None,
 ) -> dict[str, object]:
     payload_json = json.dumps(payload, ensure_ascii=False)
     payload_b64 = base64.b64encode(payload_json.encode("utf-8")).decode("ascii")
+    exports = [
+        f"NELOMAI_AGENT_COMPONENT={_shell_quote(component)}",
+        f"NELOMAI_AGENT_EXEC_MODE={_shell_quote(exec_mode)}",
+    ]
+    for key, value in (extra_env or {}).items():
+        exports.append(f"{key}={_shell_quote(value)}")
     remote_command = (
         "bash -lc "
         f"\"tmp=\\$(mktemp /tmp/nelomai-tunnel-XXXXXX.json) && "
         f"printf %s '{payload_b64}' | base64 -d > \\\"\\$tmp\\\" && "
-        f"NELOMAI_AGENT_COMPONENT={component} "
-        f"NELOMAI_AGENT_EXEC_MODE={exec_mode} "
+        f"{' '.join(exports)} "
         f"/usr/bin/node /opt/nelomai/current/agents/node-tic-agent/src/index.js < \\\"\\$tmp\\\"; "
         f"status=\\$?; rm -f \\\"\\$tmp\\\"; exit \\$status\""
     )
@@ -112,6 +123,7 @@ def main() -> None:
     tak_host = _required_env("NELOMAI_TAK_HOST")
     tak_password = _required_env("NELOMAI_TAK_SSH_PASSWORD")
     tak_host_key = _required_env("NELOMAI_TAK_SSH_HOST_KEY")
+    tak_amnezia_tool_cmd = os.environ.get("NELOMAI_TAK_AMNEZIA_TOOL_CMD", "").strip()
     tic_port = int(os.environ.get("NELOMAI_TIC_SSH_PORT", "22"))
     tak_port = int(os.environ.get("NELOMAI_TAK_SSH_PORT", "22"))
 
@@ -126,6 +138,7 @@ def main() -> None:
         host_key=tak_host_key,
         component="tak-agent",
         exec_mode="filesystem",
+        extra_env={"NELOMAI_AMNEZIAWG_TOOL_CMD": tak_amnezia_tool_cmd} if tak_amnezia_tool_cmd else None,
         payload={
             **_payload_base("provision_tak_tunnel", "tak-agent", "tunnel.tak.provision.v1"),
             "server": tak_server,
@@ -138,6 +151,22 @@ def main() -> None:
     amnezia_config = provision.get("amnezia_config")
     if not tunnel_id or not isinstance(amnezia_config, dict):
         raise LiveTunnelCheckFailure("provision_tak_tunnel did not return tunnel_id + amnezia_config")
+    if not isinstance(amnezia_config.get("endpoint"), dict):
+        raise LiveTunnelCheckFailure(f"provision_tak_tunnel did not return structured endpoint: {provision}")
+    if not isinstance(amnezia_config.get("addressing"), dict):
+        raise LiveTunnelCheckFailure(f"provision_tak_tunnel did not return structured addressing: {provision}")
+    if not isinstance(amnezia_config.get("keys"), dict):
+        raise LiveTunnelCheckFailure(f"provision_tak_tunnel did not return structured keys: {provision}")
+    if not isinstance(amnezia_config.get("awg_parameters"), dict):
+        raise LiveTunnelCheckFailure(f"provision_tak_tunnel did not return structured awg_parameters: {provision}")
+    if tak_amnezia_tool_cmd:
+        if amnezia_config.get("source") != "official-tooling":
+            raise LiveTunnelCheckFailure(f"provision_tak_tunnel did not use official tooling source: {provision}")
+        canonical_artifacts = amnezia_config.get("canonical_artifacts") or {}
+        if canonical_artifacts.get("server_config_text") != "# official fake server config":
+            raise LiveTunnelCheckFailure(f"provision_tak_tunnel did not use canonical server artifact from tool: {provision}")
+        if canonical_artifacts.get("client_config_text") != "# official fake client config":
+            raise LiveTunnelCheckFailure(f"provision_tak_tunnel did not use canonical client artifact from tool: {provision}")
 
     verify_tak = _agent_call(
         host=tak_host,

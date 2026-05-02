@@ -96,6 +96,7 @@ function renderSystemdUnit(serverRecord) {
   const type = String(serverRecord && serverRecord.server_type || "tic").trim().toLowerCase();
   const root = installRoot();
   const stateFile = `${root}/state/${type}-agent-state.json`;
+  const envFile = `/etc/default/nelomai-${type}-agent`;
   return [
     "[Unit]",
     `Description=Nelomai ${type.toUpperCase()} Node Agent`,
@@ -108,6 +109,7 @@ function renderSystemdUnit(serverRecord) {
     `ExecStart=/usr/bin/node ${root}/current/agents/node-tic-agent/src/daemon.js`,
     "Restart=always",
     "RestartSec=3",
+    `EnvironmentFile=-${envFile}`,
     `Environment=NELOMAI_AGENT_COMPONENT=${type}-agent`,
     `Environment=NELOMAI_AGENT_STATE_FILE=${stateFile}`,
     `Environment=NELOMAI_AGENT_DAEMON_STATUS_FILE=${root}/state/${type}-agent-daemon-status.json`,

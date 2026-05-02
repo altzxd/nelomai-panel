@@ -173,9 +173,15 @@ function syncTunnelArtifacts(tunnelRecord) {
   writeJsonFile(tunnelMetaPath(tunnelRecord), tunnelRecord);
   const localRole = String(tunnelRecord.local_role || "").trim().toLowerCase();
   if (localRole === "tic") {
-    writeTextFile(tunnelClientConfigPath(tunnelRecord), renderTicTunnelClientConfig(tunnelRecord));
+    writeTextFile(
+      tunnelClientConfigPath(tunnelRecord),
+      String(tunnelRecord.client_config_text || "").trim() || renderTicTunnelClientConfig(tunnelRecord)
+    );
   } else {
-    writeTextFile(tunnelServerConfigPath(tunnelRecord), renderTakTunnelServerConfig(tunnelRecord));
+    writeTextFile(
+      tunnelServerConfigPath(tunnelRecord),
+      String(tunnelRecord.server_config_text || "").trim() || renderTakTunnelServerConfig(tunnelRecord)
+    );
   }
   writeJsonFile(tunnelClientPayloadPath(tunnelRecord), buildTakTunnelClientPayload(tunnelRecord));
 }

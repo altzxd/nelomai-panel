@@ -231,6 +231,14 @@ The current target routing model is:
 - One `Tak` may host multiple such tunnels for different `Tic` servers.
 - One `Tic` currently has only one active `Tak` binding.
 - `Tak` allocates and generates the `AmneziaWG 2.0` server-side tunnel config.
+- The production source of truth should be the official `AmneziaWG` tooling.
+- The current structured `amnezia_config` payload is only a bridge format for
+  panel↔agent orchestration until the official integration is connected.
+- `Tak` is currently also the source of truth for the structured `amnezia_config` payload:
+  - endpoint;
+  - tunnel addressing;
+  - client/server keys;
+  - `AmneziaWG 2.0` obfuscation parameters (`H*`, `S*`, `I*`).
 - The panel relays the generated tunnel data to the selected `Tic`.
 - The `Tak` tunnel listen port is random and non-standard in the current phase.
 - The first-release default should use a dedicated point-to-point tunnel subnet

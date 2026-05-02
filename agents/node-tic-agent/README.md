@@ -126,6 +126,16 @@ Behavior:
 - `NELOMAI_AGENT_SYSTEM_WG_ROOT`
   default: `/etc/wireguard`
   system-mode root for WireGuard-compatible files
+- `NELOMAI_AMNEZIAWG_TOOL_CMD`
+  default: unset
+  optional command for the official `AmneziaWG` tooling adapter; when set,
+  `provision_tak_tunnel` asks this command to return canonical tunnel artifacts
+  and uses the built-in structured fallback only when the command is unset
+- `NELOMAI_AMNEZIAWG_TOOL_MODULE`
+  default: unset
+  local test-only adapter path used by repository checks to avoid spawning an
+  external process inside the sandbox; production should prefer
+  `NELOMAI_AMNEZIAWG_TOOL_CMD`
 - `NELOMAI_AGENT_BOOTSTRAP_MODE`
   default: `dry-run`
   available values:
@@ -214,6 +224,11 @@ Behavior:
   - password-auth mode uses PuTTY `plink` in Windows environments when it is available
 - bootstrap tasks can now pause with `input_required` on SSH host key confirm, password capture, or explicit per-step command confirmation, then resume from the interrupted step
   - bootstrap responses now include a compact `bootstrap_snapshot` with transport, applied/planned state, current step, and resume pointer
+- deployed agents now support an optional systemd env file:
+  - `/etc/default/nelomai-tic-agent`
+  - `/etc/default/nelomai-tak-agent`
+  - this is where production `NELOMAI_AMNEZIAWG_TOOL_CMD=...` should be placed
+    on the target host
 - Runtime layout is now closer to `/etc/wireguard`:
   - one interface directory per `agent_interface_id`
   - `wg0.conf` for interface-level config

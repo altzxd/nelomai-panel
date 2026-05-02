@@ -114,11 +114,26 @@ def main() -> None:
                     "nat_mode": "masquerade",
                     "amnezia_config": {
                         "interface_name": "amz-fake-1",
-                        "private_key": "fake-private-key",
-                        "public_key": "fake-public-key",
-                        "preshared_key": "fake-preshared-key",
-                        "endpoint": "127.0.0.51:51831",
-                        "allowed_ips": ["172.27.10.0/30"],
+                        "protocol": "amneziawg-2.0",
+                        "version": "2.0",
+                        "endpoint": {"host": "127.0.0.51", "port": 51831},
+                        "addressing": {
+                            "network_cidr": "172.27.10.0/30",
+                            "tak_address_v4": "172.27.10.1/30",
+                            "tic_address_v4": "172.27.10.2/30",
+                            "allowed_ips": ["172.27.10.0/30"],
+                        },
+                        "keys": {
+                            "client_private_key": "fake-client-private-key",
+                            "client_public_key": "fake-client-public-key",
+                            "server_public_key": "fake-server-public-key",
+                        },
+                        "awg_parameters": {
+                            "jitter_seed": "fake-seed",
+                            "header_obfuscation": {"H1": 11, "H2": 22, "H3": 33, "H4": 44},
+                            "session_noise": {"S1": 55, "S2": 66, "S3": 77, "S4": 88},
+                            "init_noise": {"I1": 99, "I2": 111, "I3": 122, "I4": 133, "I5": 144},
+                        },
                     },
                 }
             )

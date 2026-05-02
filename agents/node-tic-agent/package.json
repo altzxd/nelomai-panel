@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "daemon": "node src/daemon.js",
-    "check": "node --check src/index.js && node --check src/daemon.js && node --check src/constants.js && node --check src/registry.js && node --check src/validation.js && node --check src/response.js && node --check src/state.js && node --check src/render.js && node --check src/zip.js && node --check src/runtime.js && node --check src/bootstrap.js && node --check src/transport.js"
+    "check": "node --check src/index.js && node --check src/daemon.js && node --check src/constants.js && node --check src/registry.js && node --check src/validation.js && node --check src/response.js && node --check src/state.js && node --check src/render.js && node --check src/zip.js && node --check src/runtime.js && node --check src/bootstrap.js && node --check src/transport.js && node --check src/amnezia_adapter.js"
   },
   "engines": {
     "node": ">=20"

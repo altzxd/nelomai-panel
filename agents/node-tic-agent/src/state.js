@@ -3,6 +3,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { buildBootstrapPlan, bootstrapExecutionMode, executeBootstrapPlan } = require("./bootstrap");
+const { buildCanonicalAmneziaConfig, extractCanonicalTunnelArtifacts } = require("./amnezia_adapter");
 const { randomBase64, buildTakTunnelClientPayload } = require("./render");
 
 function deployedStateRoot() {
@@ -267,7 +268,30 @@ function findTunnelRecord(state, payload) {
 }
 
 function buildAmneziaConfig(record) {
+  if (record.amnezia_config && typeof record.amnezia_config === "object") {
+    return record.amnezia_config;
+  }
   return buildTakTunnelClientPayload(record);
+}
+
+function tunnelAwgParameters(sequence) {
+  const normalized = Number(sequence) || 1;
+  return {
+    awg_jitter_seed: `seed-${normalized}`,
+    awg_h1: 10 + normalized,
+    awg_h2: 20 + normalized,
+    awg_h3: 30 + normalized,
+    awg_h4: 40 + normalized,
+    awg_s1: 50 + normalized,
+    awg_s2: 60 + normalized,
+    awg_s3: 70 + normalized,
+    awg_s4: 80 + normalized,
+    awg_i1: 90 + normalized,
+    awg_i2: 100 + normalized,
+    awg_i3: 110 + normalized,
+    awg_i4: 120 + normalized,
+    awg_i5: 130 + normalized
+  };
 }
 
 function buildTakTunnelPlan(state, payload) {
@@ -313,14 +337,20 @@ function buildTakTunnelPlan(state, payload) {
     server_public_key: randomBase64(),
     client_private_key: randomBase64(),
     client_public_key: randomBase64(),
+    ...tunnelAwgParameters(sequence),
     nat_mode: "masquerade",
     status: "planned",
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString()
   };
+  const amneziaConfig = buildCanonicalAmneziaConfig(record);
+  const canonicalArtifacts = extractCanonicalTunnelArtifacts(amneziaConfig);
   return {
     ...record,
-    amnezia_config: buildAmneziaConfig(record)
+    amnezia_config: amneziaConfig,
+    amnezia_source: canonicalArtifacts.source,
+    server_config_text: canonicalArtifacts.server_config_text,
+    client_config_text: canonicalArtifacts.client_config_text,
   };
 }
 
@@ -359,7 +389,25 @@ function provisionTakTunnelRecord(state, payload) {
     server_public_key: plan.server_public_key,
     client_private_key: plan.client_private_key,
     client_public_key: plan.client_public_key,
+    awg_jitter_seed: plan.awg_jitter_seed,
+    awg_h1: plan.awg_h1,
+    awg_h2: plan.awg_h2,
+    awg_h3: plan.awg_h3,
+    awg_h4: plan.awg_h4,
+    awg_s1: plan.awg_s1,
+    awg_s2: plan.awg_s2,
+    awg_s3: plan.awg_s3,
+    awg_s4: plan.awg_s4,
+    awg_i1: plan.awg_i1,
+    awg_i2: plan.awg_i2,
+    awg_i3: plan.awg_i3,
+    awg_i4: plan.awg_i4,
+    awg_i5: plan.awg_i5,
     nat_mode: plan.nat_mode,
+    amnezia_source: plan.amnezia_source,
+    server_config_text: plan.server_config_text,
+    client_config_text: plan.client_config_text,
+    amnezia_config: plan.amnezia_config,
     status: "provisioned",
     created_at: plan.created_at,
     updated_at: new Date().toISOString()
@@ -368,9 +416,9 @@ function provisionTakTunnelRecord(state, payload) {
   saveState(state);
   return {
     ...persisted,
-    amnezia_config: buildAmneziaConfig(persisted)
-  };
-}
+      amnezia_config: buildAmneziaConfig(persisted)
+    };
+  }
 
 function getTakTunnelRecord(state, payload) {
   const existing = findTunnelRecord(state, payload);
@@ -431,14 +479,35 @@ function attachTakTunnelRecord(state, payload) {
   existing.tak_server_id = Number(takServerPayload.id) || existing.tak_server_id || 0;
   existing.tak_server_name = String(takServerPayload.name || existing.tak_server_name || "");
   existing.tak_server_host = String(takServerPayload.host || existing.tak_server_host || "");
-  existing.listen_port = Number(amneziaConfig.endpoint_port) || Number(existing.listen_port) || 0;
-  existing.network_cidr = String(amneziaConfig.network_cidr || existing.network_cidr || "");
-  existing.tak_address_v4 = String(amneziaConfig.tak_address_v4 || existing.tak_address_v4 || "");
-  existing.tic_address_v4 = String(amneziaConfig.tic_address_v4 || existing.tic_address_v4 || "");
-  existing.client_private_key = String(amneziaConfig.client_private_key || existing.client_private_key || "");
-  existing.client_public_key = String(amneziaConfig.client_public_key || existing.client_public_key || "");
-  existing.server_public_key = String(amneziaConfig.server_public_key || existing.server_public_key || "");
+  const canonicalArtifacts = extractCanonicalTunnelArtifacts(amneziaConfig);
+  existing.listen_port = Number(amneziaConfig.endpoint?.port || amneziaConfig.endpoint_port) || Number(existing.listen_port) || 0;
+  existing.network_cidr = String(amneziaConfig.addressing?.network_cidr || amneziaConfig.network_cidr || existing.network_cidr || "");
+  existing.tak_address_v4 = String(amneziaConfig.addressing?.tak_address_v4 || amneziaConfig.tak_address_v4 || existing.tak_address_v4 || "");
+  existing.tic_address_v4 = String(amneziaConfig.addressing?.tic_address_v4 || amneziaConfig.tic_address_v4 || existing.tic_address_v4 || "");
+  existing.client_private_key = String(amneziaConfig.keys?.client_private_key || amneziaConfig.client_private_key || existing.client_private_key || "");
+  existing.client_public_key = String(amneziaConfig.keys?.client_public_key || amneziaConfig.client_public_key || existing.client_public_key || "");
+  existing.server_public_key = String(amneziaConfig.keys?.server_public_key || amneziaConfig.server_public_key || existing.server_public_key || "");
+  existing.awg_jitter_seed = String(amneziaConfig.awg_parameters?.jitter_seed || existing.awg_jitter_seed || "");
+  existing.awg_h1 = Number(amneziaConfig.awg_parameters?.header_obfuscation?.H1) || Number(existing.awg_h1) || 0;
+  existing.awg_h2 = Number(amneziaConfig.awg_parameters?.header_obfuscation?.H2) || Number(existing.awg_h2) || 0;
+  existing.awg_h3 = Number(amneziaConfig.awg_parameters?.header_obfuscation?.H3) || Number(existing.awg_h3) || 0;
+  existing.awg_h4 = Number(amneziaConfig.awg_parameters?.header_obfuscation?.H4) || Number(existing.awg_h4) || 0;
+  existing.awg_s1 = Number(amneziaConfig.awg_parameters?.session_noise?.S1) || Number(existing.awg_s1) || 0;
+  existing.awg_s2 = Number(amneziaConfig.awg_parameters?.session_noise?.S2) || Number(existing.awg_s2) || 0;
+  existing.awg_s3 = Number(amneziaConfig.awg_parameters?.session_noise?.S3) || Number(existing.awg_s3) || 0;
+  existing.awg_s4 = Number(amneziaConfig.awg_parameters?.session_noise?.S4) || Number(existing.awg_s4) || 0;
+  existing.awg_i1 = Number(amneziaConfig.awg_parameters?.init_noise?.I1) || Number(existing.awg_i1) || 0;
+  existing.awg_i2 = Number(amneziaConfig.awg_parameters?.init_noise?.I2) || Number(existing.awg_i2) || 0;
+  existing.awg_i3 = Number(amneziaConfig.awg_parameters?.init_noise?.I3) || Number(existing.awg_i3) || 0;
+  existing.awg_i4 = Number(amneziaConfig.awg_parameters?.init_noise?.I4) || Number(existing.awg_i4) || 0;
+  existing.awg_i5 = Number(amneziaConfig.awg_parameters?.init_noise?.I5) || Number(existing.awg_i5) || 0;
   existing.nat_mode = String(amneziaConfig.nat_mode || existing.nat_mode || "masquerade");
+  existing.amnezia_source = canonicalArtifacts.source;
+  existing.server_config_text = canonicalArtifacts.server_config_text || existing.server_config_text || "";
+  existing.client_config_text = canonicalArtifacts.client_config_text || existing.client_config_text || "";
+  existing.amnezia_config = {
+    ...amneziaConfig
+  };
   existing.status = "attached";
   touch(existing);
   saveState(state);

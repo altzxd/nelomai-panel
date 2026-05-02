@@ -167,14 +167,44 @@ function buildTakTunnelClientPayload(tunnelRecord) {
   return {
     protocol: String(tunnelRecord.protocol || "amneziawg-2.0"),
     tunnel_id: String(tunnelRecord.tunnel_id || ""),
-    endpoint_host: String(tunnelRecord.tak_server_host || ""),
-    endpoint_port: Number(tunnelRecord.listen_port) || 0,
-    network_cidr: String(tunnelRecord.network_cidr || ""),
-    tak_address_v4: String(tunnelRecord.tak_address_v4 || ""),
-    tic_address_v4: String(tunnelRecord.tic_address_v4 || ""),
-    client_private_key: String(tunnelRecord.client_private_key || ""),
-    client_public_key: String(tunnelRecord.client_public_key || ""),
-    server_public_key: String(tunnelRecord.server_public_key || ""),
+    version: "2.0",
+    endpoint: {
+      host: String(tunnelRecord.tak_server_host || ""),
+      port: Number(tunnelRecord.listen_port) || 0
+    },
+    addressing: {
+      network_cidr: String(tunnelRecord.network_cidr || ""),
+      tak_address_v4: String(tunnelRecord.tak_address_v4 || ""),
+      tic_address_v4: String(tunnelRecord.tic_address_v4 || ""),
+      allowed_ips: [String(tunnelRecord.network_cidr || "")].filter(Boolean)
+    },
+    keys: {
+      client_private_key: String(tunnelRecord.client_private_key || ""),
+      client_public_key: String(tunnelRecord.client_public_key || ""),
+      server_public_key: String(tunnelRecord.server_public_key || "")
+    },
+    awg_parameters: {
+      jitter_seed: String(tunnelRecord.awg_jitter_seed || ""),
+      header_obfuscation: {
+        H1: Number(tunnelRecord.awg_h1) || 0,
+        H2: Number(tunnelRecord.awg_h2) || 0,
+        H3: Number(tunnelRecord.awg_h3) || 0,
+        H4: Number(tunnelRecord.awg_h4) || 0
+      },
+      session_noise: {
+        S1: Number(tunnelRecord.awg_s1) || 0,
+        S2: Number(tunnelRecord.awg_s2) || 0,
+        S3: Number(tunnelRecord.awg_s3) || 0,
+        S4: Number(tunnelRecord.awg_s4) || 0
+      },
+      init_noise: {
+        I1: Number(tunnelRecord.awg_i1) || 0,
+        I2: Number(tunnelRecord.awg_i2) || 0,
+        I3: Number(tunnelRecord.awg_i3) || 0,
+        I4: Number(tunnelRecord.awg_i4) || 0,
+        I5: Number(tunnelRecord.awg_i5) || 0
+      }
+    },
     nat_mode: String(tunnelRecord.nat_mode || "masquerade"),
     generated_at: String(tunnelRecord.updated_at || tunnelRecord.created_at || ""),
   };
