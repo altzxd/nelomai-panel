@@ -276,21 +276,32 @@ function buildAmneziaConfig(record) {
 
 function tunnelAwgParameters(sequence) {
   const normalized = Number(sequence) || 1;
+  const headerBase = 1000000000 + normalized * 1000;
   return {
-    awg_jitter_seed: `seed-${normalized}`,
-    awg_h1: 10 + normalized,
-    awg_h2: 20 + normalized,
-    awg_h3: 30 + normalized,
-    awg_h4: 40 + normalized,
-    awg_s1: 50 + normalized,
-    awg_s2: 60 + normalized,
-    awg_s3: 70 + normalized,
-    awg_s4: 80 + normalized,
-    awg_i1: 90 + normalized,
-    awg_i2: 100 + normalized,
-    awg_i3: 110 + normalized,
-    awg_i4: 120 + normalized,
-    awg_i5: 130 + normalized
+    awg_headers: {
+      H1: `${headerBase}-${headerBase + 49}`,
+      H2: `${headerBase + 100}-${headerBase + 149}`,
+      H3: `${headerBase + 200}-${headerBase + 249}`,
+      H4: `${headerBase + 300}-${headerBase + 349}`,
+    },
+    awg_session_noise: {
+      S1: 24,
+      S2: 16,
+      S3: 12,
+      S4: 8,
+    },
+    awg_init_noise: {
+      I1: "<r 2><b 0x8580000100010000000004796162730679616e6465780272750000010001c00c000100010000026d000457fa27d1>",
+      I2: "",
+      I3: "",
+      I4: "",
+      I5: "",
+    },
+    awg_junk: {
+      Jc: 3,
+      Jmin: 64,
+      Jmax: 96,
+    },
   };
 }
 
@@ -389,20 +400,10 @@ function provisionTakTunnelRecord(state, payload) {
     server_public_key: plan.server_public_key,
     client_private_key: plan.client_private_key,
     client_public_key: plan.client_public_key,
-    awg_jitter_seed: plan.awg_jitter_seed,
-    awg_h1: plan.awg_h1,
-    awg_h2: plan.awg_h2,
-    awg_h3: plan.awg_h3,
-    awg_h4: plan.awg_h4,
-    awg_s1: plan.awg_s1,
-    awg_s2: plan.awg_s2,
-    awg_s3: plan.awg_s3,
-    awg_s4: plan.awg_s4,
-    awg_i1: plan.awg_i1,
-    awg_i2: plan.awg_i2,
-    awg_i3: plan.awg_i3,
-    awg_i4: plan.awg_i4,
-    awg_i5: plan.awg_i5,
+    awg_headers: plan.awg_headers,
+    awg_session_noise: plan.awg_session_noise,
+    awg_init_noise: plan.awg_init_noise,
+    awg_junk: plan.awg_junk,
     nat_mode: plan.nat_mode,
     amnezia_source: plan.amnezia_source,
     server_config_text: plan.server_config_text,
@@ -487,20 +488,30 @@ function attachTakTunnelRecord(state, payload) {
   existing.client_private_key = String(amneziaConfig.keys?.client_private_key || amneziaConfig.client_private_key || existing.client_private_key || "");
   existing.client_public_key = String(amneziaConfig.keys?.client_public_key || amneziaConfig.client_public_key || existing.client_public_key || "");
   existing.server_public_key = String(amneziaConfig.keys?.server_public_key || amneziaConfig.server_public_key || existing.server_public_key || "");
-  existing.awg_jitter_seed = String(amneziaConfig.awg_parameters?.jitter_seed || existing.awg_jitter_seed || "");
-  existing.awg_h1 = Number(amneziaConfig.awg_parameters?.header_obfuscation?.H1) || Number(existing.awg_h1) || 0;
-  existing.awg_h2 = Number(amneziaConfig.awg_parameters?.header_obfuscation?.H2) || Number(existing.awg_h2) || 0;
-  existing.awg_h3 = Number(amneziaConfig.awg_parameters?.header_obfuscation?.H3) || Number(existing.awg_h3) || 0;
-  existing.awg_h4 = Number(amneziaConfig.awg_parameters?.header_obfuscation?.H4) || Number(existing.awg_h4) || 0;
-  existing.awg_s1 = Number(amneziaConfig.awg_parameters?.session_noise?.S1) || Number(existing.awg_s1) || 0;
-  existing.awg_s2 = Number(amneziaConfig.awg_parameters?.session_noise?.S2) || Number(existing.awg_s2) || 0;
-  existing.awg_s3 = Number(amneziaConfig.awg_parameters?.session_noise?.S3) || Number(existing.awg_s3) || 0;
-  existing.awg_s4 = Number(amneziaConfig.awg_parameters?.session_noise?.S4) || Number(existing.awg_s4) || 0;
-  existing.awg_i1 = Number(amneziaConfig.awg_parameters?.init_noise?.I1) || Number(existing.awg_i1) || 0;
-  existing.awg_i2 = Number(amneziaConfig.awg_parameters?.init_noise?.I2) || Number(existing.awg_i2) || 0;
-  existing.awg_i3 = Number(amneziaConfig.awg_parameters?.init_noise?.I3) || Number(existing.awg_i3) || 0;
-  existing.awg_i4 = Number(amneziaConfig.awg_parameters?.init_noise?.I4) || Number(existing.awg_i4) || 0;
-  existing.awg_i5 = Number(amneziaConfig.awg_parameters?.init_noise?.I5) || Number(existing.awg_i5) || 0;
+  existing.awg_headers = {
+    H1: String(amneziaConfig.awg_parameters?.header_obfuscation?.H1 || existing.awg_headers?.H1 || "0"),
+    H2: String(amneziaConfig.awg_parameters?.header_obfuscation?.H2 || existing.awg_headers?.H2 || "0"),
+    H3: String(amneziaConfig.awg_parameters?.header_obfuscation?.H3 || existing.awg_headers?.H3 || "0"),
+    H4: String(amneziaConfig.awg_parameters?.header_obfuscation?.H4 || existing.awg_headers?.H4 || "0"),
+  };
+  existing.awg_session_noise = {
+    S1: Number(amneziaConfig.awg_parameters?.session_noise?.S1) || Number(existing.awg_session_noise?.S1) || 0,
+    S2: Number(amneziaConfig.awg_parameters?.session_noise?.S2) || Number(existing.awg_session_noise?.S2) || 0,
+    S3: Number(amneziaConfig.awg_parameters?.session_noise?.S3) || Number(existing.awg_session_noise?.S3) || 0,
+    S4: Number(amneziaConfig.awg_parameters?.session_noise?.S4) || Number(existing.awg_session_noise?.S4) || 0,
+  };
+  existing.awg_init_noise = {
+    I1: String(amneziaConfig.awg_parameters?.init_noise?.I1 || existing.awg_init_noise?.I1 || ""),
+    I2: String(amneziaConfig.awg_parameters?.init_noise?.I2 || existing.awg_init_noise?.I2 || ""),
+    I3: String(amneziaConfig.awg_parameters?.init_noise?.I3 || existing.awg_init_noise?.I3 || ""),
+    I4: String(amneziaConfig.awg_parameters?.init_noise?.I4 || existing.awg_init_noise?.I4 || ""),
+    I5: String(amneziaConfig.awg_parameters?.init_noise?.I5 || existing.awg_init_noise?.I5 || ""),
+  };
+  existing.awg_junk = {
+    Jc: Number(amneziaConfig.awg_parameters?.junk_packets?.Jc) || Number(existing.awg_junk?.Jc) || 0,
+    Jmin: Number(amneziaConfig.awg_parameters?.junk_packets?.Jmin) || Number(existing.awg_junk?.Jmin) || 0,
+    Jmax: Number(amneziaConfig.awg_parameters?.junk_packets?.Jmax) || Number(existing.awg_junk?.Jmax) || 0,
+  };
   existing.nat_mode = String(amneziaConfig.nat_mode || existing.nat_mode || "masquerade");
   existing.amnezia_source = canonicalArtifacts.source;
   existing.server_config_text = canonicalArtifacts.server_config_text || existing.server_config_text || "";

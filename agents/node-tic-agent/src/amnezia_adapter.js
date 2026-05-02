@@ -75,26 +75,30 @@ function fallbackAmneziaConfig(plan) {
       server_public_key: String(plan.server_public_key || "")
     },
     awg_parameters: {
-      jitter_seed: String(plan.awg_jitter_seed || ""),
       header_obfuscation: {
-        H1: Number(plan.awg_h1) || 0,
-        H2: Number(plan.awg_h2) || 0,
-        H3: Number(plan.awg_h3) || 0,
-        H4: Number(plan.awg_h4) || 0
+        H1: String(plan.awg_headers?.H1 || "0"),
+        H2: String(plan.awg_headers?.H2 || "0"),
+        H3: String(plan.awg_headers?.H3 || "0"),
+        H4: String(plan.awg_headers?.H4 || "0")
       },
       session_noise: {
-        S1: Number(plan.awg_s1) || 0,
-        S2: Number(plan.awg_s2) || 0,
-        S3: Number(plan.awg_s3) || 0,
-        S4: Number(plan.awg_s4) || 0
+        S1: Number(plan.awg_session_noise?.S1) || 0,
+        S2: Number(plan.awg_session_noise?.S2) || 0,
+        S3: Number(plan.awg_session_noise?.S3) || 0,
+        S4: Number(plan.awg_session_noise?.S4) || 0
       },
       init_noise: {
-        I1: Number(plan.awg_i1) || 0,
-        I2: Number(plan.awg_i2) || 0,
-        I3: Number(plan.awg_i3) || 0,
-        I4: Number(plan.awg_i4) || 0,
-        I5: Number(plan.awg_i5) || 0
-      }
+        I1: String(plan.awg_init_noise?.I1 || ""),
+        I2: String(plan.awg_init_noise?.I2 || ""),
+        I3: String(plan.awg_init_noise?.I3 || ""),
+        I4: String(plan.awg_init_noise?.I4 || ""),
+        I5: String(plan.awg_init_noise?.I5 || "")
+      },
+      junk_packets: {
+        Jc: Number(plan.awg_junk?.Jc) || 0,
+        Jmin: Number(plan.awg_junk?.Jmin) || 0,
+        Jmax: Number(plan.awg_junk?.Jmax) || 0
+      },
     },
     nat_mode: String(plan.nat_mode || "masquerade"),
     generated_at: String(plan.updated_at || plan.created_at || ""),

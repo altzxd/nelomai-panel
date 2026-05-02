@@ -124,6 +124,9 @@ function renderPeerConfig(interfaceRecord, peerRecord) {
 }
 
 function renderTakTunnelServerConfig(tunnelRecord) {
+  const header = tunnelRecord.awg_headers || {};
+  const sessionNoise = tunnelRecord.awg_session_noise || {};
+  const initNoise = tunnelRecord.awg_init_noise || {};
   return [
     "# Nelomai generated inter-server tunnel config",
     `# Protocol target: ${String(tunnelRecord.protocol || "amneziawg-2.0")}`,
@@ -132,6 +135,19 @@ function renderTakTunnelServerConfig(tunnelRecord) {
     `ListenPort = ${Number(tunnelRecord.listen_port) || 0}`,
     `Address = ${String(tunnelRecord.tak_address_v4 || "")}`,
     `PrivateKey = ${String(tunnelRecord.server_private_key || "")}`,
+    `H1 = ${String(header.H1 || "0")}`,
+    `H2 = ${String(header.H2 || "0")}`,
+    `H3 = ${String(header.H3 || "0")}`,
+    `H4 = ${String(header.H4 || "0")}`,
+    `S1 = ${Number(sessionNoise.S1) || 0}`,
+    `S2 = ${Number(sessionNoise.S2) || 0}`,
+    `S3 = ${Number(sessionNoise.S3) || 0}`,
+    `S4 = ${Number(sessionNoise.S4) || 0}`,
+    `I1 = ${String(initNoise.I1 || "")}`,
+    `I2 = ${String(initNoise.I2 || "")}`,
+    `I3 = ${String(initNoise.I3 || "")}`,
+    `I4 = ${String(initNoise.I4 || "")}`,
+    `I5 = ${String(initNoise.I5 || "")}`,
     `# NatMode = ${String(tunnelRecord.nat_mode || "masquerade")}`,
     "",
     `[Peer]`,
@@ -144,6 +160,10 @@ function renderTakTunnelServerConfig(tunnelRecord) {
 }
 
 function renderTicTunnelClientConfig(tunnelRecord) {
+  const header = tunnelRecord.awg_headers || {};
+  const sessionNoise = tunnelRecord.awg_session_noise || {};
+  const initNoise = tunnelRecord.awg_init_noise || {};
+  const junk = tunnelRecord.awg_junk || {};
   return [
     "# Nelomai generated inter-server tunnel config",
     `# Protocol target: ${String(tunnelRecord.protocol || "amneziawg-2.0")}`,
@@ -151,6 +171,22 @@ function renderTicTunnelClientConfig(tunnelRecord) {
     `[Interface]`,
     `Address = ${String(tunnelRecord.tic_address_v4 || "")}`,
     `PrivateKey = ${String(tunnelRecord.client_private_key || "")}`,
+    `Jc = ${Number(junk.Jc) || 0}`,
+    `Jmin = ${Number(junk.Jmin) || 0}`,
+    `Jmax = ${Number(junk.Jmax) || 0}`,
+    `H1 = ${String(header.H1 || "0")}`,
+    `H2 = ${String(header.H2 || "0")}`,
+    `H3 = ${String(header.H3 || "0")}`,
+    `H4 = ${String(header.H4 || "0")}`,
+    `S1 = ${Number(sessionNoise.S1) || 0}`,
+    `S2 = ${Number(sessionNoise.S2) || 0}`,
+    `S3 = ${Number(sessionNoise.S3) || 0}`,
+    `S4 = ${Number(sessionNoise.S4) || 0}`,
+    `I1 = ${String(initNoise.I1 || "")}`,
+    `I2 = ${String(initNoise.I2 || "")}`,
+    `I3 = ${String(initNoise.I3 || "")}`,
+    `I4 = ${String(initNoise.I4 || "")}`,
+    `I5 = ${String(initNoise.I5 || "")}`,
     `# NatMode = ${String(tunnelRecord.nat_mode || "masquerade")}`,
     "",
     `[Peer]`,
@@ -184,26 +220,30 @@ function buildTakTunnelClientPayload(tunnelRecord) {
       server_public_key: String(tunnelRecord.server_public_key || "")
     },
     awg_parameters: {
-      jitter_seed: String(tunnelRecord.awg_jitter_seed || ""),
       header_obfuscation: {
-        H1: Number(tunnelRecord.awg_h1) || 0,
-        H2: Number(tunnelRecord.awg_h2) || 0,
-        H3: Number(tunnelRecord.awg_h3) || 0,
-        H4: Number(tunnelRecord.awg_h4) || 0
+        H1: String(tunnelRecord.awg_headers?.H1 || "0"),
+        H2: String(tunnelRecord.awg_headers?.H2 || "0"),
+        H3: String(tunnelRecord.awg_headers?.H3 || "0"),
+        H4: String(tunnelRecord.awg_headers?.H4 || "0")
       },
       session_noise: {
-        S1: Number(tunnelRecord.awg_s1) || 0,
-        S2: Number(tunnelRecord.awg_s2) || 0,
-        S3: Number(tunnelRecord.awg_s3) || 0,
-        S4: Number(tunnelRecord.awg_s4) || 0
+        S1: Number(tunnelRecord.awg_session_noise?.S1) || 0,
+        S2: Number(tunnelRecord.awg_session_noise?.S2) || 0,
+        S3: Number(tunnelRecord.awg_session_noise?.S3) || 0,
+        S4: Number(tunnelRecord.awg_session_noise?.S4) || 0
       },
       init_noise: {
-        I1: Number(tunnelRecord.awg_i1) || 0,
-        I2: Number(tunnelRecord.awg_i2) || 0,
-        I3: Number(tunnelRecord.awg_i3) || 0,
-        I4: Number(tunnelRecord.awg_i4) || 0,
-        I5: Number(tunnelRecord.awg_i5) || 0
-      }
+        I1: String(tunnelRecord.awg_init_noise?.I1 || ""),
+        I2: String(tunnelRecord.awg_init_noise?.I2 || ""),
+        I3: String(tunnelRecord.awg_init_noise?.I3 || ""),
+        I4: String(tunnelRecord.awg_init_noise?.I4 || ""),
+        I5: String(tunnelRecord.awg_init_noise?.I5 || "")
+      },
+      junk_packets: {
+        Jc: Number(tunnelRecord.awg_junk?.Jc) || 0,
+        Jmin: Number(tunnelRecord.awg_junk?.Jmin) || 0,
+        Jmax: Number(tunnelRecord.awg_junk?.Jmax) || 0
+      },
     },
     nat_mode: String(tunnelRecord.nat_mode || "masquerade"),
     generated_at: String(tunnelRecord.updated_at || tunnelRecord.created_at || ""),
