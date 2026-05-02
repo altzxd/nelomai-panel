@@ -66,14 +66,18 @@ def _bridge_call(payload: dict[str, object]) -> dict[str, object]:
         text=True,
         check=False,
     )
-    if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout or f"exit={completed.returncode}").strip()
-        raise LivePanelFallbackFailure(f"bridge call failed: {detail}")
     stdout = (completed.stdout or "").strip()
     try:
-        return json.loads(stdout or "{}")
+        parsed = json.loads(stdout or "{}")
     except json.JSONDecodeError as exc:
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or f"exit={completed.returncode}").strip()
+            raise LivePanelFallbackFailure(f"bridge call failed: {detail}") from exc
         raise LivePanelFallbackFailure(f"bridge returned invalid json: {stdout}") from exc
+    if completed.returncode != 0 and not isinstance(parsed, dict):
+        detail = (completed.stderr or completed.stdout or f"exit={completed.returncode}").strip()
+        raise LivePanelFallbackFailure(f"bridge call failed: {detail}")
+    return parsed
 
 
 def _payload_base(action: str, component: str, capability: str) -> dict[str, object]:
@@ -96,9 +100,10 @@ def _cleanup(prefix: str) -> None:
         db.commit()
 
 
-def _create_server(*, name: str, server_type: ServerType, host: str, ssh_port: int, ssh_password: str) -> int:
+def _create_server(*, server_id: int, name: str, server_type: ServerType, host: str, ssh_port: int, ssh_password: str) -> int:
     with SessionLocal() as db:
         server = Server(
+            id=server_id,
             name=name,
             server_type=server_type,
             host=host,
@@ -138,6 +143,7 @@ def main() -> None:
     settings.peer_agent_command = f'"{sys.executable}" ".\\scripts\\live_remote_peer_agent_bridge.py"'
 
     suffix = uuid.uuid4().hex[:6]
+    numeric_suffix = int(suffix, 16)
     prefix = f"live-fallback-{suffix}"
     tic_name = f"{prefix}-tic 8q"
     tak_name = f"{prefix}-tak 8q"
@@ -148,6 +154,7 @@ def main() -> None:
         with TestClient(app) as client:
             headers = _auth_headers(admin)
             tic_id = _create_server(
+                server_id=100000 + numeric_suffix,
                 name=tic_name,
                 server_type=ServerType.TIC,
                 host=tic_host,
@@ -155,6 +162,7 @@ def main() -> None:
                 ssh_password=tic_password,
             )
             tak_id = _create_server(
+                server_id=200000 + numeric_suffix,
                 name=tak_name,
                 server_type=ServerType.TAK,
                 host=tak_host,
@@ -165,28 +173,30 @@ def main() -> None:
             tic_server = {"id": tic_id, "name": tic_name, "server_type": "tic", "host": tic_host, "ssh_port": tic_port, "ssh_login": "root", "ssh_password": tic_password}
             tak_server = {"id": tak_id, "name": tak_name, "server_type": "tak", "host": tak_host, "ssh_port": tak_port, "ssh_login": "root", "ssh_password": tak_password}
 
-            pre_detach_tic = _bridge_call(
-                {
-                    **_payload_base("detach_tak_tunnel", "tic-agent", "tunnel.tak.detach.v1"),
-                    "server": tic_server,
-                    "tak_server": tak_server,
-                }
-            )
-            if pre_detach_tic.get("ok") is not True and "requires known tunnel" not in str(pre_detach_tic.get("error") or ""):
-                raise LivePanelFallbackFailure(f"pre-clean detach_tak_tunnel on Tic failed: {pre_detach_tic}")
-            pre_detach_tak = _bridge_call(
-                {
-                    **_payload_base("detach_tak_tunnel", "tak-agent", "tunnel.tak.detach.v1"),
-                    "server": tak_server,
-                    "tic_server": tic_server,
-                }
-            )
-            if pre_detach_tak.get("ok") is not True and "requires known tunnel" not in str(pre_detach_tak.get("error") or ""):
-                raise LivePanelFallbackFailure(f"pre-clean detach_tak_tunnel on Tak failed: {pre_detach_tak}")
+            try:
+                _bridge_call(
+                    {
+                        **_payload_base("detach_tak_tunnel", "tic-agent", "tunnel.tak.detach.v1"),
+                        "server": tic_server,
+                        "tak_server": tak_server,
+                    }
+                )
+            except LivePanelFallbackFailure:
+                pass
+            try:
+                _bridge_call(
+                    {
+                        **_payload_base("detach_tak_tunnel", "tak-agent", "tunnel.tak.detach.v1"),
+                        "server": tak_server,
+                        "tic_server": tic_server,
+                    }
+                )
+            except LivePanelFallbackFailure:
+                pass
 
             prepare = client.post(
                 "/api/admin/interfaces/prepare",
-                json={"name": interface_name, "tic_server_id": tic_id, "tak_server_id": tak_id},
+                json={"name": interface_name, "tic_server_id": tic_id},
                 headers=headers,
             )
             _assert_status(prepare, 200, "prepare live via_tak interface")
@@ -196,15 +206,21 @@ def main() -> None:
                 json={
                     "name": interface_name,
                     "tic_server_id": tic_id,
-                    "tak_server_id": tak_id,
                     "listen_port": prepared["listen_port"],
                     "address_v4": prepared["address_v4"],
                     "peer_limit": 5,
                 },
                 headers=headers,
             )
-            _assert_status(create, 201, "create live via_tak interface")
+            _assert_status(create, 201, "create live standalone interface")
             interface_id = int(create.json()["id"])
+
+            bind_tak = client.put(
+                f"/api/admin/interfaces/{interface_id}/tak-server",
+                json={"tak_server_id": tak_id},
+                headers=headers,
+            )
+            _assert_status(bind_tak, 200, "bind Tak to live interface")
 
             detach_tic = _bridge_call(
                 {

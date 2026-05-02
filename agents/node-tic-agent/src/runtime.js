@@ -106,6 +106,18 @@ function resolveTunnelQuickCommand() {
   return candidates.find((candidate) => commandExists(candidate)) || null;
 }
 
+function resolveTunnelUserspaceImplementation() {
+  const scoped = String(process.env.NELOMAI_AGENT_TUNNEL_USERSPACE_IMPLEMENTATION || "").trim();
+  if (scoped) {
+    return scoped;
+  }
+  const legacy = String(process.env.WG_QUICK_USERSPACE_IMPLEMENTATION || "").trim();
+  if (legacy) {
+    return legacy;
+  }
+  return "";
+}
+
 function generateWireGuardKeyPair() {
   const privateCompleted = childProcess.spawnSync("wg", ["genkey"], {
     encoding: "utf8"
@@ -533,12 +545,16 @@ function buildAttachTunnelCommands(tunnelRecord) {
   const runtimeConfigPath = tunnelClientConfigPath(tunnelRecord);
   const systemConfigPath = systemTunnelConfigPath(tunnelRecord);
   const tunnelName = systemTunnelName(tunnelRecord);
+  const userspaceImplementation = resolveTunnelUserspaceImplementation();
+  const quickPrefix = userspaceImplementation
+    ? `WG_QUICK_USERSPACE_IMPLEMENTATION=${userspaceImplementation} `
+    : "";
   return [
     `install -d -m 700 ${systemTunnelRoot()}`,
     `install -m 600 ${runtimeConfigPath} ${systemConfigPath}`,
-    `if ip link show dev ${tunnelName} >/dev/null 2>&1; then ${quickCommand} down ${systemConfigPath} || true; fi`,
+    `if ip link show dev ${tunnelName} >/dev/null 2>&1; then ${quickPrefix}${quickCommand} down ${systemConfigPath} || true; fi`,
     `if ip link show dev ${tunnelName} >/dev/null 2>&1; then ip link delete dev ${tunnelName} || true; fi`,
-    `${quickCommand} up ${systemConfigPath}`
+    `${quickPrefix}${quickCommand} up ${systemConfigPath}`
   ];
 }
 
@@ -552,8 +568,12 @@ function buildDetachTunnelCommands(tunnelRecord) {
   }
   const systemConfigPath = systemTunnelConfigPath(tunnelRecord);
   const tunnelName = systemTunnelName(tunnelRecord);
+  const userspaceImplementation = resolveTunnelUserspaceImplementation();
+  const quickPrefix = userspaceImplementation
+    ? `WG_QUICK_USERSPACE_IMPLEMENTATION=${userspaceImplementation} `
+    : "";
   return [
-    `if ip link show dev ${tunnelName} >/dev/null 2>&1; then ${quickCommand} down ${systemConfigPath} || true; fi`,
+    `if ip link show dev ${tunnelName} >/dev/null 2>&1; then ${quickPrefix}${quickCommand} down ${systemConfigPath} || true; fi`,
     `if ip link show dev ${tunnelName} >/dev/null 2>&1; then ip link delete dev ${tunnelName} || true; fi`,
     `rm -f ${systemConfigPath}`
   ];
