@@ -44,6 +44,8 @@ def _remote_run(*, host: str, port: int, password: str, host_key: str, remote_co
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
 
@@ -124,6 +126,7 @@ def main() -> None:
     tak_password = _required_env("NELOMAI_TAK_SSH_PASSWORD")
     tak_host_key = _required_env("NELOMAI_TAK_SSH_HOST_KEY")
     tak_amnezia_tool_cmd = os.environ.get("NELOMAI_TAK_AMNEZIA_TOOL_CMD", "").strip()
+    tic_userspace_impl = os.environ.get("NELOMAI_TIC_WG_QUICK_USERSPACE_IMPLEMENTATION", "").strip()
     tic_port = int(os.environ.get("NELOMAI_TIC_SSH_PORT", "22"))
     tak_port = int(os.environ.get("NELOMAI_TAK_SSH_PORT", "22"))
 
@@ -197,6 +200,7 @@ def main() -> None:
         host_key=tic_host_key,
         component="tic-agent",
         exec_mode="system",
+        extra_env={"WG_QUICK_USERSPACE_IMPLEMENTATION": tic_userspace_impl} if tic_userspace_impl else None,
         payload={
             **_payload_base("attach_tak_tunnel", "tic-agent", "tunnel.tak.attach.v1"),
             "server": tic_server,

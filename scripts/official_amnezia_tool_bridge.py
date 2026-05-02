@@ -53,7 +53,6 @@ def _render_server_config(payload: dict[str, object]) -> str:
         f"S2 = {_int(session.get('S2'))}",
         f"S3 = {_int(session.get('S3'))}",
         f"S4 = {_int(session.get('S4'))}",
-        "",
         "[Peer]",
         f"PublicKey = {_string(provisional.get('client_public_key'))}",
         f"AllowedIPs = {_string(tunnel.get('tic_address_v4'))}",
@@ -90,19 +89,21 @@ def _render_client_config(payload: dict[str, object]) -> str:
         f"S2 = {_int(session.get('S2'))}",
         f"S3 = {_int(session.get('S3'))}",
         f"S4 = {_int(session.get('S4'))}",
-        f"I1 = {_string(init_noise.get('I1'))}",
-        f"I2 = {_string(init_noise.get('I2'))}",
-        f"I3 = {_string(init_noise.get('I3'))}",
-        f"I4 = {_string(init_noise.get('I4'))}",
-        f"I5 = {_string(init_noise.get('I5'))}",
-        "",
-        "[Peer]",
+    ]
+    for key in ("I1", "I2", "I3", "I4", "I5"):
+        value = _string(init_noise.get(key))
+        if value:
+            lines.append(f"{key} = {value}")
+    lines.extend(
+        [
+            "[Peer]",
         f"PublicKey = {_string(provisional.get('server_public_key'))}",
         f"AllowedIPs = {_string(tunnel.get('network_cidr'))}",
         f"Endpoint = {_string(tak.get('host'))}:{_int(tunnel.get('listen_port'))}",
         "PersistentKeepalive = 21",
         "",
-    ]
+        ]
+    )
     return "\n".join(lines)
 
 
