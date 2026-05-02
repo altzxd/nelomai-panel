@@ -106,14 +106,13 @@ def _render_client_config(payload: dict[str, object]) -> str:
     return "\n".join(lines)
 
 
-def _validate_config_text(config_text: str, *, suffix: str) -> None:
+def _validate_config_text(config_text: str, *, name: str) -> None:
     quick_command = _candidate_quick_command()
     if not quick_command:
         raise BridgeFailure("Official AmneziaWG quick command is not installed")
-    with tempfile.NamedTemporaryFile("w", delete=False, suffix=suffix) as handle:
-        handle.write(config_text)
-        temp_path = Path(handle.name)
-    try:
+    with tempfile.TemporaryDirectory(prefix="nelomai-awg-bridge-") as temp_dir:
+        temp_path = Path(temp_dir) / f"{name}.conf"
+        temp_path.write_text(config_text, encoding="utf-8")
         completed = subprocess.run(
             [quick_command, "strip", str(temp_path)],
             capture_output=True,
@@ -123,8 +122,6 @@ def _validate_config_text(config_text: str, *, suffix: str) -> None:
         if completed.returncode != 0:
             detail = (completed.stderr or completed.stdout or "awg-quick strip failed").strip()
             raise BridgeFailure(detail)
-    finally:
-        temp_path.unlink(missing_ok=True)
 
 
 def main() -> None:
@@ -136,8 +133,8 @@ def main() -> None:
 
     server_config = _render_server_config(payload)
     client_config = _render_client_config(payload)
-    _validate_config_text(server_config, suffix=".server.conf")
-    _validate_config_text(client_config, suffix=".client.conf")
+    _validate_config_text(server_config, name="tak-tunnel-server")
+    _validate_config_text(client_config, name="tak-tunnel-client")
 
     print(
         json.dumps(

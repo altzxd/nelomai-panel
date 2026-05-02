@@ -160,7 +160,7 @@ def main() -> None:
         raise LiveTunnelCheckFailure(f"provision_tak_tunnel did not return structured keys: {provision}")
     if not isinstance(amnezia_config.get("awg_parameters"), dict):
         raise LiveTunnelCheckFailure(f"provision_tak_tunnel did not return structured awg_parameters: {provision}")
-    if tak_amnezia_tool_cmd:
+    if tak_amnezia_tool_cmd and "fake_amnezia_tool.py" in tak_amnezia_tool_cmd:
         if amnezia_config.get("source") != "official-tooling":
             raise LiveTunnelCheckFailure(f"provision_tak_tunnel did not use official tooling source: {provision}")
         canonical_artifacts = amnezia_config.get("canonical_artifacts") or {}
@@ -186,7 +186,7 @@ def main() -> None:
     tak_status = verify_tak.get("tunnel_status") or {}
     if verify_tak.get("ok") is not True or tak_status.get("exists") is not True:
         raise LiveTunnelCheckFailure(f"Tak tunnel verify failed: {verify_tak}")
-    if tak_amnezia_tool_cmd:
+    if tak_amnezia_tool_cmd and "fake_amnezia_tool.py" in tak_amnezia_tool_cmd:
         print("OK: live Tak tunnel provision command-path check passed")
         return
 
