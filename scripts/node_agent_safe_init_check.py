@@ -113,9 +113,20 @@ def main() -> None:
 
         checks = [
             "apt-get update",
-            "apt-get install -y ca-certificates curl git iproute2 iptables jq nftables tar unzip wireguard wireguard-tools zip",
+            "apt-get upgrade -y",
+            "apt-get install -y bash build-essential ca-certificates curl git iproute2 iptables jq nftables python3 tar unzip wireguard wireguard-tools zip",
             "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -",
             "apt-get install -y nodejs",
+            "GO_VERSION=$(curl -fsSL https://go.dev/VERSION?m=text | head -n 1 | tr -d '\\r'); echo \"$GO_VERSION\" > /tmp/nelomai-go-version",
+            "GO_VERSION=$(cat /tmp/nelomai-go-version); curl -fsSL \"https://dl.google.com/go/${GO_VERSION}.linux-amd64.tar.gz\" -o /tmp/nelomai-go.tar.gz",
+            "/usr/local/go/bin/go version",
+            "make -C '/opt/nelomai/third_party/amneziawg-tools/src'",
+            "make -C '/opt/nelomai/third_party/amneziawg-tools/src' install PREFIX=/usr WITH_WGQUICK=yes WITH_SYSTEMDUNITS=yes",
+            "cd '/opt/nelomai/third_party/amneziawg-go' && PATH=/usr/local/go/bin:$PATH make",
+            "install -m 755 '/opt/nelomai/third_party/amneziawg-go/amneziawg-go' /usr/local/bin/amneziawg-go",
+            "command -v python3",
+            "command -v awg-quick",
+            "command -v amneziawg-go",
             "systemctl daemon-reload",
         ]
         indexes = {command: _assert_index(commands, command) for command in checks}
@@ -123,29 +134,42 @@ def main() -> None:
         if indexes[checks[0]] >= indexes[checks[1]]:
             raise SafeInitCheckFailure("safe-init order is invalid: apt-get update must run before package install")
         if indexes[checks[1]] >= indexes[checks[2]]:
-            raise SafeInitCheckFailure("safe-init order is invalid: package install must run before NodeSource bootstrap")
+            raise SafeInitCheckFailure("safe-init order is invalid: apt-get upgrade must run before package install")
         if indexes[checks[2]] >= indexes[checks[3]]:
-            raise SafeInitCheckFailure("safe-init order is invalid: NodeSource bootstrap must run before nodejs install")
+            raise SafeInitCheckFailure("safe-init order is invalid: package install must run before NodeSource bootstrap")
         if indexes[checks[3]] >= indexes[checks[4]]:
-            raise SafeInitCheckFailure("safe-init order is invalid: nodejs install must run before daemon-reload")
-
-        forbidden_markers = [
-            "apt-get install -y bash ca-certificates curl git jq tar unzip zip iproute2 iptables nftables wireguard wireguard-tools",
-        ]
-        for marker in forbidden_markers:
-            if marker in commands:
-                raise SafeInitCheckFailure(f"Unexpected duplicate package line: {marker}")
+            raise SafeInitCheckFailure("safe-init order is invalid: NodeSource bootstrap must run before nodejs install")
+        if indexes[checks[4]] >= indexes[checks[5]]:
+            raise SafeInitCheckFailure("safe-init order is invalid: nodejs install must run before Go bootstrap")
+        if indexes[checks[5]] >= indexes[checks[6]]:
+            raise SafeInitCheckFailure("safe-init order is invalid: Go version capture must run before archive download")
+        if indexes[checks[6]] >= indexes[checks[7]]:
+            raise SafeInitCheckFailure("safe-init order is invalid: Go archive download must run before Go version check")
+        if indexes[checks[7]] >= indexes[checks[8]]:
+            raise SafeInitCheckFailure("safe-init order is invalid: Go install must run before amneziawg-tools build")
+        if indexes[checks[9]] >= indexes[checks[10]]:
+            raise SafeInitCheckFailure("safe-init order is invalid: amneziawg-tools install must run before amneziawg-go build")
+        if indexes[checks[11]] >= indexes[checks[14]]:
+            raise SafeInitCheckFailure("safe-init order is invalid: amneziawg-go install must run before daemon-reload")
 
         if not any("git clone" in command for command in commands):
             raise SafeInitCheckFailure("safe-init must include git clone/pull step")
         if not any("npm install --omit=dev" in command for command in commands):
             raise SafeInitCheckFailure("safe-init must include npm install step")
+        if not any("cat > '/etc/default/nelomai-tic-agent'" in command for command in commands):
+            raise SafeInitCheckFailure("safe-init must include tic env file generation")
         if not any("systemctl enable" in command for command in commands):
             raise SafeInitCheckFailure("safe-init must include systemctl enable step")
         if not any("systemctl restart" in command for command in commands):
             raise SafeInitCheckFailure("safe-init must include systemctl restart step")
         if not any("systemctl --no-pager --full status" in command for command in commands):
             raise SafeInitCheckFailure("safe-init must include service status step")
+
+        environment_file = bootstrap_plan.get("environment_file")
+        if not isinstance(environment_file, str) or "NELOMAI_AGENT_TUNNEL_USERSPACE_IMPLEMENTATION=/usr/local/bin/amneziawg-go" not in environment_file:
+            raise SafeInitCheckFailure("safe-init must expose amneziawg-go in tic environment file")
+        if "NELOMAI_AGENT_TUNNEL_QUICK_CMD=/usr/bin/awg-quick" not in environment_file:
+            raise SafeInitCheckFailure("safe-init must expose awg-quick in tic environment file")
 
         print("OK: node safe-init bootstrap check passed")
     finally:

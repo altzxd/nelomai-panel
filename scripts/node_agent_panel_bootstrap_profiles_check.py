@@ -117,14 +117,15 @@ def _assert_profile_view(task: dict[str, Any], expected_profile: str) -> None:
         raise NodePanelBootstrapProfilesFailure("bootstrap_packages is missing")
     if not isinstance(safe_init_packages, list) or not safe_init_packages:
         raise NodePanelBootstrapProfilesFailure("bootstrap_safe_init_packages is missing")
-    if "wireguard" not in safe_init_packages or "nodejs" in safe_init_packages:
-        # nodejs is installed as a command step, not a package in current safe-init package set
-        pass
+    if "wireguard" not in safe_init_packages or "build-essential" not in safe_init_packages or "python3" not in safe_init_packages:
+        raise NodePanelBootstrapProfilesFailure("bootstrap_safe_init_packages is missing required runtime dependencies")
+    if "nodejs" in safe_init_packages:
+        raise NodePanelBootstrapProfilesFailure("nodejs must remain a command step, not a safe-init package baseline entry")
     if expected_profile == "safe-init":
-        if full_only_packages != ["bash"]:
+        if full_only_packages != []:
             raise NodePanelBootstrapProfilesFailure(f"Unexpected safe-init full-only delta: {full_only_packages!r}")
     if expected_profile == "full":
-        if full_only_packages != ["bash"]:
+        if full_only_packages != []:
             raise NodePanelBootstrapProfilesFailure(f"Unexpected full-profile delta: {full_only_packages!r}")
         snapshot = task.get("bootstrap_snapshot") or {}
         if int(snapshot.get("command_count") or 0) <= 0:

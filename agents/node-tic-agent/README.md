@@ -40,14 +40,18 @@ Bootstrap assumption:
 - target Tic server starts as blank `Ubuntu 22.04`;
 - the same bootstrap assumption will be used for Tak servers;
 - required software must be installed by bootstrap itself;
+- if the deployed agent invokes a binary or helper at runtime, bootstrap must
+  install it or update it before the service is started;
 - do not assume preinstalled `wireguard`, `iproute2`, `iptables`, `curl`,
-  `git`, `ca-certificates`, `zip`, `tar`, or Node.js.
+  `git`, `ca-certificates`, `python3`, `zip`, `tar`, or Node.js.
 - current full bootstrap package baseline for Tic/Tak:
   - `bash`
+  - `build-essential`
   - `ca-certificates`
   - `curl`
   - `git`
   - `jq`
+  - `python3`
   - `tar`
   - `unzip`
   - `zip`
@@ -56,6 +60,9 @@ Bootstrap assumption:
   - `nftables`
   - `wireguard`
   - `wireguard-tools`
+  - latest Go runtime from `go.dev`
+  - official `amneziawg-tools` built from `amnezia-vpn/amneziawg-tools`
+  - official `amneziawg-go` built from `amnezia-vpn/amneziawg-go`
 
 ## Run
 
@@ -144,7 +151,7 @@ Behavior:
 - `NELOMAI_AGENT_BOOTSTRAP_COMMAND_PROFILE`
   default: `safe-init`
   available values:
-  - `safe-init`: remote sanity checks, `apt-get update`, install of base, networking, and first WireGuard packages (`ca-certificates`, `curl`, `git`, `iproute2`, `iptables`, `jq`, `nftables`, `tar`, `unzip`, `wireguard`, `wireguard-tools`, `zip`), NodeSource bootstrap, `nodejs` install, directory preparation, `git clone/pull` of the monorepo, `npm install --omit=dev` for `agents/node-tic-agent`, systemd unit generation, `daemon-reload`, `systemctl enable`, `systemctl restart`, and service status check on a blank Ubuntu 22.04 host
+  - `safe-init`: remote sanity checks, `apt-get update`, `apt-get upgrade -y`, install of the required runtime baseline (`bash`, `build-essential`, `ca-certificates`, `curl`, `git`, `iproute2`, `iptables`, `jq`, `nftables`, `python3`, `tar`, `unzip`, `wireguard`, `wireguard-tools`, `zip`), NodeSource bootstrap, `nodejs` install, latest Go bootstrap from `go.dev`, build/install of official `amneziawg-tools`, build/install of official `amneziawg-go`, runtime command verification, directory preparation, `git clone/pull` of the monorepo, `npm install --omit=dev` for `agents/node-tic-agent`, environment file generation under `/etc/default/nelomai-<type>-agent`, systemd unit generation, `daemon-reload`, `systemctl enable`, `systemctl restart`, and service status check on a blank Ubuntu 22.04 host
   - `full`: same bootstrap path plus only the package delta that is still missing for the selected server type
 - `NELOMAI_AGENT_BOOTSTRAP_ALLOW_LOCAL`
   default: unset
@@ -227,8 +234,13 @@ Behavior:
 - deployed agents now support an optional systemd env file:
   - `/etc/default/nelomai-tic-agent`
   - `/etc/default/nelomai-tak-agent`
-  - this is where production `NELOMAI_AMNEZIAWG_TOOL_CMD=...` should be placed
-    on the target host
+  - bootstrap now generates these files itself before service start
+  - `Tak` env defaults to
+    `NELOMAI_AMNEZIAWG_TOOL_CMD=/usr/bin/python3 /opt/nelomai/current/scripts/official_amnezia_tool_bridge.py`
+  - `Tic` env defaults to
+    `NELOMAI_AGENT_TUNNEL_QUICK_CMD=/usr/bin/awg-quick`
+  - `Tic` env defaults to
+    `NELOMAI_AGENT_TUNNEL_USERSPACE_IMPLEMENTATION=/usr/local/bin/amneziawg-go`
 - Runtime layout is now closer to `/etc/wireguard`:
   - one interface directory per `agent_interface_id`
   - `wg0.conf` for interface-level config

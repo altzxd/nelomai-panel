@@ -24,6 +24,23 @@ function installRoot() {
   return process.env.NELOMAI_AGENT_INSTALL_ROOT || "/opt/nelomai";
 }
 
+function environmentFilePath(serverRecord) {
+  const type = String(serverRecord && serverRecord.server_type || "tic").trim().toLowerCase();
+  return `/etc/default/nelomai-${type}-agent`;
+}
+
+function thirdPartyRoot() {
+  return `${installRoot()}/third_party`;
+}
+
+function amneziawgToolsRepositoryUrl() {
+  return process.env.NELOMAI_AMNEZIAWG_TOOLS_REPO || "https://github.com/amnezia-vpn/amneziawg-tools.git";
+}
+
+function amneziawgGoRepositoryUrl() {
+  return process.env.NELOMAI_AMNEZIAWG_GO_REPO || "https://github.com/amnezia-vpn/amneziawg-go.git";
+}
+
 function bootstrapCommandProfile() {
   const value = String(process.env.NELOMAI_AGENT_BOOTSTRAP_COMMAND_PROFILE || "safe-init").trim().toLowerCase();
   if (value === "safe-init" || value === "full") {
@@ -44,10 +61,12 @@ function bootstrapPackageList(serverRecord) {
   const serverType = String(serverRecord && serverRecord.server_type || "").trim().toLowerCase();
   const basePackages = [
     "bash",
+    "build-essential",
     "ca-certificates",
     "curl",
     "git",
     "jq",
+    "python3",
     "tar",
     "unzip",
     "zip"
@@ -70,8 +89,11 @@ function bootstrapPackageList(serverRecord) {
   return [...basePackages, ...networkRuntimePackages, ...wireguardPackages];
 }
 
-function safeInitPackageList() {
-  return [
+function safeInitPackageList(serverRecord) {
+  const serverType = String(serverRecord && serverRecord.server_type || "").trim().toLowerCase();
+  const commonPackages = [
+    "bash",
+    "build-essential",
     "ca-certificates",
     "curl",
     "git",
@@ -79,12 +101,28 @@ function safeInitPackageList() {
     "iptables",
     "jq",
     "nftables",
+    "python3",
     "tar",
     "unzip",
     "wireguard",
     "wireguard-tools",
     "zip"
   ];
+  if (serverType === "storage") {
+    return [
+      "bash",
+      "build-essential",
+      "ca-certificates",
+      "curl",
+      "git",
+      "jq",
+      "python3",
+      "tar",
+      "unzip",
+      "zip"
+    ];
+  }
+  return commonPackages;
 }
 
 function additionalFullPackages(packages, safeInitPackages) {
@@ -123,16 +161,56 @@ function renderSystemdUnit(serverRecord) {
   ].join("\n");
 }
 
+function renderEnvironmentFile(serverRecord) {
+  const type = String(serverRecord && serverRecord.server_type || "tic").trim().toLowerCase();
+  const root = installRoot();
+  const lines = [
+    `NELOMAI_AGENT_COMPONENT=${type}-agent`,
+    `NELOMAI_AGENT_STATE_FILE=${root}/state/${type}-agent-state.json`,
+    `NELOMAI_AGENT_DAEMON_STATUS_FILE=${root}/state/${type}-agent-daemon-status.json`,
+    `NELOMAI_AGENT_RUNTIME_ROOT=${root}/runtime/${type}`,
+    "NELOMAI_AGENT_EXEC_MODE=system",
+  ];
+  if (type === "tak") {
+    lines.push(`NELOMAI_AMNEZIAWG_TOOL_CMD=/usr/bin/python3 ${root}/current/scripts/official_amnezia_tool_bridge.py`);
+  }
+  if (type === "tic") {
+    lines.push("NELOMAI_AGENT_TUNNEL_QUICK_CMD=/usr/bin/awg-quick");
+    lines.push("NELOMAI_AGENT_TUNNEL_USERSPACE_IMPLEMENTATION=/usr/local/bin/amneziawg-go");
+  }
+  return `${lines.join("\n")}\n`;
+}
+
 function buildBootstrapPlan(serverRecord, payload) {
   const repoUrl = repositoryUrl(payload);
   const root = installRoot();
   const type = String(serverRecord && serverRecord.server_type || "tic").trim().toLowerCase();
   const packages = bootstrapPackageList(serverRecord);
-  const safeInitPackages = safeInitPackageList();
+  const safeInitPackages = safeInitPackageList(serverRecord);
   const fullOnlyPackages = additionalFullPackages(packages, safeInitPackages);
   const svcName = serviceName(serverRecord);
   const svcPath = `/etc/systemd/system/${svcName}`;
+  const envPath = environmentFilePath(serverRecord);
+  const thirdParty = thirdPartyRoot();
+  const awgToolsDir = `${thirdParty}/amneziawg-tools`;
+  const awgGoDir = `${thirdParty}/amneziawg-go`;
+  const needsAmneziaRuntime = type === "tic" || type === "tak";
   const unitContent = renderSystemdUnit(serverRecord);
+  const envContent = renderEnvironmentFile(serverRecord);
+  const amneziaRuntimeCommands = needsAmneziaRuntime ? [
+    `install -d -m 755 ${thirdParty}`,
+    "GO_VERSION=$(curl -fsSL https://go.dev/VERSION?m=text | head -n 1 | tr -d '\\r'); echo \"$GO_VERSION\" > /tmp/nelomai-go-version",
+    "GO_VERSION=$(cat /tmp/nelomai-go-version); curl -fsSL \"https://dl.google.com/go/${GO_VERSION}.linux-amd64.tar.gz\" -o /tmp/nelomai-go.tar.gz",
+    "rm -rf /usr/local/go",
+    "tar -C /usr/local -xzf /tmp/nelomai-go.tar.gz",
+    "/usr/local/go/bin/go version",
+    `if [ ! -d ${shellQuote(`${awgToolsDir}/.git`)} ]; then rm -rf ${shellQuote(awgToolsDir)} && git clone ${shellQuote(amneziawgToolsRepositoryUrl())} ${shellQuote(awgToolsDir)}; else git -C ${shellQuote(awgToolsDir)} pull --ff-only; fi`,
+    `make -C ${shellQuote(`${awgToolsDir}/src`)}`,
+    `make -C ${shellQuote(`${awgToolsDir}/src`)} install PREFIX=/usr WITH_WGQUICK=yes WITH_SYSTEMDUNITS=yes`,
+    `if [ ! -d ${shellQuote(`${awgGoDir}/.git`)} ]; then rm -rf ${shellQuote(awgGoDir)} && git clone ${shellQuote(amneziawgGoRepositoryUrl())} ${shellQuote(awgGoDir)}; else git -C ${shellQuote(awgGoDir)} pull --ff-only; fi`,
+    `cd ${shellQuote(awgGoDir)} && PATH=/usr/local/go/bin:$PATH make`,
+    `install -m 755 ${shellQuote(`${awgGoDir}/amneziawg-go`)} /usr/local/bin/amneziawg-go`,
+  ] : [];
   const safeInitCommands = [
     "export DEBIAN_FRONTEND=noninteractive",
     "uname -a",
@@ -144,9 +222,20 @@ function buildBootstrapPlan(serverRecord, payload) {
     "command -v systemctl",
     "command -v wg >/dev/null 2>&1 || echo 'wg-not-installed-yet'",
     "apt-get update",
+    "apt-get upgrade -y",
     `apt-get install -y ${safeInitPackages.join(" ")}`,
     "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -",
     "apt-get install -y nodejs",
+    ...amneziaRuntimeCommands,
+    "command -v python3",
+    "command -v node",
+    "command -v npm",
+    "command -v wg",
+    `command -v ${needsAmneziaRuntime ? "awg-quick" : "wg-quick"}`,
+    ...(needsAmneziaRuntime ? [
+      "command -v awg",
+      "command -v amneziawg-go"
+    ] : []),
     `install -d -m 755 ${root}`,
     `install -d -m 755 ${root}/releases`,
     `install -d -m 755 ${root}/current`,
@@ -154,6 +243,7 @@ function buildBootstrapPlan(serverRecord, payload) {
     `install -d -m 700 ${root}/state`,
     `if [ ! -d ${shellQuote(`${root}/current/.git`)} ]; then rm -rf ${shellQuote(`${root}/current`)} && git clone ${shellQuote(repoUrl)} ${shellQuote(`${root}/current`)}; else git -C ${shellQuote(`${root}/current`)} pull --ff-only; fi`,
     `cd ${shellQuote(`${root}/current/agents/node-tic-agent`)} && npm install --omit=dev`,
+    `cat > ${shellQuote(envPath)} <<'ENV'\n${envContent}ENV`,
     `cat > ${shellQuote(svcPath)} <<'UNIT'\n${unitContent}\nUNIT`,
     "systemctl daemon-reload",
     `systemctl enable ${svcName}`,
@@ -185,11 +275,13 @@ function buildBootstrapPlan(serverRecord, payload) {
     install_root: root,
     service_name: svcName,
     service_path: svcPath,
+    environment_file_path: envPath,
     command_profile: commandProfile,
     packages,
     safe_init_packages: safeInitPackages,
     full_only_packages: fullOnlyPackages,
     commands,
+    environment_file: envContent,
     systemd_unit: unitContent,
     summary
   };

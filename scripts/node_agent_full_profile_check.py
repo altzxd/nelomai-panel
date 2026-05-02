@@ -141,13 +141,13 @@ def main() -> None:
         raise FullProfileCheckFailure("full profile must begin with the exact safe-init command sequence")
 
     extra_commands = full_commands[len(safe_commands):]
-    expected_delta = ["apt-get install -y bash"]
+    expected_delta: list[str] = []
     if extra_commands != expected_delta:
         raise FullProfileCheckFailure(f"Unexpected full-profile delta: {extra_commands!r}")
 
     packages = full_plan.get("packages")
-    if not isinstance(packages, list) or "bash" not in packages:
-        raise FullProfileCheckFailure("full profile must expose complete package baseline including bash")
+    if not isinstance(packages, list) or "bash" not in packages or "python3" not in packages or "build-essential" not in packages:
+        raise FullProfileCheckFailure("full profile must expose complete package baseline including bash, build-essential, and python3")
 
     print("OK: node full-profile bootstrap check passed")
 

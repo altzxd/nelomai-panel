@@ -51,7 +51,10 @@ The same initial-state rule must be used for Tak servers:
 The bootstrap path must assume the host may not yet have:
 
 - Node.js
+- Python 3
 - WireGuard
+- WireGuard userspace helper
+- official `AmneziaWG` tools
 - iptables/nftables tooling
 - zip/tar/archive tooling
 - curl/git/ca-certificates
@@ -60,11 +63,17 @@ The bootstrap path must assume the host may not yet have:
 
 Bootstrap must install every required runtime dependency itself. It must not
 assume that a fresh Ubuntu 22.04 host already contains networking tools,
-WireGuard, Node.js, archive utilities, or agent-specific directories.
+WireGuard, Python 3, Node.js, archive utilities, userspace tunnel helpers, or
+agent-specific directories.
+
+If the deployed agent or its bridge scripts call a binary at runtime, bootstrap
+must make that binary available before the agent service starts.
 
 The first safe bootstrap slice may install only the base operating packages
 needed for later provisioning, for example:
 
+- `bash`
+- `build-essential`
 - `ca-certificates`
 - `curl`
 - `git`
@@ -72,11 +81,19 @@ needed for later provisioning, for example:
 - `iptables`
 - `jq`
 - `nftables`
+- `python3`
 - `tar`
 - `unzip`
 - `wireguard`
 - `wireguard-tools`
 - `zip`
+
+For the current `Tic <-> Tak` production path this safe slice must also
+install or build:
+
+- latest Go toolchain from the official `go.dev` distribution;
+- official `amneziawg-tools` from `amnezia-vpn/amneziawg-tools`;
+- official `amneziawg-go` from `amnezia-vpn/amneziawg-go`.
 
 This safe slice is intentionally smaller than the final full bootstrap.
 It may already include installation of `nodejs` as the last package/runtime
@@ -176,7 +193,10 @@ required:
 - `bash`
 - `ip`
 - `wg`
-- `wg-quick`
+- `awg`
+- `awg-quick`
+- `python3` on `Tak` for the official bridge path
+- `amneziawg-go` on `Tic` for the userspace tunnel path
 - writable runtime root
 - writable `/etc/wireguard`
 - required peer subdirectories
