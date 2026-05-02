@@ -915,6 +915,7 @@ def _reconcile_tak_tunnel_routes(db: Session) -> None:
     changed = False
     for _, pair_interfaces in by_pair.items():
         sample = pair_interfaces[0]
+        healed_during_reconcile = False
         try:
             response = _run_tic_executor(
                 _build_server_executor_payload(
@@ -931,8 +932,33 @@ def _reconcile_tak_tunnel_routes(db: Session) -> None:
         except Exception:
             tunnel_status = {"is_active": False, "status": "error"}
 
+        if not bool(tunnel_status.get("is_active")):
+            try:
+                _provision_and_attach_tak_tunnel(
+                    db,
+                    tic_server=sample.tic_server,
+                    tak_server=sample.tak_server,
+                )
+                response = _run_tic_executor(
+                    _build_server_executor_payload(
+                        action="verify_tak_tunnel_status",
+                        server=sample.tic_server,
+                        extra={"tak_server": _server_agent_identity_payload(sample.tak_server)},
+                    )
+                )
+                _validate_agent_contract_response(response)
+                if response.get("ok") is True:
+                    healed_status = response.get("tunnel_status") or {}
+                    if bool(healed_status.get("is_active")):
+                        tunnel_status = healed_status
+                        healed_during_reconcile = True
+            except Exception:
+                db.rollback()
+
         is_active = bool(tunnel_status.get("is_active"))
         status_label = str(tunnel_status.get("status") or ("active" if is_active else "error"))[:32]
+        if healed_during_reconcile and is_active:
+            status_label = "recovered"
         for interface in pair_interfaces:
             try:
                 if is_active:

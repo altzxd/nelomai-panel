@@ -256,34 +256,26 @@ def main() -> None:
                 _assert_status(dashboard, 200, "dashboard reconcile after refresh")
                 interface = _get_interface(interface_id)
                 if not interface.tak_tunnel_fallback_active:
-                    raise LivePanelFallbackFailure("Interface did not switch to fallback after refresh or dashboard reconcile")
-
-            provision = _bridge_call(
-                {
-                    **_payload_base("provision_tak_tunnel", "tak-agent", "tunnel.tak.provision.v1"),
-                    "server": tak_server,
-                    "tic_server": tic_server,
-                }
-            )
-            if provision.get("ok") is not True:
-                raise LivePanelFallbackFailure(f"provision_tak_tunnel failed: {provision}")
-            attach = _bridge_call(
-                {
-                    **_payload_base("attach_tak_tunnel", "tic-agent", "tunnel.tak.attach.v1"),
-                    "server": tic_server,
-                    "tak_server": tak_server,
-                    "tunnel_id": provision.get("tunnel_id"),
-                    "tunnel_artifacts": provision.get("tunnel_artifacts"),
-                }
-            )
-            if attach.get("ok") is not True:
-                raise LivePanelFallbackFailure(f"attach_tak_tunnel failed: {attach}")
+                    verify_healed = _bridge_call(
+                        {
+                            **_payload_base("verify_tak_tunnel_status", "tic-agent", "tunnel.tak.status.v1"),
+                            "server": tic_server,
+                            "tak_server": tak_server,
+                        }
+                    )
+                    healed_status = verify_healed.get("tunnel_status") or {}
+                    if healed_status.get("is_active") is not True:
+                        raise LivePanelFallbackFailure("Interface did not switch to fallback and tunnel was not auto-restored after refresh or dashboard reconcile")
 
             refresh_up = client.post(f"/api/admin/servers/{tic_id}/refresh", headers=headers)
             _assert_status(refresh_up, 200, "refresh tic after tunnel restore")
             interface = _get_interface(interface_id)
             if interface.tak_tunnel_fallback_active:
-                raise LivePanelFallbackFailure("Interface did not return from fallback after refresh")
+                dashboard = client.get("/dashboard", headers=headers)
+                _assert_status(dashboard, 200, "dashboard reconcile after tunnel restore")
+                interface = _get_interface(interface_id)
+                if interface.tak_tunnel_fallback_active:
+                    raise LivePanelFallbackFailure("Interface did not return from fallback after automatic reconcile")
 
         print("OK: live panel tak fallback check passed")
     finally:
