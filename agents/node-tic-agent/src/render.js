@@ -44,6 +44,15 @@ function randomBase64(size = 32) {
   return crypto.randomBytes(size).toString("base64");
 }
 
+function nonEmptyAwgInitNoiseLines(initNoise) {
+  return ["I1", "I2", "I3", "I4", "I5"]
+    .map((key) => {
+      const value = String(initNoise?.[key] || "");
+      return value ? `${key} = ${value}` : "";
+    })
+    .filter(Boolean);
+}
+
 function resolvedKey(value, fallbackParts) {
   const preferred = String(value || "").trim();
   if (preferred) {
@@ -127,6 +136,7 @@ function renderTakTunnelServerConfig(tunnelRecord) {
   const header = tunnelRecord.awg_headers || {};
   const sessionNoise = tunnelRecord.awg_session_noise || {};
   const initNoise = tunnelRecord.awg_init_noise || {};
+  const initNoiseLines = nonEmptyAwgInitNoiseLines(initNoise);
   return [
     "# Nelomai generated inter-server tunnel config",
     `# Protocol target: ${String(tunnelRecord.protocol || "amneziawg-2.0")}`,
@@ -143,11 +153,7 @@ function renderTakTunnelServerConfig(tunnelRecord) {
     `S2 = ${Number(sessionNoise.S2) || 0}`,
     `S3 = ${Number(sessionNoise.S3) || 0}`,
     `S4 = ${Number(sessionNoise.S4) || 0}`,
-    `I1 = ${String(initNoise.I1 || "")}`,
-    `I2 = ${String(initNoise.I2 || "")}`,
-    `I3 = ${String(initNoise.I3 || "")}`,
-    `I4 = ${String(initNoise.I4 || "")}`,
-    `I5 = ${String(initNoise.I5 || "")}`,
+    ...initNoiseLines,
     `# NatMode = ${String(tunnelRecord.nat_mode || "masquerade")}`,
     "",
     `[Peer]`,
@@ -164,6 +170,7 @@ function renderTicTunnelClientConfig(tunnelRecord) {
   const sessionNoise = tunnelRecord.awg_session_noise || {};
   const initNoise = tunnelRecord.awg_init_noise || {};
   const junk = tunnelRecord.awg_junk || {};
+  const initNoiseLines = nonEmptyAwgInitNoiseLines(initNoise);
   return [
     "# Nelomai generated inter-server tunnel config",
     `# Protocol target: ${String(tunnelRecord.protocol || "amneziawg-2.0")}`,
@@ -182,11 +189,7 @@ function renderTicTunnelClientConfig(tunnelRecord) {
     `S2 = ${Number(sessionNoise.S2) || 0}`,
     `S3 = ${Number(sessionNoise.S3) || 0}`,
     `S4 = ${Number(sessionNoise.S4) || 0}`,
-    `I1 = ${String(initNoise.I1 || "")}`,
-    `I2 = ${String(initNoise.I2 || "")}`,
-    `I3 = ${String(initNoise.I3 || "")}`,
-    `I4 = ${String(initNoise.I4 || "")}`,
-    `I5 = ${String(initNoise.I5 || "")}`,
+    ...initNoiseLines,
     `# NatMode = ${String(tunnelRecord.nat_mode || "masquerade")}`,
     "",
     `[Peer]`,

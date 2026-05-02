@@ -82,9 +82,11 @@ def _agent_call(
     ]
     for key, value in (extra_env or {}).items():
         exports.append(f"{key}={_shell_quote(value)}")
+    env_file = f"/etc/default/nelomai-{component.replace('-agent', '')}-agent"
     remote_command = (
         "bash -lc "
-        f"\"tmp=\\$(mktemp /tmp/nelomai-tunnel-XXXXXX.json) && "
+        f"\"set -a && test -f {_shell_quote(env_file)} && . {_shell_quote(env_file)}; set +a; "
+        f"tmp=\\$(mktemp /tmp/nelomai-tunnel-XXXXXX.json) && "
         f"printf %s '{payload_b64}' | base64 -d > \\\"\\$tmp\\\" && "
         f"{' '.join(exports)} "
         f"/usr/bin/node /opt/nelomai/current/agents/node-tic-agent/src/index.js < \\\"\\$tmp\\\"; "
