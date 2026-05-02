@@ -133,6 +133,9 @@
                             {% elif log.details %}
                             <p>{{ log.details }}</p>
                             {% endif %}
+                            {% if log.pair_label and log.diagnostics_url %}
+                            <p><a href="{{ log.diagnostics_url }}">Открыть диагностику пары {{ log.pair_label }}</a></p>
+                            {% endif %}
                         </div>
                     </article>
                     {% endfor %}

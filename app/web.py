@@ -624,11 +624,18 @@ def admin_logs(
 @router.get("/admin/diagnostics", response_class=HTMLResponse)
 def admin_diagnostics(
     request: Request,
+    focused_tic_server_id: int | None = Query(default=None),
+    focused_tak_server_id: int | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     try:
-        diagnostics_page = get_panel_diagnostics_page(current_user)
+        diagnostics_page = run_panel_diagnostics(
+            db,
+            current_user,
+            focused_tic_server_id=focused_tic_server_id,
+            focused_tak_server_id=focused_tak_server_id,
+        )
     except PermissionDeniedError as exc:
         raise_service_http_error(exc)
     return templates.TemplateResponse(

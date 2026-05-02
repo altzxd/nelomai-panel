@@ -1125,6 +1125,25 @@ def serialize_audit_log(log: AuditLog) -> AuditLogView:
     server_url = None
     if log.server_id is not None:
         server_url = f"/admin/servers?bucket=active&selected_server_id={log.server_id}"
+    pair_label = None
+    diagnostics_url = None
+    if log.event_type == "tak_tunnels.auto_recovered" and log.details:
+        try:
+            details = json.loads(log.details)
+        except json.JSONDecodeError:
+            details = None
+        if isinstance(details, dict):
+            tic_server_id = details.get("tic_server_id")
+            tak_server_id = details.get("tak_server_id")
+            tic_server_name = str(details.get("tic_server_name") or "")
+            tak_server_name = str(details.get("tak_server_name") or "")
+            if tic_server_name or tak_server_name:
+                pair_label = f"{tic_server_name} → {tak_server_name}".strip()
+            if tic_server_id and tak_server_id:
+                diagnostics_url = (
+                    f"/admin/diagnostics?focused_tic_server_id={int(tic_server_id)}"
+                    f"&focused_tak_server_id={int(tak_server_id)}#check-tak_tunnels"
+                )
     return AuditLogView(
         id=log.id,
         event_type=log.event_type,
@@ -1139,6 +1158,8 @@ def serialize_audit_log(log: AuditLog) -> AuditLogView:
         server_id=log.server_id,
         server_name=log.server.name if log.server else None,
         server_url=server_url,
+        pair_label=pair_label,
+        diagnostics_url=diagnostics_url,
         details=log.details,
         details_ru=_format_audit_details_ru(log),
         created_at=log.created_at,
@@ -1527,7 +1548,13 @@ def _build_diagnostics_recommendations(checks: list[DiagnosticsCheckView]) -> li
     return recommendations
 
 
-def run_panel_diagnostics(db: Session, actor: User) -> DiagnosticsPageView:
+def run_panel_diagnostics(
+    db: Session,
+    actor: User,
+    *,
+    focused_tic_server_id: int | None = None,
+    focused_tak_server_id: int | None = None,
+) -> DiagnosticsPageView:
     require_admin(actor)
     checks: list[DiagnosticsCheckView] = []
     problem_nodes: list[str] = []
@@ -1813,6 +1840,10 @@ def run_panel_diagnostics(db: Session, actor: User) -> DiagnosticsPageView:
         recovered_pairs: list[str] = []
         for pair_interfaces in tak_tunnel_pairs.values():
             sample = pair_interfaces[0]
+            if focused_tic_server_id is not None and sample.tic_server_id != focused_tic_server_id:
+                continue
+            if focused_tak_server_id is not None and sample.tak_server_id != focused_tak_server_id:
+                continue
             pair_label = f"{sample.tic_server.name} → {sample.tak_server.name}"
             if any(
                 interface.tak_tunnel_last_status == "recovered" and not interface.tak_tunnel_fallback_active
@@ -1864,6 +1895,8 @@ def run_panel_diagnostics(db: Session, actor: User) -> DiagnosticsPageView:
             )
             if len(tak_tunnel_action_links) >= 5:
                 break
+    if focused_tic_server_id is not None and focused_tak_server_id is not None:
+        tak_tunnel_details.insert(0, f"Фокус: пара Tic/Tak {focused_tic_server_id} → {focused_tak_server_id}")
     checks.append(
         DiagnosticsCheckView(
             key="tak_tunnels",

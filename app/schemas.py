@@ -239,6 +239,8 @@ class AuditLogView(BaseModel):
     server_id: int | None = None
     server_name: str | None = None
     server_url: str | None = None
+    pair_label: str | None = None
+    diagnostics_url: str | None = None
     details: str | None = None
     details_ru: str | None = None
     created_at: datetime
