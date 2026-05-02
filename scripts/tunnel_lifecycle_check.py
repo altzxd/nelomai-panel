@@ -82,7 +82,14 @@ def run() -> None:
     require(provision.get("ok") is True, "provision_tak_tunnel must succeed")
     tunnel_id = str(provision.get("tunnel_id") or "")
     require(bool(tunnel_id), "provision_tak_tunnel must return tunnel_id")
+    tunnel_artifacts = provision.get("tunnel_artifacts")
     amnezia_config = provision.get("amnezia_config")
+    require(isinstance(tunnel_artifacts, dict), "provision_tak_tunnel must return tunnel_artifacts")
+    require(isinstance(tunnel_artifacts.get("endpoint"), dict), "tunnel_artifacts must include endpoint")
+    require(isinstance(tunnel_artifacts.get("addressing"), dict), "tunnel_artifacts must include addressing")
+    require(isinstance(tunnel_artifacts.get("keys"), dict), "tunnel_artifacts must include keys")
+    require(isinstance(tunnel_artifacts.get("awg_parameters"), dict), "tunnel_artifacts must include awg_parameters")
+    require(isinstance(tunnel_artifacts.get("runtime_artifacts"), dict), "tunnel_artifacts must include runtime_artifacts")
     require(isinstance(amnezia_config, dict), "provision_tak_tunnel must return amnezia_config")
     require(isinstance(amnezia_config.get("endpoint"), dict), "amnezia_config must include endpoint")
     require(isinstance(amnezia_config.get("addressing"), dict), "amnezia_config must include addressing")
@@ -105,6 +112,7 @@ def run() -> None:
         "server": tic_server,
         "tak_server": tak_server,
         "tunnel_id": tunnel_id,
+        "tunnel_artifacts": tunnel_artifacts,
         "amnezia_config": amnezia_config,
     }
     attach = run_agent(attach_payload, component_env="tic-agent", state_file=state_file, runtime_root=runtime_root)

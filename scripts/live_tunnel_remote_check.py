@@ -154,9 +154,20 @@ def main() -> None:
     if provision.get("ok") is not True:
         raise LiveTunnelCheckFailure(f"provision_tak_tunnel returned error: {provision}")
     tunnel_id = str(provision.get("tunnel_id") or "").strip()
+    tunnel_artifacts = provision.get("tunnel_artifacts")
     amnezia_config = provision.get("amnezia_config")
-    if not tunnel_id or not isinstance(amnezia_config, dict):
-        raise LiveTunnelCheckFailure("provision_tak_tunnel did not return tunnel_id + amnezia_config")
+    if not tunnel_id or not isinstance(tunnel_artifacts, dict) or not isinstance(amnezia_config, dict):
+        raise LiveTunnelCheckFailure("provision_tak_tunnel did not return tunnel_id + tunnel_artifacts + amnezia_config")
+    if not isinstance(tunnel_artifacts.get("endpoint"), dict):
+        raise LiveTunnelCheckFailure(f"provision_tak_tunnel did not return structured tunnel_artifacts.endpoint: {provision}")
+    if not isinstance(tunnel_artifacts.get("addressing"), dict):
+        raise LiveTunnelCheckFailure(f"provision_tak_tunnel did not return structured tunnel_artifacts.addressing: {provision}")
+    if not isinstance(tunnel_artifacts.get("keys"), dict):
+        raise LiveTunnelCheckFailure(f"provision_tak_tunnel did not return structured tunnel_artifacts.keys: {provision}")
+    if not isinstance(tunnel_artifacts.get("awg_parameters"), dict):
+        raise LiveTunnelCheckFailure(f"provision_tak_tunnel did not return structured tunnel_artifacts.awg_parameters: {provision}")
+    if not isinstance(tunnel_artifacts.get("runtime_artifacts"), dict):
+        raise LiveTunnelCheckFailure(f"provision_tak_tunnel did not return structured tunnel_artifacts.runtime_artifacts: {provision}")
     if not isinstance(amnezia_config.get("endpoint"), dict):
         raise LiveTunnelCheckFailure(f"provision_tak_tunnel did not return structured endpoint: {provision}")
     if not isinstance(amnezia_config.get("addressing"), dict):
@@ -168,6 +179,11 @@ def main() -> None:
     if tak_amnezia_tool_cmd and "fake_amnezia_tool.py" in tak_amnezia_tool_cmd:
         if amnezia_config.get("source") != "official-tooling":
             raise LiveTunnelCheckFailure(f"provision_tak_tunnel did not use official tooling source: {provision}")
+        runtime_artifacts = tunnel_artifacts.get("runtime_artifacts") or {}
+        if runtime_artifacts.get("server_config_text") != "# official fake server config":
+            raise LiveTunnelCheckFailure(f"provision_tak_tunnel did not use tunnel_artifacts.server_config_text from tool: {provision}")
+        if runtime_artifacts.get("client_config_text") != "# official fake client config":
+            raise LiveTunnelCheckFailure(f"provision_tak_tunnel did not use tunnel_artifacts.client_config_text from tool: {provision}")
         canonical_artifacts = amnezia_config.get("canonical_artifacts") or {}
         if canonical_artifacts.get("server_config_text") != "# official fake server config":
             raise LiveTunnelCheckFailure(f"provision_tak_tunnel did not use canonical server artifact from tool: {provision}")
@@ -208,6 +224,7 @@ def main() -> None:
             "server": tic_server,
             "tak_server": tak_server,
             "tunnel_id": tunnel_id,
+            "tunnel_artifacts": tunnel_artifacts,
             "amnezia_config": amnezia_config,
         },
     )

@@ -3,7 +3,12 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { buildBootstrapPlan, bootstrapExecutionMode, executeBootstrapPlan } = require("./bootstrap");
-const { buildCanonicalAmneziaConfig, extractCanonicalTunnelArtifacts } = require("./amnezia_adapter");
+const {
+  buildCanonicalAmneziaConfig,
+  extractCanonicalTunnelArtifacts,
+  buildTunnelArtifactsFromConfig,
+  buildLegacyAmneziaConfig
+} = require("./amnezia_adapter");
 const { randomBase64, buildTakTunnelClientPayload } = require("./render");
 
 function deployedStateRoot() {
@@ -268,10 +273,20 @@ function findTunnelRecord(state, payload) {
 }
 
 function buildAmneziaConfig(record) {
+  if (record.tunnel_artifacts && typeof record.tunnel_artifacts === "object") {
+    return buildLegacyAmneziaConfig(record.tunnel_artifacts, record);
+  }
   if (record.amnezia_config && typeof record.amnezia_config === "object") {
     return record.amnezia_config;
   }
   return buildTakTunnelClientPayload(record);
+}
+
+function buildTunnelArtifacts(record) {
+  if (record.tunnel_artifacts && typeof record.tunnel_artifacts === "object") {
+    return record.tunnel_artifacts;
+  }
+  return buildTunnelArtifactsFromConfig(buildAmneziaConfig(record), record);
 }
 
 function tunnelAwgParameters(sequence) {
@@ -356,8 +371,10 @@ function buildTakTunnelPlan(state, payload) {
   };
   const amneziaConfig = buildCanonicalAmneziaConfig(record);
   const canonicalArtifacts = extractCanonicalTunnelArtifacts(amneziaConfig);
+  const tunnelArtifacts = buildTunnelArtifactsFromConfig(amneziaConfig, record);
   return {
     ...record,
+    tunnel_artifacts: tunnelArtifacts,
     amnezia_config: amneziaConfig,
     amnezia_source: canonicalArtifacts.source,
     server_config_text: canonicalArtifacts.server_config_text,
@@ -376,6 +393,7 @@ function provisionTakTunnelRecord(state, payload) {
     saveState(state);
     return {
       ...existing,
+      tunnel_artifacts: buildTunnelArtifacts(existing),
       amnezia_config: buildAmneziaConfig(existing)
     };
   }
@@ -406,6 +424,7 @@ function provisionTakTunnelRecord(state, payload) {
     awg_junk: plan.awg_junk,
     nat_mode: plan.nat_mode,
     amnezia_source: plan.amnezia_source,
+    tunnel_artifacts: plan.tunnel_artifacts,
     server_config_text: plan.server_config_text,
     client_config_text: plan.client_config_text,
     amnezia_config: plan.amnezia_config,
@@ -417,9 +436,10 @@ function provisionTakTunnelRecord(state, payload) {
   saveState(state);
   return {
     ...persisted,
-      amnezia_config: buildAmneziaConfig(persisted)
-    };
-  }
+    tunnel_artifacts: buildTunnelArtifacts(persisted),
+    amnezia_config: buildAmneziaConfig(persisted)
+  };
+}
 
 function getTakTunnelRecord(state, payload) {
   const existing = findTunnelRecord(state, payload);
@@ -428,6 +448,7 @@ function getTakTunnelRecord(state, payload) {
   }
   return {
     ...existing,
+    tunnel_artifacts: buildTunnelArtifacts(existing),
     amnezia_config: buildAmneziaConfig(existing)
   };
 }
@@ -438,7 +459,14 @@ function attachTakTunnelRecord(state, payload) {
   }
   const serverPayload = payload && payload.server && typeof payload.server === "object" ? payload.server : null;
   const takServerPayload = payload && payload.tak_server && typeof payload.tak_server === "object" ? payload.tak_server : null;
-  const amneziaConfig = payload && payload.amnezia_config && typeof payload.amnezia_config === "object" ? payload.amnezia_config : null;
+  const tunnelArtifactsPayload = payload && payload.tunnel_artifacts && typeof payload.tunnel_artifacts === "object"
+    ? payload.tunnel_artifacts
+    : null;
+  const amneziaConfig = tunnelArtifactsPayload
+    ? buildLegacyAmneziaConfig(tunnelArtifactsPayload, {})
+    : payload && payload.amnezia_config && typeof payload.amnezia_config === "object"
+      ? payload.amnezia_config
+      : null;
   if (!serverPayload || String(serverPayload.server_type || "").trim() !== "tic") {
     throw new Error("attach_tak_tunnel requires Tic server payload");
   }
@@ -446,7 +474,7 @@ function attachTakTunnelRecord(state, payload) {
     throw new Error("attach_tak_tunnel requires Tak server payload");
   }
   if (!amneziaConfig) {
-    throw new Error("attach_tak_tunnel requires amnezia_config");
+    throw new Error("attach_tak_tunnel requires tunnel_artifacts or amnezia_config");
   }
 
   const tunnelId = String(amneziaConfig.tunnel_id || payload.tunnel_id || "").trim();
@@ -514,6 +542,7 @@ function attachTakTunnelRecord(state, payload) {
   };
   existing.nat_mode = String(amneziaConfig.nat_mode || existing.nat_mode || "masquerade");
   existing.amnezia_source = canonicalArtifacts.source;
+  existing.tunnel_artifacts = tunnelArtifactsPayload || buildTunnelArtifactsFromConfig(amneziaConfig, existing);
   existing.server_config_text = canonicalArtifacts.server_config_text || existing.server_config_text || "";
   existing.client_config_text = canonicalArtifacts.client_config_text || existing.client_config_text || "";
   existing.amnezia_config = {
@@ -524,6 +553,7 @@ function attachTakTunnelRecord(state, payload) {
   saveState(state);
   return {
     ...existing,
+    tunnel_artifacts: buildTunnelArtifacts(existing),
     amnezia_config: {
       ...amneziaConfig
     }
@@ -545,6 +575,7 @@ function detachTakTunnelRecord(state, payload) {
   saveState(state);
   return {
     ...existing,
+    tunnel_artifacts: buildTunnelArtifacts(existing),
     amnezia_config: buildAmneziaConfig(existing)
   };
 }

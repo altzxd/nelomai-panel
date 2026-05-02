@@ -126,8 +126,10 @@ def _get_interface(interface_id: int) -> Interface:
 def main() -> None:
     tic_host = _required_env("NELOMAI_TIC_HOST")
     tic_password = _required_env("NELOMAI_TIC_SSH_PASSWORD")
+    _required_env("NELOMAI_TIC_SSH_HOST_KEY")
     tak_host = _required_env("NELOMAI_TAK_HOST")
     tak_password = _required_env("NELOMAI_TAK_SSH_PASSWORD")
+    _required_env("NELOMAI_TAK_SSH_HOST_KEY")
     tic_port = int(os.environ.get("NELOMAI_TIC_SSH_PORT", "22"))
     tak_port = int(os.environ.get("NELOMAI_TAK_SSH_PORT", "22"))
 
@@ -240,6 +242,7 @@ def main() -> None:
                     "server": tic_server,
                     "tak_server": tak_server,
                     "tunnel_id": provision.get("tunnel_id"),
+                    "tunnel_artifacts": provision.get("tunnel_artifacts"),
                     "amnezia_config": provision.get("amnezia_config"),
                 }
             )

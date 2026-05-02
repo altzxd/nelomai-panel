@@ -112,6 +112,34 @@ def main() -> None:
                     "tak_address_v4": "172.27.10.1/30",
                     "tic_address_v4": "172.27.10.2/30",
                     "nat_mode": "masquerade",
+                    "tunnel_artifacts": {
+                        "format": "amneziawg-2.0",
+                        "version": "2.0",
+                        "source": "fake-agent",
+                        "tunnel_id": "fake-tak-tunnel-1",
+                        "endpoint": {"host": "127.0.0.51", "port": 51831},
+                        "addressing": {
+                            "network_cidr": "172.27.10.0/30",
+                            "tak_address_v4": "172.27.10.1/30",
+                            "tic_address_v4": "172.27.10.2/30",
+                            "allowed_ips": ["172.27.10.0/30"],
+                        },
+                        "keys": {
+                            "client_private_key": "fake-client-private-key",
+                            "client_public_key": "fake-client-public-key",
+                            "server_public_key": "fake-server-public-key",
+                        },
+                        "awg_parameters": {
+                            "header_obfuscation": {"H1": 11, "H2": 22, "H3": 33, "H4": 44},
+                            "session_noise": {"S1": 55, "S2": 66, "S3": 77, "S4": 88},
+                            "init_noise": {"I1": 99, "I2": 111, "I3": 122, "I4": 133, "I5": 144},
+                            "junk_packets": {"Jc": 3, "Jmin": 64, "Jmax": 96},
+                        },
+                        "runtime_artifacts": {
+                            "server_config_text": "# fake server config",
+                            "client_config_text": "# fake client config",
+                        },
+                    },
                     "amnezia_config": {
                         "interface_name": "amz-fake-1",
                         "protocol": "amneziawg-2.0",

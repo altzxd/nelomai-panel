@@ -110,6 +110,26 @@ function fallbackAmneziaConfig(plan) {
   return config;
 }
 
+function buildTunnelArtifactsFromConfig(config, plan) {
+  const normalized = normalizeOfficialResult(config, plan);
+  return {
+    format: String(normalized.protocol || "amneziawg-2.0"),
+    version: String(normalized.version || "2.0"),
+    source: String(normalized.source || "unknown"),
+    tunnel_id: String(normalized.tunnel_id || ""),
+    generated_at: String(normalized.generated_at || ""),
+    endpoint: normalized.endpoint,
+    addressing: normalized.addressing,
+    keys: normalized.keys,
+    awg_parameters: normalized.awg_parameters,
+    nat_mode: String(normalized.nat_mode || "masquerade"),
+    runtime_artifacts: {
+      server_config_text: String(normalized.canonical_artifacts?.server_config_text || ""),
+      client_config_text: String(normalized.canonical_artifacts?.client_config_text || ""),
+    },
+  };
+}
+
 function normalizeOfficialResult(result, plan) {
   const rawConfig = result && typeof result.amnezia_config === "object" ? result.amnezia_config : result;
   if (!rawConfig || typeof rawConfig !== "object") {
@@ -227,8 +247,35 @@ function extractCanonicalTunnelArtifacts(config) {
   };
 }
 
+function buildLegacyAmneziaConfig(tunnelArtifacts, plan) {
+  const artifacts = tunnelArtifacts && typeof tunnelArtifacts.runtime_artifacts === "object"
+    ? tunnelArtifacts.runtime_artifacts
+    : {};
+  return normalizeOfficialResult(
+    {
+      protocol: tunnelArtifacts?.format,
+      version: tunnelArtifacts?.version,
+      source: tunnelArtifacts?.source,
+      tunnel_id: tunnelArtifacts?.tunnel_id,
+      generated_at: tunnelArtifacts?.generated_at,
+      endpoint: tunnelArtifacts?.endpoint,
+      addressing: tunnelArtifacts?.addressing,
+      keys: tunnelArtifacts?.keys,
+      awg_parameters: tunnelArtifacts?.awg_parameters,
+      nat_mode: tunnelArtifacts?.nat_mode,
+      canonical_artifacts: {
+        server_config_text: artifacts.server_config_text,
+        client_config_text: artifacts.client_config_text,
+      },
+    },
+    plan || {}
+  );
+}
+
 module.exports = {
   officialAmneziaCommand,
   buildCanonicalAmneziaConfig,
   extractCanonicalTunnelArtifacts,
+  buildTunnelArtifactsFromConfig,
+  buildLegacyAmneziaConfig,
 };

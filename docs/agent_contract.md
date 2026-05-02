@@ -467,8 +467,10 @@ The current target model for `route_mode=via_tak` is:
   panel; the panel passes it to the selected `Tic`.
 - The production source of truth for that tunnel configuration should be the
   official `AmneziaWG` tooling/repository, not a panel-defined generator.
-- The current structured `amnezia_config` payload is a temporary adapter format
-  used until the official integration is wired in.
+- `tunnel_artifacts` is now the canonical server-generated carrier for
+  `AmneziaWG 2.0` tunnel data between `Tak` and `Tic`.
+- The legacy structured `amnezia_config` payload remains only as a backward
+  compatibility mirror while panel and agents converge on `tunnel_artifacts`.
 - The tunnel listen port on `Tak` is random/non-standard and not manually
   editable in the current phase.
 - Only user traffic of interfaces running with `route_mode=via_tak` should
@@ -538,25 +540,32 @@ Planned payload highlights:
   - `network_cidr`;
   - `tak_address_v4`;
   - `tic_address_v4`;
-  - `amnezia_config` as a temporary structured adapter payload for `Tic` with:
+  - `tunnel_artifacts` as the canonical server-generated payload for `Tic` with:
+    - `format`, `version`, `source`;
+    - `endpoint.host`, `endpoint.port`;
+    - `addressing.network_cidr`, `addressing.tak_address_v4`, `addressing.tic_address_v4`, `addressing.allowed_ips`;
+    - `keys.client_private_key`, `keys.client_public_key`, `keys.server_public_key`;
+    - `awg_parameters.header_obfuscation.H1-H4`;
+    - `awg_parameters.session_noise.S1-S4`;
+    - `awg_parameters.init_noise.I1-I5`;
+    - `runtime_artifacts.server_config_text`;
+    - `runtime_artifacts.client_config_text`.
+  - legacy `amnezia_config` as a backward-compatible mirror payload with:
     - `protocol`, `version`;
     - `endpoint.host`, `endpoint.port`;
     - `addressing.network_cidr`, `addressing.tak_address_v4`, `addressing.tic_address_v4`, `addressing.allowed_ips`;
     - `keys.client_private_key`, `keys.client_public_key`, `keys.server_public_key`;
-    - `awg_parameters.jitter_seed`;
     - `awg_parameters.header_obfuscation.H1-H4`;
     - `awg_parameters.session_noise.S1-S4`;
-    - `awg_parameters.init_noise.I1-I5`.
-- Long-term target:
-  - `Tak` should call the official `AmneziaWG` generator/runtime and return the
-    canonical server/client tunnel artifacts derived from that toolchain;
-  - panel-side fields should describe tunnel intent and transport metadata, not
-    reimplement the final `AmneziaWG` config format.
+    - `awg_parameters.init_noise.I1-I5`;
+    - `canonical_artifacts.server_config_text`;
+    - `canonical_artifacts.client_config_text`.
 - `attach_tak_tunnel` should receive:
   - `server` (`Tic`);
   - `tak_server` metadata;
   - `tunnel_id`;
-  - the `Tak`-generated `amnezia_config` payload.
+  - the `Tak`-generated canonical `tunnel_artifacts` payload;
+  - optional legacy `amnezia_config` payload for backward compatibility.
 - `verify_tak_tunnel_status` should return:
   - `exists`;
   - `is_active`;

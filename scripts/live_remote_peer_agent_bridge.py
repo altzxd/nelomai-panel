@@ -67,9 +67,11 @@ def main() -> None:
     component = str(payload.get("component") or "tic-agent").strip() or "tic-agent"
     exec_mode = str(payload.get("exec_mode") or "system").strip() or "system"
     payload_b64 = base64.b64encode(json.dumps(payload, ensure_ascii=False).encode("utf-8")).decode("ascii")
+    env_file = f"/etc/default/nelomai-{component.replace('-agent', '')}-agent"
     remote_command = (
         "bash -lc "
-        f"\"tmp=\\$(mktemp /tmp/nelomai-bridge-XXXXXX.json) && "
+        f"\"set -a && test -f '{env_file}' && . '{env_file}'; set +a; "
+        f"tmp=\\$(mktemp /tmp/nelomai-bridge-XXXXXX.json) && "
         f"printf %s '{payload_b64}' | base64 -d > \\\"\\$tmp\\\" && "
         f"NELOMAI_AGENT_COMPONENT={component} "
         f"NELOMAI_AGENT_EXEC_MODE={exec_mode} "

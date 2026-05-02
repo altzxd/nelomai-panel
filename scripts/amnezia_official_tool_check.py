@@ -82,7 +82,12 @@ def run() -> None:
         runtime_root=runtime_root,
     )
     require(provision.get("ok") is True, "provision_tak_tunnel must succeed")
+    tunnel_artifacts = provision.get("tunnel_artifacts")
     config = provision.get("amnezia_config")
+    require(isinstance(tunnel_artifacts, dict), "tunnel_artifacts must exist")
+    runtime_artifacts = tunnel_artifacts.get("runtime_artifacts") or {}
+    require(runtime_artifacts.get("server_config_text") == "# official fake server config", "official server runtime artifact must be used")
+    require(runtime_artifacts.get("client_config_text") == "# official fake client config", "official client runtime artifact must be used")
     require(isinstance(config, dict), "amnezia_config must exist")
     require(config.get("source") == "official-tooling", "official tool source marker is required")
     artifacts = config.get("canonical_artifacts") or {}

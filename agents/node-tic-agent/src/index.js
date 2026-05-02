@@ -519,6 +519,7 @@ function realServerResponse(payload) {
         tak_address_v4: tunnel.tak_address_v4,
         tic_address_v4: tunnel.tic_address_v4,
         nat_mode: tunnel.nat_mode,
+        tunnel_artifacts: tunnel.tunnel_artifacts,
         amnezia_config: tunnel.amnezia_config
       });
     } catch (error) {
@@ -540,6 +541,7 @@ function realServerResponse(payload) {
         tak_address_v4: tunnel.tak_address_v4,
         tic_address_v4: tunnel.tic_address_v4,
         nat_mode: tunnel.nat_mode,
+        tunnel_artifacts: tunnel.tunnel_artifacts,
         amnezia_config: tunnel.amnezia_config,
         execution_mode: execution.mode,
         system_commands_applied: execution.applied
