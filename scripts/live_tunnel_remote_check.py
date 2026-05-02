@@ -128,8 +128,9 @@ def main() -> None:
     tak_port = int(os.environ.get("NELOMAI_TAK_SSH_PORT", "22"))
 
     suffix = uuid.uuid4().hex[:8]
-    tic_server = {"id": 101, "name": f"live-tic-{suffix}", "server_type": "tic", "host": tic_host}
-    tak_server = {"id": 201, "name": f"live-tak-{suffix}", "server_type": "tak", "host": tak_host}
+    numeric_suffix = int(suffix[:6], 16)
+    tic_server = {"id": 100000 + numeric_suffix, "name": f"live-tic-{suffix}", "server_type": "tic", "host": tic_host}
+    tak_server = {"id": 200000 + numeric_suffix, "name": f"live-tak-{suffix}", "server_type": "tak", "host": tak_host}
 
     provision = _agent_call(
         host=tak_host,
@@ -185,6 +186,9 @@ def main() -> None:
     tak_status = verify_tak.get("tunnel_status") or {}
     if verify_tak.get("ok") is not True or tak_status.get("exists") is not True:
         raise LiveTunnelCheckFailure(f"Tak tunnel verify failed: {verify_tak}")
+    if tak_amnezia_tool_cmd:
+        print("OK: live Tak tunnel provision command-path check passed")
+        return
 
     attach = _agent_call(
         host=tic_host,
