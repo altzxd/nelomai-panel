@@ -133,8 +133,8 @@ def main() -> None:
 
     server_config = _render_server_config(payload)
     client_config = _render_client_config(payload)
-    _validate_config_text(server_config, name="tak-tunnel-server")
-    _validate_config_text(client_config, name="tak-tunnel-client")
+    _validate_config_text(server_config, name="awgtaksrv")
+    _validate_config_text(client_config, name="awgtakcli")
 
     print(
         json.dumps(
