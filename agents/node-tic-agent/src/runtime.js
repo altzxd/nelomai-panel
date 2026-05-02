@@ -536,8 +536,8 @@ function buildAttachTunnelCommands(tunnelRecord) {
   return [
     `install -d -m 700 ${systemTunnelRoot()}`,
     `install -m 600 ${runtimeConfigPath} ${systemConfigPath}`,
-    `if ip link show dev ${tunnelName} >/dev/null 2>&1; then ${quickCommand} down ${tunnelName} || true; fi`,
-    `${quickCommand} up ${tunnelName}`
+    `if ip link show dev ${tunnelName} >/dev/null 2>&1; then ${quickCommand} down ${systemConfigPath} || true; fi`,
+    `${quickCommand} up ${systemConfigPath}`
   ];
 }
 
@@ -552,7 +552,7 @@ function buildDetachTunnelCommands(tunnelRecord) {
   const systemConfigPath = systemTunnelConfigPath(tunnelRecord);
   const tunnelName = systemTunnelName(tunnelRecord);
   return [
-    `if ip link show dev ${tunnelName} >/dev/null 2>&1; then ${quickCommand} down ${tunnelName} || true; fi`,
+    `if ip link show dev ${tunnelName} >/dev/null 2>&1; then ${quickCommand} down ${systemConfigPath} || true; fi`,
     `rm -f ${systemConfigPath}`
   ];
 }
