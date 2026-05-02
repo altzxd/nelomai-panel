@@ -437,7 +437,7 @@ function buildCreateInterfaceCommands(interfaceRecord) {
     `install -d -m 700 ${systemPeerDir}`,
     `install -m 600 ${runtimeConfigPath} ${systemConfigPath}`,
     `if [ -d "${runtimePeerDir}" ]; then find "${runtimePeerDir}" -maxdepth 1 -type f -name '*.conf' -exec install -m 600 {} "${systemPeerDir}/" \\; ; fi`,
-    `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${systemConfigPath}) && ip link set up dev ${interfaceName}; else wg-quick up ${systemConfigPath}; fi`
+    `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${interfaceName}) && ip link set up dev ${interfaceName}; else wg-quick up ${interfaceName}; fi`
   ];
 }
 
@@ -455,12 +455,12 @@ function buildToggleInterfaceCommands(interfaceRecord) {
       `install -d -m 700 ${systemPeerDir}`,
       `install -m 600 ${runtimeConfigPath} ${systemConfigPath}`,
       `if [ -d "${runtimePeerDir}" ]; then find "${runtimePeerDir}" -maxdepth 1 -type f -name '*.conf' -exec install -m 600 {} "${systemPeerDir}/" \\; ; fi`,
-      `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${systemConfigPath}) && ip link set up dev ${interfaceName}; else wg-quick up ${systemConfigPath}; fi`
+      `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${interfaceName}) && ip link set up dev ${interfaceName}; else wg-quick up ${interfaceName}; fi`
     ];
   }
 
   return [
-    `if [ -f "${systemConfigPath}" ]; then wg-quick down ${systemConfigPath} || (ip link show dev ${interfaceName} >/dev/null 2>&1 && ip link delete dev ${interfaceName}) || true; elif ip link show dev ${interfaceName} >/dev/null 2>&1; then ip link delete dev ${interfaceName}; fi`
+    `if [ -f "${systemConfigPath}" ]; then wg-quick down ${interfaceName} || (ip link show dev ${interfaceName} >/dev/null 2>&1 && ip link delete dev ${interfaceName}) || true; elif ip link show dev ${interfaceName} >/dev/null 2>&1; then ip link delete dev ${interfaceName}; fi`
   ];
 }
 
@@ -478,14 +478,14 @@ function buildTogglePeerCommands(interfaceRecord, peerRecord) {
       `install -d -m 700 ${systemPeerDir}`,
       `install -m 600 ${runtimeConfigPath} ${systemConfigPath}`,
       `install -m 600 ${runtimePeerPath} ${systemPeerPath}`,
-      `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${systemConfigPath}) && ip link set up dev ${interfaceName}; fi`
+      `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${interfaceName}) && ip link set up dev ${interfaceName}; fi`
     ];
   }
 
   return [
     `rm -f ${systemPeerPath}`,
     `install -m 600 ${runtimeConfigPath} ${systemConfigPath}`,
-    `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${systemConfigPath}) && ip link set up dev ${interfaceName}; fi`
+    `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${interfaceName}) && ip link set up dev ${interfaceName}; fi`
   ];
 }
 
@@ -503,7 +503,7 @@ function buildRefreshInterfaceCommands(interfaceRecord) {
     `if [ -d "${runtimePeerDir}" ]; then find "${runtimePeerDir}" -maxdepth 1 -type f -name '*.conf' -exec install -m 600 {} "${systemPeerDir}/" \\; ; fi`
   ];
   if (interfaceRecord.is_enabled) {
-    commands.push(`if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${systemConfigPath}) && ip link set up dev ${interfaceName}; else wg-quick up ${systemConfigPath}; fi`);
+    commands.push(`if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${interfaceName}) && ip link set up dev ${interfaceName}; else wg-quick up ${interfaceName}; fi`);
   }
   return commands;
 }
@@ -519,7 +519,7 @@ function buildRecreatePeerCommands(interfaceRecord, peerRecord) {
     `install -d -m 700 ${systemPeerDir}`,
     `install -m 600 ${runtimeConfigPath} ${systemConfigPath}`,
     `install -m 600 ${peerConfigPath(interfaceRecord, peerRecord)} ${systemPeerConfigPath(interfaceRecord, peerRecord)}`,
-    `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${systemConfigPath}) && ip link set up dev ${interfaceName}; fi`
+    `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${interfaceName}) && ip link set up dev ${interfaceName}; fi`
   ];
 }
 
@@ -530,7 +530,7 @@ function buildDeletePeerCommands(interfaceRecord, peerRecord) {
   return [
     `rm -f ${systemPeerConfigPath(interfaceRecord, peerRecord)}`,
     `install -m 600 ${runtimeConfigPath} ${systemConfigPath}`,
-    `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${systemConfigPath}) && ip link set up dev ${interfaceName}; fi`
+    `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${interfaceName}) && ip link set up dev ${interfaceName}; fi`
   ];
 }
 
