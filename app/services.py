@@ -70,6 +70,7 @@ from app.schemas import (
     BackupsPageView,
     BasicSettingsUpdate,
     DiagnosticsCheckView,
+    DiagnosticsFocusedTakTunnelView,
     DiagnosticsPageView,
     DiagnosticsRecommendationView,
     FilterCreate,
@@ -1559,6 +1560,7 @@ def run_panel_diagnostics(
     checks: list[DiagnosticsCheckView] = []
     problem_nodes: list[str] = []
     recent_incidents = _get_recent_diagnostics_incidents(db)
+    focused_tak_tunnel: DiagnosticsFocusedTakTunnelView | None = None
 
     try:
         db.execute(select(User.id).limit(1)).first()
@@ -1897,6 +1899,68 @@ def run_panel_diagnostics(
                 break
     if focused_tic_server_id is not None and focused_tak_server_id is not None:
         tak_tunnel_details.insert(0, f"Фокус: пара Tic/Tak {focused_tic_server_id} → {focused_tak_server_id}")
+        focused_pair = next(
+            (
+                pair_interfaces[0]
+                for pair_interfaces in tak_tunnel_pairs.values()
+                if pair_interfaces
+                and pair_interfaces[0].tic_server_id == focused_tic_server_id
+                and pair_interfaces[0].tak_server_id == focused_tak_server_id
+            ),
+            None,
+        ) if "tak_tunnel_pairs" in locals() else None
+        if focused_pair is not None:
+            pair_status = "warning"
+            pair_details: list[str] = []
+            pair_message = "Не удалось получить актуальный статус туннеля для выбранной пары."
+            try:
+                focused_response = _run_tic_executor(
+                    _build_server_executor_payload(
+                        action="verify_tak_tunnel_status",
+                        server=focused_pair.tic_server,
+                        extra={"tak_server": _server_agent_identity_payload(focused_pair.tak_server)},
+                    )
+                )
+                _validate_agent_contract_response(focused_response)
+                focused_status = focused_response.get("tunnel_status") or {}
+                is_active = bool(focused_status.get("is_active"))
+                raw_status = str(focused_status.get("status") or ("active" if is_active else "unknown"))
+                pair_status = "ok" if is_active else "warning"
+                pair_message = (
+                    "Туннель выбранной пары активен."
+                    if is_active
+                    else "Туннель выбранной пары неактивен или требует внимания."
+                )
+                pair_details.append(f"Статус агента: {raw_status}")
+                interface_names = sorted(
+                    interface.name
+                    for interface in tak_tunnel_pairs.get((focused_tic_server_id, focused_tak_server_id), [])
+                )
+                if interface_names:
+                    pair_details.append(f"Интерфейсы via_tak: {', '.join(interface_names)}")
+                recovered_names = sorted(
+                    interface.name
+                    for interface in tak_tunnel_pairs.get((focused_tic_server_id, focused_tak_server_id), [])
+                    if interface.tak_tunnel_last_status == "recovered" and not interface.tak_tunnel_fallback_active
+                )
+                if recovered_names:
+                    pair_details.append(f"Автовосстановлены: {', '.join(recovered_names)}")
+                fallback_names = sorted(
+                    interface.name
+                    for interface in tak_tunnel_pairs.get((focused_tic_server_id, focused_tak_server_id), [])
+                    if interface.tak_tunnel_fallback_active
+                )
+                if fallback_names:
+                    pair_details.append(f"Сейчас в fallback: {', '.join(fallback_names)}")
+            except Exception as exc:
+                pair_details.append(f"Ошибка проверки: {exc}")
+            focused_tak_tunnel = DiagnosticsFocusedTakTunnelView(
+                pair_label=f"{focused_pair.tic_server.name} → {focused_pair.tak_server.name}",
+                status=pair_status,
+                message=pair_message,
+                details=pair_details,
+                server_url=f"/admin/servers?bucket=active&selected_server_id={focused_pair.tic_server.id}",
+            )
     checks.append(
         DiagnosticsCheckView(
             key="tak_tunnels",
@@ -1964,6 +2028,7 @@ def run_panel_diagnostics(
         overall_status=overall_status,
         summary=summary,
         problem_nodes=problem_nodes,
+        focused_tak_tunnel=focused_tak_tunnel,
         checks=checks,
         recommendations=recommendations,
         recent_incidents=recent_incidents,

@@ -283,11 +283,20 @@ class DiagnosticsRecommendationView(BaseModel):
     action_url: str | None = None
 
 
+class DiagnosticsFocusedTakTunnelView(BaseModel):
+    pair_label: str
+    status: str
+    message: str
+    details: list[str] = []
+    server_url: str | None = None
+
+
 class DiagnosticsPageView(BaseModel):
     has_report: bool
     overall_status: str
     summary: str
     problem_nodes: list[str] = []
+    focused_tak_tunnel: DiagnosticsFocusedTakTunnelView | None = None
     checks: list[DiagnosticsCheckView] = []
     recommendations: list[DiagnosticsRecommendationView] = []
     recent_incidents: list[AuditLogView] = []

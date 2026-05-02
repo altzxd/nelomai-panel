@@ -64,6 +64,25 @@
             {% endif %}
         </section>
 
+        {% if diagnostics_page.focused_tak_tunnel %}
+        <section class="settings-card diagnostics-summary {% if diagnostics_page.focused_tak_tunnel.status == 'error' %}is-error{% elif diagnostics_page.focused_tak_tunnel.status == 'warning' %}is-warning{% endif %}">
+            <h3>Фокус: {{ diagnostics_page.focused_tak_tunnel.pair_label }}</h3>
+            <p>{{ diagnostics_page.focused_tak_tunnel.message }}</p>
+            {% if diagnostics_page.focused_tak_tunnel.details %}
+            <ul class="diagnostics-details">
+                {% for item in diagnostics_page.focused_tak_tunnel.details %}
+                <li>{{ item }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            {% if diagnostics_page.focused_tak_tunnel.server_url %}
+            <div class="job-actions">
+                <a class="ghost-button small" href="{{ diagnostics_page.focused_tak_tunnel.server_url }}">Открыть Tic-сервер</a>
+            </div>
+            {% endif %}
+        </section>
+        {% endif %}
+
         {% if diagnostics_page.recommendations %}
         <section class="settings-card diagnostics-recommendations">
             <div class="server-list-head">
