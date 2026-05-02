@@ -143,11 +143,18 @@
                 <div><dt>Endpoint для интерфейсов</dt><dd>{{ servers_page.selected_server.endpoint_count }}</dd></div>
                 <div><dt>Пиров на Tic</dt><dd>{{ servers_page.selected_server.peer_count }}</dd></div>
                 <div><dt>Fallback via_tak</dt><dd>{{ servers_page.selected_server.tak_fallback_interface_count }}</dd></div>
+                <div><dt>Автовосстановлены</dt><dd>{{ servers_page.selected_server.tak_recovered_interface_count }}</dd></div>
             </dl>
             {% if servers_page.selected_server.tak_fallback_interface_names %}
             <div class="server-inline-warning">
                 <strong>Через Tak сейчас не идут:</strong>
                 <span>{{ servers_page.selected_server.tak_fallback_interface_names | join(", ") }}</span>
+            </div>
+            {% endif %}
+            {% if servers_page.selected_server.tak_recovered_interface_names %}
+            <div class="server-inline-note">
+                <strong>Tic ↔ Tak автовосстановлен:</strong>
+                <span>{{ servers_page.selected_server.tak_recovered_interface_names | join(", ") }}</span>
             </div>
             {% endif %}
             <div class="server-detail-lists">
@@ -402,9 +409,13 @@
                     <div><dt>Endpoint для интерфейсов</dt><dd>{{ server.endpoint_count }}</dd></div>
                     <div><dt>Пиров на Tic</dt><dd>{{ server.peer_count }}</dd></div>
                     <div><dt>Fallback via_tak</dt><dd>{{ server.tak_fallback_interface_count }}</dd></div>
+                    <div><dt>Автовосстановлены</dt><dd>{{ server.tak_recovered_interface_count }}</dd></div>
                 </dl>
                 {% if server.tak_fallback_interface_count %}
                 <p class="server-inline-warning">via_tak fallback: {{ server.tak_fallback_interface_count }} · {{ server.tak_fallback_interface_names | join(", ") }}</p>
+                {% endif %}
+                {% if server.tak_recovered_interface_count %}
+                <p class="server-inline-note">Tic ↔ Tak автовосстановлен: {{ server.tak_recovered_interface_count }} · {{ server.tak_recovered_interface_names | join(", ") }}</p>
                 {% endif %}
                 <div class="server-card-actions">
                     <button class="ghost-button small" type="button" data-server-verify="{{ server.id }}">Перепроверить</button>

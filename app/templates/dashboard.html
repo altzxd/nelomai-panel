@@ -172,8 +172,8 @@
                                 {% endif %}
                                 {% if interface.route_mode.value == "via_tak" and interface.tak_tunnel_fallback_active %}
                                 <p class="interface-tak-fallback">Маршрут через Tak временно недоступен, интерфейс работает как standalone.</p>
-                                {% elif interface.route_mode.value == "via_tak" and interface.tak_tunnel_last_status %}
-                                <p class="interface-tak-status">Статус туннеля Tic/Tak: {{ interface.tak_tunnel_last_status }}</p>
+                                {% elif interface.route_mode.value == "via_tak" and interface.tak_tunnel_status_label %}
+                                <p class="interface-tak-status">Статус туннеля Tic/Tak: {{ interface.tak_tunnel_status_label }}</p>
                                 {% endif %}
                             </div>
                             <div class="interface-header-actions">

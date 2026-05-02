@@ -244,6 +244,7 @@ AUDIT_EVENT_TYPE_LABELS = {
     "servers.verify_runtime": "Проверка runtime агента",
     "servers.restart_agent": "Перезагрузка агента",
     "servers.restore": "Восстановление сервера",
+    "tak_tunnels.auto_recovered": "Автовосстановление туннеля Tic/Tak",
     "updates.agent_apply": "Обновление агента",
     "updates.agent_check": "Проверка обновлений агента",
     "updates.panel_check": "Проверка обновлений панели",
@@ -916,6 +917,7 @@ def _reconcile_tak_tunnel_routes(db: Session) -> None:
     for _, pair_interfaces in by_pair.items():
         sample = pair_interfaces[0]
         healed_during_reconcile = False
+        previous_status_label = "unknown"
         try:
             response = _run_tic_executor(
                 _build_server_executor_payload(
@@ -931,6 +933,10 @@ def _reconcile_tak_tunnel_routes(db: Session) -> None:
                 tunnel_status = response.get("tunnel_status") or {}
         except Exception:
             tunnel_status = {"is_active": False, "status": "error"}
+
+        previous_status_label = str(
+            tunnel_status.get("status") or ("active" if bool(tunnel_status.get("is_active")) else "error")
+        )[:32]
 
         if not bool(tunnel_status.get("is_active")):
             try:
@@ -959,6 +965,26 @@ def _reconcile_tak_tunnel_routes(db: Session) -> None:
         status_label = str(tunnel_status.get("status") or ("active" if is_active else "error"))[:32]
         if healed_during_reconcile and is_active:
             status_label = "recovered"
+            write_audit_log(
+                db,
+                event_type="tak_tunnels.auto_recovered",
+                severity="info",
+                message=f"Tak tunnel auto-recovered: tic={sample.tic_server.name}, tak={sample.tak_server.name}",
+                message_ru=f"Панель автоматически восстановила туннель Tic/Tak: {sample.tic_server.name} → {sample.tak_server.name}",
+                server_id=sample.tic_server.id,
+                details=json.dumps(
+                    {
+                        "tic_server_id": sample.tic_server.id,
+                        "tic_server_name": sample.tic_server.name,
+                        "tak_server_id": sample.tak_server.id,
+                        "tak_server_name": sample.tak_server.name,
+                        "previous_status": previous_status_label,
+                        "interface_names": sorted(interface.name for interface in pair_interfaces),
+                    },
+                    ensure_ascii=False,
+                ),
+                commit=False,
+            )
         for interface in pair_interfaces:
             try:
                 if is_active:
@@ -1059,6 +1085,20 @@ def _format_audit_details_ru(log: AuditLog) -> str | None:
             parts.append(f"узлы: {', '.join(str(item) for item in top_nodes[:4])}")
         return " | ".join(parts)
 
+    if log.event_type == "tak_tunnels.auto_recovered" and isinstance(details, dict):
+        tic_server_name = str(details.get("tic_server_name") or "")
+        tak_server_name = str(details.get("tak_server_name") or "")
+        interface_names = details.get("interface_names") or []
+        previous_status = str(details.get("previous_status") or "")
+        parts = []
+        if tic_server_name or tak_server_name:
+            parts.append(f"пара: {tic_server_name} → {tak_server_name}".strip())
+        if previous_status:
+            parts.append(f"до восстановления: {previous_status}")
+        if isinstance(interface_names, list) and interface_names:
+            parts.append(f"интерфейсы: {', '.join(str(item) for item in interface_names[:6])}")
+        return " | ".join(part for part in parts if part) or log.details
+
     if log.event_type not in {"agent.command", "agent.command_failed"} or not isinstance(details, dict):
         return log.details
 
@@ -1082,6 +1122,9 @@ def _format_audit_details_ru(log: AuditLog) -> str | None:
 
 
 def serialize_audit_log(log: AuditLog) -> AuditLogView:
+    server_url = None
+    if log.server_id is not None:
+        server_url = f"/admin/servers?bucket=active&selected_server_id={log.server_id}"
     return AuditLogView(
         id=log.id,
         event_type=log.event_type,
@@ -1095,6 +1138,7 @@ def serialize_audit_log(log: AuditLog) -> AuditLogView:
         target_login=log.target_user.login if log.target_user else None,
         server_id=log.server_id,
         server_name=log.server.name if log.server else None,
+        server_url=server_url,
         details=log.details,
         details_ru=_format_audit_details_ru(log),
         created_at=log.created_at,
@@ -1766,9 +1810,16 @@ def run_panel_diagnostics(db: Session, actor: User) -> DiagnosticsPageView:
         tak_tunnel_details.append(f"Проверено пар Tic/Tak: {len(tak_tunnel_pairs)}")
         degraded_pairs: list[str] = []
         failed_pairs: list[str] = []
+        recovered_pairs: list[str] = []
         for pair_interfaces in tak_tunnel_pairs.values():
             sample = pair_interfaces[0]
             pair_label = f"{sample.tic_server.name} → {sample.tak_server.name}"
+            if any(
+                interface.tak_tunnel_last_status == "recovered" and not interface.tak_tunnel_fallback_active
+                for interface in pair_interfaces
+            ):
+                interface_names = ", ".join(sorted(interface.name for interface in pair_interfaces))
+                recovered_pairs.append(f"{pair_label} · интерфейсы: {interface_names}")
             try:
                 response = _run_tic_executor(
                     _build_server_executor_payload(
@@ -1798,6 +1849,8 @@ def run_panel_diagnostics(db: Session, actor: User) -> DiagnosticsPageView:
             tak_tunnel_details.append(f"Проблемные туннели: {'; '.join(degraded_pairs[:5])}")
         if failed_pairs:
             tak_tunnel_details.append(f"Не удалось проверить: {'; '.join(failed_pairs[:5])}")
+        if recovered_pairs:
+            tak_tunnel_details.append(f"Автовосстановлены: {'; '.join(recovered_pairs[:5])}")
     if "tak_tunnel_action_links" in locals() and not tak_tunnel_action_links:
         for pair_interfaces in tak_tunnel_pairs.values():
             sample = pair_interfaces[0]
@@ -5021,6 +5074,14 @@ def get_servers_page_data(
             (interface.name for interface in server.tic_interfaces if interface.tak_tunnel_fallback_active),
             key=str.lower,
         )
+        tak_recovered_interfaces = sorted(
+            (
+                interface.name
+                for interface in server.tic_interfaces
+                if not interface.tak_tunnel_fallback_active and interface.tak_tunnel_last_status == "recovered"
+            ),
+            key=str.lower,
+        )
         endpoint_count = len(server.tak_interfaces) if server.server_type == ServerType.TAK else len(server.tic_interfaces)
         peer_count = sum(len(interface.peers) for interface in server.tic_interfaces) if server.server_type == ServerType.TIC else 0
         status = _server_status(server)
@@ -5050,6 +5111,8 @@ def get_servers_page_data(
             endpoint_interface_names=sorted(interface.name for interface in server.tak_interfaces),
             tak_fallback_interface_count=len(tak_fallback_interfaces),
             tak_fallback_interface_names=tak_fallback_interfaces,
+            tak_recovered_interface_count=len(tak_recovered_interfaces),
+            tak_recovered_interface_names=tak_recovered_interfaces,
         )
         if server.is_excluded:
             excluded_servers.append(item)
@@ -5088,6 +5151,8 @@ def get_servers_page_data(
             endpoint_interface_names=selected_server.endpoint_interface_names,
             tak_fallback_interface_count=selected_server.tak_fallback_interface_count,
             tak_fallback_interface_names=selected_server.tak_fallback_interface_names,
+            tak_recovered_interface_count=selected_server.tak_recovered_interface_count,
+            tak_recovered_interface_names=selected_server.tak_recovered_interface_names,
         )
     return serialize_servers_page(
         active_servers,

@@ -77,6 +77,8 @@ class InterfaceView(BaseModel):
     tak_server_name: str | None = None
     tak_tunnel_fallback_active: bool = False
     tak_tunnel_last_status: str | None = None
+    tak_tunnel_status_label: str | None = None
+    tak_tunnel_auto_recovered: bool = False
     available_tak_options: list[InterfaceTakOptionView] = []
     peer_limit: int
     expires_at: datetime | None
@@ -236,6 +238,7 @@ class AuditLogView(BaseModel):
     target_login: str | None = None
     server_id: int | None = None
     server_name: str | None = None
+    server_url: str | None = None
     details: str | None = None
     details_ru: str | None = None
     created_at: datetime
@@ -385,6 +388,8 @@ class ServerListItemView(BaseModel):
     endpoint_interface_names: list[str] = []
     tak_fallback_interface_count: int = 0
     tak_fallback_interface_names: list[str] = []
+    tak_recovered_interface_count: int = 0
+    tak_recovered_interface_names: list[str] = []
 
 
 class ServerDetailView(BaseModel):
@@ -411,6 +416,8 @@ class ServerDetailView(BaseModel):
     endpoint_interface_names: list[str] = []
     tak_fallback_interface_count: int = 0
     tak_fallback_interface_names: list[str] = []
+    tak_recovered_interface_count: int = 0
+    tak_recovered_interface_names: list[str] = []
 
 
 class ServerRuntimeCheckItemView(BaseModel):
@@ -443,6 +450,8 @@ class InterfaceSummaryView(BaseModel):
     effective_route_mode: RouteMode
     tak_tunnel_fallback_active: bool = False
     tak_tunnel_last_status: str | None = None
+    tak_tunnel_status_label: str | None = None
+    tak_tunnel_auto_recovered: bool = False
     traffic_30d_gb: float
     active_peers: int
     peer_limit: int

@@ -20,6 +20,22 @@ from app.schemas import (
 from app.version import get_panel_version
 
 
+def _tak_tunnel_status_label(status: str | None) -> str | None:
+    normalized = str(status or "").strip().lower()
+    if not normalized:
+        return None
+    labels = {
+        "active": "активен",
+        "recovered": "автовосстановлен",
+        "error": "ошибка",
+        "detached": "отключён",
+        "attached": "подключён",
+        "provisioned": "подготовлен",
+        "missing": "отсутствует",
+    }
+    return labels.get(normalized, normalized)
+
+
 def serialize_interface(interface: Interface, expires_at) -> InterfaceView:
     configured_route_mode = interface.route_mode if interface.tak_server_id else RouteMode.STANDALONE
     effective_route_mode = RouteMode.STANDALONE if interface.tak_tunnel_fallback_active else configured_route_mode
@@ -34,6 +50,8 @@ def serialize_interface(interface: Interface, expires_at) -> InterfaceView:
         tak_server_name=interface.tak_server.name if getattr(interface, "tak_server", None) is not None else None,
         tak_tunnel_fallback_active=interface.tak_tunnel_fallback_active,
         tak_tunnel_last_status=interface.tak_tunnel_last_status,
+        tak_tunnel_status_label=_tak_tunnel_status_label(interface.tak_tunnel_last_status),
+        tak_tunnel_auto_recovered=interface.tak_tunnel_last_status == "recovered",
         available_tak_options=[
             {"id": server.id, "name": server.name}
             for server in getattr(interface, "available_tak_options", [])
@@ -150,6 +168,8 @@ def serialize_interface_summary(interface: Interface) -> InterfaceSummaryView:
         effective_route_mode=effective_route_mode,
         tak_tunnel_fallback_active=interface.tak_tunnel_fallback_active,
         tak_tunnel_last_status=interface.tak_tunnel_last_status,
+        tak_tunnel_status_label=_tak_tunnel_status_label(interface.tak_tunnel_last_status),
+        tak_tunnel_auto_recovered=interface.tak_tunnel_last_status == "recovered",
         traffic_30d_gb=traffic_30d_total_gb,
         active_peers=active_peers,
         peer_limit=interface.peer_limit,

@@ -119,7 +119,13 @@
                         <span>{{ log.created_at|datetime_moscow }}</span>
                         <span class="log-severity">{{ log.severity }} · {{ log.event_type_label }}</span>
                         <span>{{ log.actor_login or log.target_login or "—" }}</span>
-                        <span>{{ log.server_name or "—" }}</span>
+                        <span>
+                            {% if log.server_name and log.server_url %}
+                            <a href="{{ log.server_url }}">{{ log.server_name }}</a>
+                            {% else %}
+                            {{ log.server_name or "—" }}
+                            {% endif %}
+                        </span>
                         <div>
                             <strong>{{ log.message_ru }}</strong>
                             {% if log.details_ru %}

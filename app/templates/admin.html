@@ -200,8 +200,8 @@
                             </label>
                             {% if interface.route_mode.value == "via_tak" and interface.tak_tunnel_fallback_active %}
                             <span class="interface-inline-warning">via_tak недоступен, действует fallback в standalone</span>
-                            {% elif interface.route_mode.value == "via_tak" and interface.tak_tunnel_last_status %}
-                            <span class="interface-inline-note">туннель: {{ interface.tak_tunnel_last_status }}</span>
+                            {% elif interface.route_mode.value == "via_tak" and interface.tak_tunnel_status_label %}
+                            <span class="interface-inline-note">туннель: {{ interface.tak_tunnel_status_label }}</span>
                             {% endif %}
                         </div>
                         <div class="interface-status-line">
