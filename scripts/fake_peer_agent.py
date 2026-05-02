@@ -27,6 +27,10 @@ CONTRACT_RESPONSE = {
         "peer.download_bundle.v1",
         "peer.recreate.v1",
         "peer.state.v1",
+        "tunnel.tak.attach.v1",
+        "tunnel.tak.detach.v1",
+        "tunnel.tak.provision.v1",
+        "tunnel.tak.status.v1",
     ],
 }
 
@@ -90,6 +94,68 @@ def main() -> None:
                     "latest_version": "0.1.1",
                     "update_available": False,
                     "message": "fake agent updated",
+                }
+            )
+        )
+        return
+
+    if action == "provision_tak_tunnel":
+        print(
+            response(
+                {
+                    "ok": True,
+                    "status": "provisioned",
+                    "tunnel_id": "fake-tak-tunnel-1",
+                    "protocol": "amneziawg-2.0",
+                    "listen_port": 51831,
+                    "network_cidr": "172.27.10.0/30",
+                    "tak_address_v4": "172.27.10.1/30",
+                    "tic_address_v4": "172.27.10.2/30",
+                    "nat_mode": "masquerade",
+                    "amnezia_config": {
+                        "interface_name": "amz-fake-1",
+                        "private_key": "fake-private-key",
+                        "public_key": "fake-public-key",
+                        "preshared_key": "fake-preshared-key",
+                        "endpoint": "127.0.0.51:51831",
+                        "allowed_ips": ["172.27.10.0/30"],
+                    },
+                }
+            )
+        )
+        return
+
+    if action == "attach_tak_tunnel":
+        print(response({"ok": True, "status": "attached", "tunnel_id": "fake-tak-tunnel-1"}))
+        return
+
+    if action == "verify_tak_tunnel_status":
+        print(
+            response(
+                {
+                    "ok": True,
+                    "status": "checked",
+                    "tunnel_status": {
+                        "tunnel_id": "fake-tak-tunnel-1",
+                        "status": "active",
+                        "is_active": True,
+                    },
+                }
+            )
+        )
+        return
+
+    if action == "detach_tak_tunnel":
+        print(
+            response(
+                {
+                    "ok": True,
+                    "status": "detached",
+                    "tunnel_status": {
+                        "tunnel_id": "fake-tak-tunnel-1",
+                        "status": "detached",
+                        "is_active": False,
+                    },
                 }
             )
         )

@@ -934,8 +934,28 @@ def _reconcile_tak_tunnel_routes(db: Session) -> None:
         is_active = bool(tunnel_status.get("is_active"))
         status_label = str(tunnel_status.get("status") or ("active" if is_active else "error"))[:32]
         for interface in pair_interfaces:
-            if is_active:
-                if interface.tak_tunnel_fallback_active:
+            try:
+                if is_active:
+                    if interface.tak_tunnel_fallback_active:
+                        _run_agent_executor_logged(
+                            db,
+                            _build_tic_executor_payload(
+                                "update_interface_route_mode",
+                                interface,
+                                exclusion_filters_enabled=interface_exclusion_filters_enabled(db, interface),
+                                block_filters_enabled=block_filters_enabled(db),
+                                extra={"target_state": {"route_mode": RouteMode.VIA_TAK.value}},
+                            ),
+                        )
+                        interface.tak_tunnel_fallback_active = False
+                        changed = True
+                    if interface.tak_tunnel_last_status != status_label:
+                        interface.tak_tunnel_last_status = status_label
+                        changed = True
+                    db.add(interface)
+                    continue
+
+                if not interface.tak_tunnel_fallback_active:
                     _run_agent_executor_logged(
                         db,
                         _build_tic_executor_payload(
@@ -943,37 +963,30 @@ def _reconcile_tak_tunnel_routes(db: Session) -> None:
                             interface,
                             exclusion_filters_enabled=interface_exclusion_filters_enabled(db, interface),
                             block_filters_enabled=block_filters_enabled(db),
-                            extra={"target_state": {"route_mode": RouteMode.VIA_TAK.value}},
+                            extra={"target_state": {"route_mode": RouteMode.STANDALONE.value}},
                         ),
                     )
-                    interface.tak_tunnel_fallback_active = False
+                    interface.tak_tunnel_fallback_active = True
                     changed = True
                 if interface.tak_tunnel_last_status != status_label:
                     interface.tak_tunnel_last_status = status_label
                     changed = True
                 db.add(interface)
-                continue
-
-            if not interface.tak_tunnel_fallback_active:
-                _run_agent_executor_logged(
-                    db,
-                    _build_tic_executor_payload(
-                        "update_interface_route_mode",
-                        interface,
-                        exclusion_filters_enabled=interface_exclusion_filters_enabled(db, interface),
-                        block_filters_enabled=block_filters_enabled(db),
-                        extra={"target_state": {"route_mode": RouteMode.STANDALONE.value}},
-                    ),
-                )
-                interface.tak_tunnel_fallback_active = True
-                changed = True
-            if interface.tak_tunnel_last_status != status_label:
-                interface.tak_tunnel_last_status = status_label
-                changed = True
-            db.add(interface)
+            except Exception:
+                if interface.tak_tunnel_last_status != "error":
+                    interface.tak_tunnel_last_status = "error"
+                    db.add(interface)
+                    changed = True
 
     if changed:
         db.commit()
+
+
+def _trigger_tak_tunnel_reconcile(db: Session) -> None:
+    try:
+        _reconcile_tak_tunnel_routes(db)
+    except Exception:
+        db.rollback()
 
 
 def _validate_agent_contract_response(response: dict[str, object]) -> None:
@@ -5642,6 +5655,7 @@ def restart_server_agent(db: Session, actor: User, server_id: int) -> None:
         actor_user_id=actor.id,
         server_id=server.id,
     )
+    _trigger_tak_tunnel_reconcile(db)
 
 
 def verify_server_status(db: Session, actor: User, server_id: int) -> bool:
@@ -5668,6 +5682,7 @@ def verify_server_status(db: Session, actor: User, server_id: int) -> bool:
         actor_user_id=actor.id,
         server_id=server.id,
     )
+    _trigger_tak_tunnel_reconcile(db)
     return is_active
 
 
@@ -5749,6 +5764,7 @@ def reboot_server_host(db: Session, actor: User, server_id: int) -> None:
         actor_user_id=actor.id,
         server_id=server.id,
     )
+    _trigger_tak_tunnel_reconcile(db)
 
 
 def exclude_server_record(db: Session, actor: User, server_id: int) -> None:
@@ -5777,6 +5793,7 @@ def exclude_server_record(db: Session, actor: User, server_id: int) -> None:
         actor_user_id=actor.id,
         server_id=server.id,
     )
+    _trigger_tak_tunnel_reconcile(db)
 
 
 def restore_server_record(db: Session, actor: User, server_id: int) -> None:
@@ -5798,6 +5815,7 @@ def restore_server_record(db: Session, actor: User, server_id: int) -> None:
         actor_user_id=actor.id,
         server_id=server.id,
     )
+    _trigger_tak_tunnel_reconcile(db)
 
 
 def delete_server_record(db: Session, actor: User, server_id: int) -> None:
@@ -5825,6 +5843,7 @@ def delete_server_record(db: Session, actor: User, server_id: int) -> None:
         actor_user_id=actor.id,
         details=f"deleted_server_id={server_id}; removed_interfaces={removed_interfaces}; detached_endpoints={detached_endpoints}",
     )
+    _trigger_tak_tunnel_reconcile(db)
 
 
 def get_interface_by_id(db: Session, interface_id: int) -> Interface:
@@ -6058,24 +6077,54 @@ def create_interface_record(db: Session, actor: User, payload: InterfaceCreate) 
         listen_port=listen_port,
         address_v4=address_v4,
     )
-    response = _run_agent_executor_logged(
-        db,
-        _build_tic_executor_payload(
-            "create_interface",
-            _build_interface_executor_context(
-                interface_id=0,
-                name=name,
+    tunnel_attached = False
+    if tak_server is not None and route_mode == RouteMode.VIA_TAK:
+        if (
+            _count_via_tak_interfaces_for_pair(
+                db,
+                tic_server_id=tic_server.id,
+                tak_server_id=tak_server.id,
+            )
+            == 0
+        ):
+            _provision_and_attach_tak_tunnel(
+                db,
                 tic_server=tic_server,
                 tak_server=tak_server,
-                route_mode=route_mode,
-                listen_port=listen_port,
-                address_v4=address_v4,
+                actor_user_id=actor.id,
+            )
+            tunnel_attached = True
+    try:
+        response = _run_agent_executor_logged(
+            db,
+            _build_tic_executor_payload(
+                "create_interface",
+                _build_interface_executor_context(
+                    interface_id=0,
+                    name=name,
+                    tic_server=tic_server,
+                    tak_server=tak_server,
+                    route_mode=route_mode,
+                    listen_port=listen_port,
+                    address_v4=address_v4,
+                ),
+                exclusion_filters_enabled=exclusion_filters_enabled(db),
+                block_filters_enabled=block_filters_enabled(db),
             ),
-            exclusion_filters_enabled=exclusion_filters_enabled(db),
-            block_filters_enabled=block_filters_enabled(db),
-        ),
-        actor_user_id=actor.id,
-    )
+            actor_user_id=actor.id,
+        )
+    except Exception:
+        if tunnel_attached:
+            try:
+                _detach_tak_tunnel_pair(
+                    db,
+                    tic_server=tic_server,
+                    tak_server=tak_server,
+                    actor_user_id=actor.id,
+                )
+            except Exception:
+                pass
+        raise
     agent_interface_id = response.get("agent_interface_id") or response.get("server_interface_id")
     return _persist_interface_record(
         db,

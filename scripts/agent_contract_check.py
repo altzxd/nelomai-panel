@@ -115,7 +115,7 @@ def prepare_data() -> tuple[int, int, int, int, int, int, dict[str, Any]]:
             raise ContractFailure("No peer found for regular-user interface")
 
         contract_server = Server(
-            name="contract-check-server",
+            name="contract-check-server 9z",
             server_type=ServerType.TIC,
             host="127.0.0.50",
             ssh_port=22,
@@ -125,7 +125,7 @@ def prepare_data() -> tuple[int, int, int, int, int, int, dict[str, Any]]:
             is_active=False,
         )
         contract_tak_server = Server(
-            name="contract-check-tak-server",
+            name="contract-check-tak-server 9z",
             server_type=ServerType.TAK,
             host="127.0.0.51",
             ssh_port=22,
@@ -285,7 +285,7 @@ def run() -> None:
             assert_status(
                 client.post(
                     "/api/admin/interfaces/prepare",
-                    json={"name": "contract-check-prepared", "tic_server_id": contract_server_id, "tak_server_id": None},
+                    json={"name": "contract-check-prepared", "tic_server_id": contract_server_id, "tak_server_id": contract_tak_server_id},
                     headers=admin_headers,
                 ),
                 200,
@@ -296,7 +296,7 @@ def run() -> None:
                 json={
                     "name": "contract-check-created",
                     "tic_server_id": contract_server_id,
-                    "tak_server_id": None,
+                    "tak_server_id": contract_tak_server_id,
                     "listen_port": 19992,
                     "address_v4": "10.199.92.1/24",
                     "peer_limit": 5,
@@ -511,6 +511,12 @@ def run() -> None:
             created_interface = db.get(Interface, created_contract_interface_id)
             if created_interface is not None and created_interface.agent_interface_id is None:
                 raise ContractFailure("created interface did not persist agent_interface_id")
+        provision_tunnel_payload = find_payload(payloads, "provision_tak_tunnel")
+        if provision_tunnel_payload.get("server", {}).get("id") != contract_tak_server_id:
+            raise ContractFailure("provision_tak_tunnel must target Tak contract server")
+        attach_tunnel_payload = find_payload(payloads, "attach_tak_tunnel")
+        if attach_tunnel_payload.get("server", {}).get("id") != contract_server_id:
+            raise ContractFailure("attach_tak_tunnel must target Tic contract server")
 
         toggle_interface_payload = find_payload(payloads, "toggle_interface")
         if "is_enabled" not in toggle_interface_payload.get("target_state", {}):
