@@ -162,6 +162,28 @@ def main() -> None:
                 ssh_password=tak_password,
             )
 
+            tic_server = {"id": tic_id, "name": tic_name, "server_type": "tic", "host": tic_host, "ssh_port": tic_port, "ssh_login": "root", "ssh_password": tic_password}
+            tak_server = {"id": tak_id, "name": tak_name, "server_type": "tak", "host": tak_host, "ssh_port": tak_port, "ssh_login": "root", "ssh_password": tak_password}
+
+            pre_detach_tic = _bridge_call(
+                {
+                    **_payload_base("detach_tak_tunnel", "tic-agent", "tunnel.tak.detach.v1"),
+                    "server": tic_server,
+                    "tak_server": tak_server,
+                }
+            )
+            if pre_detach_tic.get("ok") is not True and "requires known tunnel" not in str(pre_detach_tic.get("error") or ""):
+                raise LivePanelFallbackFailure(f"pre-clean detach_tak_tunnel on Tic failed: {pre_detach_tic}")
+            pre_detach_tak = _bridge_call(
+                {
+                    **_payload_base("detach_tak_tunnel", "tak-agent", "tunnel.tak.detach.v1"),
+                    "server": tak_server,
+                    "tic_server": tic_server,
+                }
+            )
+            if pre_detach_tak.get("ok") is not True and "requires known tunnel" not in str(pre_detach_tak.get("error") or ""):
+                raise LivePanelFallbackFailure(f"pre-clean detach_tak_tunnel on Tak failed: {pre_detach_tak}")
+
             prepare = client.post(
                 "/api/admin/interfaces/prepare",
                 json={"name": interface_name, "tic_server_id": tic_id, "tak_server_id": tak_id},
@@ -183,9 +205,6 @@ def main() -> None:
             )
             _assert_status(create, 201, "create live via_tak interface")
             interface_id = int(create.json()["id"])
-
-            tic_server = {"id": tic_id, "name": tic_name, "server_type": "tic", "host": tic_host, "ssh_port": tic_port, "ssh_login": "root", "ssh_password": tic_password}
-            tak_server = {"id": tak_id, "name": tak_name, "server_type": "tak", "host": tak_host, "ssh_port": tak_port, "ssh_login": "root", "ssh_password": tak_password}
 
             detach_tic = _bridge_call(
                 {
