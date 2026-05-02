@@ -148,6 +148,18 @@ The future Tic Node-agent should handle:
 - apply exclusion filters at the interface/user level as currently contracted;
 - apply block filters per peer as currently contracted.
 
+## Future Tak Tunnel Notes
+
+- `Tak` should later own the server side of the shared `AmneziaWG 2.0`
+  inter-server tunnel used by `via_tak`.
+- Manual editing of the Tak tunnel listen port is not required in the current
+  phase, but may be added later as an advanced setting.
+- The first tunnel implementation slice should start with a dedicated lifecycle:
+  - `provision_tak_tunnel`
+  - `attach_tak_tunnel`
+  - `verify_tak_tunnel_status`
+  - `detach_tak_tunnel`
+
 The panel owns:
 
 - user accounts and permissions;

@@ -170,6 +170,11 @@
                                     </select>
                                 </p>
                                 {% endif %}
+                                {% if interface.route_mode.value == "via_tak" and interface.tak_tunnel_fallback_active %}
+                                <p class="interface-tak-fallback">Маршрут через Tak временно недоступен, интерфейс работает как standalone.</p>
+                                {% elif interface.route_mode.value == "via_tak" and interface.tak_tunnel_last_status %}
+                                <p class="interface-tak-status">Статус туннеля Tic/Tak: {{ interface.tak_tunnel_last_status }}</p>
+                                {% endif %}
                             </div>
                             <div class="interface-header-actions">
                                 <div class="interface-status-block">
@@ -221,6 +226,12 @@
                                 <span>Tak endpoint</span>
                                 <strong>{{ interface.tak_server_name or "standalone" }}</strong>
                             </div>
+                            {% if interface.route_mode.value == "via_tak" %}
+                            <div class="interface-meta-item">
+                                <span>Фактический маршрут</span>
+                                <strong>{{ "Россия (fallback)" if interface.tak_tunnel_fallback_active else "Не Россия" }}</strong>
+                            </div>
+                            {% endif %}
                             {% endif %}
                             {% if is_admin_view %}
                             <label class="interface-limit-control">

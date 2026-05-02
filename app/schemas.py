@@ -72,8 +72,11 @@ class InterfaceView(BaseModel):
     name: str
     tic_server_name: str
     route_mode: RouteMode
+    effective_route_mode: RouteMode
     tak_server_id: int | None = None
     tak_server_name: str | None = None
+    tak_tunnel_fallback_active: bool = False
+    tak_tunnel_last_status: str | None = None
     available_tak_options: list[InterfaceTakOptionView] = []
     peer_limit: int
     expires_at: datetime | None
@@ -252,6 +255,10 @@ class AuditLogsPageView(BaseModel):
 
 
 class DiagnosticsCheckView(BaseModel):
+    class ActionLinkView(BaseModel):
+        label: str
+        url: str
+
     key: str
     title: str
     status: str
@@ -259,6 +266,7 @@ class DiagnosticsCheckView(BaseModel):
     details: list[str] = []
     source_label: str | None = None
     source_url: str | None = None
+    action_links: list[ActionLinkView] = []
 
 
 class DiagnosticsRecommendationView(BaseModel):
@@ -375,6 +383,8 @@ class ServerListItemView(BaseModel):
     is_excluded: bool = False
     owner_interface_names: list[str] = []
     endpoint_interface_names: list[str] = []
+    tak_fallback_interface_count: int = 0
+    tak_fallback_interface_names: list[str] = []
 
 
 class ServerDetailView(BaseModel):
@@ -399,6 +409,8 @@ class ServerDetailView(BaseModel):
     is_excluded: bool = False
     owner_interface_names: list[str] = []
     endpoint_interface_names: list[str] = []
+    tak_fallback_interface_count: int = 0
+    tak_fallback_interface_names: list[str] = []
 
 
 class ServerRuntimeCheckItemView(BaseModel):
@@ -428,6 +440,9 @@ class InterfaceSummaryView(BaseModel):
     tic_server_id: int
     tic_server_name: str
     route_mode: RouteMode
+    effective_route_mode: RouteMode
+    tak_tunnel_fallback_active: bool = False
+    tak_tunnel_last_status: str | None = None
     traffic_30d_gb: float
     active_peers: int
     peer_limit: int

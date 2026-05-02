@@ -23,6 +23,14 @@ Node Tic-agent:
 - invokes system commands such as `wg`, `wg-quick`, `ip`, and `systemctl`;
 - returns structured stdout JSON according to the panel contract.
 
+Node Tak-agent:
+
+- handles server bootstrap, runtime diagnostics, update lifecycle, and
+  server-backup operations for Tak hosts;
+- owns the server side of the shared `AmneziaWG 2.0` inter-server tunnel used
+  by bound `Tic` servers;
+- does not own interface or peer lifecycle in the current architecture.
+
 WireGuard itself is not reimplemented inside the agent. The agent is only an
 orchestrator around the official Linux WireGuard tooling.
 
@@ -208,6 +216,45 @@ WireGuard lifecycle should use standard Linux behavior:
 - interface applied by `wg-quick` or an equivalent explicit `ip` + `wg`
   sequence
 - state changes reflected back to the panel through contract responses
+
+## 7.1 Tic <-> Tak inter-server tunnel
+
+The current target routing model is:
+
+- `Tic` is the client side of the inter-server tunnel and is responsible for
+  bring-up and reconnection.
+- `Tak` is the server side of the inter-server tunnel.
+- The tunnel protocol is `AmneziaWG 2.0`.
+- The tunnel is shared by all interfaces/peers of a given `Tic` server that
+  currently use `route_mode=via_tak`.
+- Each bound `Tic -> Tak` pair gets a separate inter-server tunnel.
+- One `Tak` may host multiple such tunnels for different `Tic` servers.
+- One `Tic` currently has only one active `Tak` binding.
+- `Tak` allocates and generates the `AmneziaWG 2.0` server-side tunnel config.
+- The panel relays the generated tunnel data to the selected `Tic`.
+- The `Tak` tunnel listen port is random and non-standard in the current phase.
+- The first-release default should use a dedicated point-to-point tunnel subnet
+  per pair, preferably `/30`.
+- `Tak` should perform outbound `SNAT/MASQUERADE` for traffic arriving from the
+  `Tic` tunnel.
+- If the tunnel fails, affected `via_tak` interfaces on `Tic` temporarily fall
+  back to `standalone`, and return to `via_tak` after tunnel recovery.
+- System traffic of the `Tic` host itself must stay outside this tunnel.
+
+The first implementation slice should use a dedicated tunnel lifecycle with
+four actions:
+
+- `provision_tak_tunnel`
+- `attach_tak_tunnel`
+- `verify_tak_tunnel_status`
+- `detach_tak_tunnel`
+
+Recommended ownership:
+
+- `tak-agent` provisions the server side, port, subnet, and generated
+  `AmneziaWG 2.0` payload;
+- `tic-agent` attaches that payload, maintains reconnect behavior, and drives
+  interface fallback to `standalone` on failure.
 
 ## 8. What the Agent Must Not Own
 

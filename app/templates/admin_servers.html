@@ -102,6 +102,12 @@
                 · {{ servers_page.selected_server.last_seen_at|datetime_moscow }}
                 {% endif %}
             </p>
+            {% if servers_page.selected_server.server_type == 'tak' %}
+            <p class="server-metrics-note">
+                Tak-сервер используется только для bootstrap, runtime, обновлений, backup и inter-server туннеля.
+                Интерфейсы и пиры обслуживаются только через Tic-сервер.
+            </p>
+            {% endif %}
             {% if servers_page.selected_server.available %}
             <div class="metric-stack">
                 <div class="metric-row">
@@ -136,7 +142,14 @@
                 <div><dt>Интерфейсов на сервере</dt><dd>{{ servers_page.selected_server.interface_count }}</dd></div>
                 <div><dt>Endpoint для интерфейсов</dt><dd>{{ servers_page.selected_server.endpoint_count }}</dd></div>
                 <div><dt>Пиров на Tic</dt><dd>{{ servers_page.selected_server.peer_count }}</dd></div>
+                <div><dt>Fallback via_tak</dt><dd>{{ servers_page.selected_server.tak_fallback_interface_count }}</dd></div>
             </dl>
+            {% if servers_page.selected_server.tak_fallback_interface_names %}
+            <div class="server-inline-warning">
+                <strong>Через Tak сейчас не идут:</strong>
+                <span>{{ servers_page.selected_server.tak_fallback_interface_names | join(", ") }}</span>
+            </div>
+            {% endif %}
             <div class="server-detail-lists">
                 <div>
                     <h4>Созданные интерфейсы</h4>
@@ -388,7 +401,11 @@
                     <div><dt>Интерфейсов на сервере</dt><dd>{{ server.interface_count }}</dd></div>
                     <div><dt>Endpoint для интерфейсов</dt><dd>{{ server.endpoint_count }}</dd></div>
                     <div><dt>Пиров на Tic</dt><dd>{{ server.peer_count }}</dd></div>
+                    <div><dt>Fallback via_tak</dt><dd>{{ server.tak_fallback_interface_count }}</dd></div>
                 </dl>
+                {% if server.tak_fallback_interface_count %}
+                <p class="server-inline-warning">via_tak fallback: {{ server.tak_fallback_interface_count }} · {{ server.tak_fallback_interface_names | join(", ") }}</p>
+                {% endif %}
                 <div class="server-card-actions">
                     <button class="ghost-button small" type="button" data-server-verify="{{ server.id }}">Перепроверить</button>
                     <button class="ghost-button small" type="button" data-server-restart-agent="{{ server.id }}">Перезагрузить агент</button>

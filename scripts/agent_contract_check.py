@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -228,7 +229,38 @@ def assert_common_payload(payload: dict[str, Any], interface_id: int | None = No
         raise ContractFailure(f"Payload {payload.get('action')} has no block_filters block")
 
 
+def assert_component_registry_split() -> None:
+    constants_path = ROOT_DIR / "agents" / "node-tic-agent" / "src" / "constants.js"
+    source = constants_path.read_text(encoding="utf-8")
+    tic_only_actions = [
+        "prepare_interface",
+        "create_interface",
+        "toggle_interface",
+        "update_interface_route_mode",
+        "update_interface_tak_server",
+        "update_interface_exclusion_filters",
+        "toggle_peer",
+        "recreate_peer",
+        "delete_peer",
+        "download_peer_config",
+        "download_interface_bundle",
+        "update_peer_block_filters",
+    ]
+    for action in tic_only_actions:
+        match = re.search(
+            rf"{re.escape(action)}:\s*\{{\s*components:\s*\[(?P<components>[^\]]+)\]",
+            source,
+            re.MULTILINE,
+        )
+        if match is None:
+            raise ContractFailure(f"{action} is missing in constants.js action registry")
+        components = {item.strip().strip("\"'") for item in match.group("components").split(",") if item.strip()}
+        if components != {"tic-agent"}:
+            raise ContractFailure(f"{action} must be restricted to tic-agent, got {sorted(components)}")
+
+
 def run() -> None:
+    assert_component_registry_split()
     fake_agent = ROOT_DIR / "scripts" / "fake_peer_agent.py"
     cleanup_contract_records()
     admin_id, user_id, interface_id, peer_id, contract_server_id, contract_tak_server_id, original_state = prepare_data()

@@ -119,6 +119,8 @@ Typical peer payload:
 
 ### Interface lifecycle
 
+These actions are supported only by `tic-agent`. `tak-agent` must reject them.
+
 `prepare_interface`
 - input: selected Tic server, optional Tak server, interface name;
 - output: suggested `listen_port`, `address_v4`;
@@ -143,6 +145,8 @@ Typical peer payload:
 - `target_state.exclusion_filters_enabled`
 
 ### Peer lifecycle
+
+These actions are supported only by `tic-agent`. `tak-agent` must reject them.
 
 `toggle_peer`
 - `target_state.is_enabled`
@@ -205,6 +209,45 @@ Typical peer payload:
 
 `cleanup_server_backups`
 - delete old server-local backups but keep latest copies requested by panel
+
+## 6.1 Tic <-> Tak tunnel
+
+- `route_mode=via_tak` uses a dedicated `AmneziaWG 2.0` tunnel between `Tic`
+  and `Tak`.
+- `Tic` is always the client and initiates/reconnects the tunnel itself.
+- `Tak` generates the tunnel config and passes it through the panel to the
+  bound `Tic`.
+- One `Tak` can serve many `Tic` servers, but one `Tic` currently uses only one
+  active `Tak`.
+- The tunnel listen port on `Tak` is random/non-standard.
+- Traffic of `via_tak` interfaces goes into the tunnel; system traffic of the
+  `Tic` host does not.
+- If the tunnel is down, affected interfaces temporarily fall back to
+  `standalone`; after recovery they return to `via_tak`.
+- `Tak` should perform outbound `SNAT/MASQUERADE` for tunneled traffic in the
+  first release.
+
+Planned first action set:
+
+- `provision_tak_tunnel` on `tak-agent`
+- `attach_tak_tunnel` on `tic-agent`
+- `verify_tak_tunnel_status` on both sides
+- `detach_tak_tunnel` on the side being unbound/stopped
+
+Planned first payload/result minimums:
+
+- `provision_tak_tunnel` -> `tunnel_id`, `listen_port`, `network_cidr`,
+  `tak_address_v4`, `tic_address_v4`, `amnezia_config`
+- `attach_tak_tunnel` -> `ok`, `tunnel_id`, optional `is_active`
+- `verify_tak_tunnel_status` -> `ok`, `exists`, `is_active`, `tunnel_id`
+- `detach_tak_tunnel` -> `ok`, `tunnel_id`, optional `detached`
+
+Planned ownership split:
+
+- `tak-agent` owns server-side tunnel allocation and `AmneziaWG 2.0` server
+  config generation;
+- `tic-agent` owns client-side attach/reconnect and runtime failover back to
+  `standalone`.
 
 ## 7. File Payload Shape
 

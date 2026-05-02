@@ -103,6 +103,8 @@ def upgrade() -> None:
         sa.Column("tic_server_id", sa.Integer(), sa.ForeignKey("servers.id"), nullable=False),
         sa.Column("tak_server_id", sa.Integer(), sa.ForeignKey("servers.id"), nullable=True),
         sa.Column("route_mode", route_mode, nullable=False),
+        sa.Column("tak_tunnel_fallback_active", sa.Boolean(), nullable=False),
+        sa.Column("tak_tunnel_last_status", sa.String(length=32), nullable=True),
         sa.Column("listen_port", sa.Integer(), nullable=False),
         sa.Column("address_v4", sa.String(length=64), nullable=False),
         sa.Column("address_v6", sa.String(length=64), nullable=True),

@@ -1,5 +1,7 @@
 "use strict";
 
+const crypto = require("node:crypto");
+
 function configAddress(addressV4) {
   return String(addressV4 || "").trim();
 }
@@ -36,6 +38,10 @@ function placeholderKey(parts) {
     .join(":");
   const encoded = Buffer.from(normalized, "utf8").toString("base64").replace(/=+$/g, "");
   return `${encoded}${"A".repeat(Math.max(0, 44 - encoded.length))}`.slice(0, 44);
+}
+
+function randomBase64(size = 32) {
+  return crypto.randomBytes(size).toString("base64");
 }
 
 function resolvedKey(value, fallbackParts) {
@@ -117,9 +123,70 @@ function renderPeerConfig(interfaceRecord, peerRecord) {
   ].join("\n");
 }
 
+function renderTakTunnelServerConfig(tunnelRecord) {
+  return [
+    "# Nelomai generated inter-server tunnel config",
+    `# Protocol target: ${String(tunnelRecord.protocol || "amneziawg-2.0")}`,
+    `# TunnelId: ${String(tunnelRecord.tunnel_id || "")}`,
+    `[Interface]`,
+    `ListenPort = ${Number(tunnelRecord.listen_port) || 0}`,
+    `Address = ${String(tunnelRecord.tak_address_v4 || "")}`,
+    `PrivateKey = ${String(tunnelRecord.server_private_key || "")}`,
+    `# NatMode = ${String(tunnelRecord.nat_mode || "masquerade")}`,
+    "",
+    `[Peer]`,
+    `# Role = tic-client`,
+    `AllowedIPs = ${String(tunnelRecord.tic_address_v4 || "")}`,
+    `PublicKey = ${String(tunnelRecord.client_public_key || "")}`,
+    `PersistentKeepalive = 21`,
+    ""
+  ].join("\n");
+}
+
+function renderTicTunnelClientConfig(tunnelRecord) {
+  return [
+    "# Nelomai generated inter-server tunnel config",
+    `# Protocol target: ${String(tunnelRecord.protocol || "amneziawg-2.0")}`,
+    `# TunnelId: ${String(tunnelRecord.tunnel_id || "")}`,
+    `[Interface]`,
+    `Address = ${String(tunnelRecord.tic_address_v4 || "")}`,
+    `PrivateKey = ${String(tunnelRecord.client_private_key || "")}`,
+    `# NatMode = ${String(tunnelRecord.nat_mode || "masquerade")}`,
+    "",
+    `[Peer]`,
+    `# Role = tak-server`,
+    `AllowedIPs = ${String(tunnelRecord.network_cidr || tunnelRecord.tak_address_v4 || "")}`,
+    `Endpoint = ${String(tunnelRecord.tak_server_host || "")}:${Number(tunnelRecord.listen_port) || 0}`,
+    `PublicKey = ${String(tunnelRecord.server_public_key || "")}`,
+    `PersistentKeepalive = 21`,
+    ""
+  ].join("\n");
+}
+
+function buildTakTunnelClientPayload(tunnelRecord) {
+  return {
+    protocol: String(tunnelRecord.protocol || "amneziawg-2.0"),
+    tunnel_id: String(tunnelRecord.tunnel_id || ""),
+    endpoint_host: String(tunnelRecord.tak_server_host || ""),
+    endpoint_port: Number(tunnelRecord.listen_port) || 0,
+    network_cidr: String(tunnelRecord.network_cidr || ""),
+    tak_address_v4: String(tunnelRecord.tak_address_v4 || ""),
+    tic_address_v4: String(tunnelRecord.tic_address_v4 || ""),
+    client_private_key: String(tunnelRecord.client_private_key || ""),
+    client_public_key: String(tunnelRecord.client_public_key || ""),
+    server_public_key: String(tunnelRecord.server_public_key || ""),
+    nat_mode: String(tunnelRecord.nat_mode || "masquerade"),
+    generated_at: String(tunnelRecord.updated_at || tunnelRecord.created_at || ""),
+  };
+}
+
 module.exports = {
+  randomBase64,
   peerFileName,
   peerLinuxFileName,
   renderInterfaceConfig,
-  renderPeerConfig
+  renderPeerConfig,
+  renderTakTunnelServerConfig,
+  renderTicTunnelClientConfig,
+  buildTakTunnelClientPayload
 };

@@ -75,6 +75,10 @@ operations explicitly:
 | `create_server_backup` | `tic-agent` / `tak-agent` | `backup.server.v1` |
 | `verify_server_backup_copy` | `tic-agent` / `tak-agent` | `backup.server.v1` |
 | `cleanup_server_backups` | `tic-agent` / `tak-agent` | `backup.server.v1` |
+| `provision_tak_tunnel` | `tak-agent` | `tunnel.tak.provision.v1` |
+| `attach_tak_tunnel` | `tic-agent` | `tunnel.tak.attach.v1` |
+| `verify_tak_tunnel_status` | `tic-agent` / `tak-agent` | `tunnel.tak.status.v1` |
+| `detach_tak_tunnel` | `tic-agent` / `tak-agent` | `tunnel.tak.detach.v1` |
 | `prepare_interface` | `tic-agent` | `interface.create.v1` |
 | `create_interface` | `tic-agent` | `interface.create.v1` |
 | `toggle_interface` | `tic-agent` | `interface.state.v1` |
@@ -87,6 +91,10 @@ operations explicitly:
 | `download_peer_config` | `tic-agent` | `peer.download.v1` |
 | `download_interface_bundle` | `tic-agent` | `peer.download_bundle.v1` |
 | `update_peer_block_filters` | `tic-agent` | `filters.block.v1` |
+
+Interface and peer lifecycle are intentionally Tic-only. `tak-agent` currently
+owns only server/bootstrap/runtime/update/backup actions and must reject
+interface/peer-level actions.
 
 ## Common Interface Payload
 
@@ -444,6 +452,99 @@ update is available:
 
 `update_server_agent` applies the update on the target server and may return the
 same shape with `status: "updated"`.
+
+### Tic <-> Tak tunnel model
+
+The current target model for `route_mode=via_tak` is:
+
+- `Tic` acts as the tunnel client.
+- `Tak` acts as the tunnel server.
+- The inter-server tunnel uses `AmneziaWG 2.0`.
+- Each `Tic -> Tak` binding gets its own dedicated inter-server tunnel.
+- One `Tak` may serve multiple `Tic` servers.
+- One `Tic` currently supports only one active `Tak` binding.
+- `Tak` generates the `AmneziaWG 2.0` tunnel configuration and hands it to the
+  panel; the panel passes it to the selected `Tic`.
+- The tunnel listen port on `Tak` is random/non-standard and not manually
+  editable in the current phase.
+- Only user traffic of interfaces running with `route_mode=via_tak` should
+  traverse the inter-server tunnel.
+- System traffic of the `Tic` host itself must stay local and must not be
+  redirected through `Tak`.
+- If the inter-server tunnel goes down, affected interfaces temporarily fall
+  back to `standalone`.
+- After the tunnel is restored, those interfaces return to `via_tak`.
+- `Tak` performs outbound `SNAT/MASQUERADE` for traffic received from the
+  `Tic` tunnel as the first-release default.
+
+### Planned tunnel lifecycle actions
+
+The first implementation slice should keep the tunnel lifecycle separate from
+the existing interface/peer actions and use dedicated actions:
+
+- `provision_tak_tunnel`
+  - component: `tak-agent`
+  - responsibility:
+    - allocate a random/non-standard listen port;
+    - allocate a dedicated point-to-point tunnel subnet, preferably `/30`;
+    - generate the server-side `AmneziaWG 2.0` config and metadata;
+    - persist the Tak-side tunnel runtime;
+    - return the data package that the panel will hand to the selected `Tic`.
+
+- `attach_tak_tunnel`
+  - component: `tic-agent`
+  - responsibility:
+    - receive the Tak-generated tunnel package from the panel;
+    - generate/persist the Tic-side client config;
+    - bring the inter-server tunnel up;
+    - mark the tunnel as active for the bound `Tak`.
+
+- `verify_tak_tunnel_status`
+  - component: `tic-agent` / `tak-agent`
+  - responsibility:
+    - report whether the inter-server tunnel exists and is active on that side;
+    - expose enough state for panel diagnostics and automatic fallback.
+
+- `detach_tak_tunnel`
+  - component: `tic-agent` / `tak-agent`
+  - responsibility:
+    - tear the tunnel down cleanly;
+    - remove or deactivate its runtime files;
+    - ensure affected interfaces return to `standalone`.
+
+Panel orchestration rules for this planned lifecycle:
+
+- tunnel provisioning starts when a `Tak` server is bound to a `Tic`;
+- the panel first calls `provision_tak_tunnel` on `tak-agent`;
+- the panel then calls `attach_tak_tunnel` on `tic-agent`;
+- normal `route_mode=via_tak` traffic is allowed only after both sides confirm
+  that the tunnel is active;
+- if either side reports the tunnel down, the panel and/or `tic-agent` should
+  force affected interfaces back to `standalone`.
+
+Planned payload highlights:
+
+- `provision_tak_tunnel` should receive:
+  - `server` (`Tak`);
+  - `tic_server` target metadata;
+  - desired tunnel purpose/version metadata.
+- `provision_tak_tunnel` should return:
+  - `tunnel_id`;
+  - `listen_port`;
+  - `network_cidr`;
+  - `tak_address_v4`;
+  - `tic_address_v4`;
+  - `amnezia_config` or equivalent structured server-side payload for `Tic`.
+- `attach_tak_tunnel` should receive:
+  - `server` (`Tic`);
+  - `tak_server` metadata;
+  - `tunnel_id`;
+  - the `Tak`-generated `amnezia_config` payload.
+- `verify_tak_tunnel_status` should return:
+  - `exists`;
+  - `is_active`;
+  - `tunnel_id`;
+  - optional last handshake / last error / endpoint metadata.
 
 `create_server_backup` asks the target server agent to prepare a server-side
 snapshot for a full panel backup. The response uses the same file payload shape

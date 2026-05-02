@@ -198,6 +198,11 @@
                                 <input type="checkbox" data-interface-toggle="{{ interface.id }}" {% if interface.is_enabled %}checked{% endif %}>
                                 <span class="slider"></span>
                             </label>
+                            {% if interface.route_mode.value == "via_tak" and interface.tak_tunnel_fallback_active %}
+                            <span class="interface-inline-warning">via_tak недоступен, действует fallback в standalone</span>
+                            {% elif interface.route_mode.value == "via_tak" and interface.tak_tunnel_last_status %}
+                            <span class="interface-inline-note">туннель: {{ interface.tak_tunnel_last_status }}</span>
+                            {% endif %}
                         </div>
                         <div class="interface-status-line">
                             <span class="availability {% if interface.is_invalid %}is-invalid{% elif interface.is_enabled %}is-online{% else %}is-offline{% endif %}">

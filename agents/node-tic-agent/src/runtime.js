@@ -8,7 +8,10 @@ const {
   peerFileName,
   peerLinuxFileName,
   renderInterfaceConfig,
-  renderPeerConfig
+  renderPeerConfig,
+  renderTakTunnelServerConfig,
+  renderTicTunnelClientConfig,
+  buildTakTunnelClientPayload
 } = require("./render");
 
 function runtimeRoot() {
@@ -53,6 +56,54 @@ function writeTextFile(targetPath, content) {
 
 function writeJsonFile(targetPath, value) {
   writeTextFile(targetPath, JSON.stringify(value, null, 2));
+}
+
+function tunnelsRoot() {
+  return path.join(runtimeRoot(), "tunnels");
+}
+
+function tunnelDirectory(tunnelRecord) {
+  return path.join(tunnelsRoot(), String(tunnelRecord.tunnel_id || "tunnel"));
+}
+
+function tunnelMetaPath(tunnelRecord) {
+  return path.join(tunnelDirectory(tunnelRecord), "tunnel.json");
+}
+
+function tunnelServerConfigPath(tunnelRecord) {
+  return path.join(tunnelDirectory(tunnelRecord), "server.amneziawg.conf");
+}
+
+function tunnelClientConfigPath(tunnelRecord) {
+  return path.join(tunnelDirectory(tunnelRecord), "client.amneziawg.conf");
+}
+
+function tunnelClientPayloadPath(tunnelRecord) {
+  return path.join(tunnelDirectory(tunnelRecord), "client-payload.json");
+}
+
+function systemTunnelRoot() {
+  return process.env.NELOMAI_AGENT_SYSTEM_TUNNEL_ROOT || "/etc/wireguard";
+}
+
+function systemTunnelName(tunnelRecord) {
+  const sequence = String(Number(tunnelRecord.sequence) || 0).padStart(5, "0");
+  const ticTail = String(Number(tunnelRecord.tic_server_id) || 0).slice(-3).padStart(3, "0");
+  const takTail = String(Number(tunnelRecord.tak_server_id) || 0).slice(-3).padStart(3, "0");
+  return `awg${sequence}${ticTail}${takTail}`;
+}
+
+function systemTunnelConfigPath(tunnelRecord) {
+  return path.join(systemTunnelRoot(), `${systemTunnelName(tunnelRecord)}.conf`);
+}
+
+function resolveTunnelQuickCommand() {
+  const explicit = String(process.env.NELOMAI_AGENT_TUNNEL_QUICK_CMD || "").trim();
+  if (explicit) {
+    return explicit;
+  }
+  const candidates = ["awg-quick", "amneziawg-quick", "wg-quick"];
+  return candidates.find((candidate) => commandExists(candidate)) || null;
 }
 
 function generateWireGuardKeyPair() {
@@ -114,6 +165,56 @@ function removePeerArtifacts(interfaceRecord, peerRecord) {
     fs.unlinkSync(peerPath);
   }
   syncInterfaceArtifacts(interfaceRecord);
+}
+
+function syncTunnelArtifacts(tunnelRecord) {
+  const directory = tunnelDirectory(tunnelRecord);
+  ensureDir(directory);
+  writeJsonFile(tunnelMetaPath(tunnelRecord), tunnelRecord);
+  const localRole = String(tunnelRecord.local_role || "").trim().toLowerCase();
+  if (localRole === "tic") {
+    writeTextFile(tunnelClientConfigPath(tunnelRecord), renderTicTunnelClientConfig(tunnelRecord));
+  } else {
+    writeTextFile(tunnelServerConfigPath(tunnelRecord), renderTakTunnelServerConfig(tunnelRecord));
+  }
+  writeJsonFile(tunnelClientPayloadPath(tunnelRecord), buildTakTunnelClientPayload(tunnelRecord));
+}
+
+function inspectTunnelArtifacts(tunnelRecord) {
+  const directory = tunnelDirectory(tunnelRecord);
+  const metaPath = tunnelMetaPath(tunnelRecord);
+  const serverConfigPath = tunnelServerConfigPath(tunnelRecord);
+  const clientConfigPath = tunnelClientConfigPath(tunnelRecord);
+  const clientPayloadPath = tunnelClientPayloadPath(tunnelRecord);
+  const localRole = String(tunnelRecord.local_role || "").trim().toLowerCase();
+  const systemConfigPath = localRole === "tic" ? systemTunnelConfigPath(tunnelRecord) : null;
+  const systemInterfaceName = localRole === "tic" ? systemTunnelName(tunnelRecord) : null;
+  return {
+    runtime_dir: directory,
+    meta_path: metaPath,
+    server_config_path: serverConfigPath,
+    client_config_path: clientConfigPath,
+    client_payload_path: clientPayloadPath,
+    system_config_path: systemConfigPath,
+    system_interface_name: systemInterfaceName,
+    runtime_dir_exists: fs.existsSync(directory) && fs.statSync(directory).isDirectory(),
+    meta_exists: fs.existsSync(metaPath) && fs.statSync(metaPath).isFile(),
+    server_config_exists: fs.existsSync(serverConfigPath) && fs.statSync(serverConfigPath).isFile(),
+    client_config_exists: fs.existsSync(clientConfigPath) && fs.statSync(clientConfigPath).isFile(),
+    client_payload_exists: fs.existsSync(clientPayloadPath) && fs.statSync(clientPayloadPath).isFile(),
+    system_config_exists: Boolean(systemConfigPath) && fs.existsSync(systemConfigPath) && fs.statSync(systemConfigPath).isFile(),
+    system_interface_exists: Boolean(systemInterfaceName) && childProcess.spawnSync("bash", ["-lc", `ip link show dev ${systemInterfaceName}`], {
+      encoding: "utf8"
+    }).status === 0
+  };
+}
+
+function removeTunnelArtifacts(tunnelRecord) {
+  const directory = tunnelDirectory(tunnelRecord);
+  if (!fs.existsSync(directory) || !fs.statSync(directory).isDirectory()) {
+    return;
+  }
+  fs.rmSync(directory, { recursive: true, force: true });
 }
 
 function collectInterfaceBundleEntries(interfaceRecord) {
@@ -415,6 +516,41 @@ function buildDeletePeerCommands(interfaceRecord, peerRecord) {
   ];
 }
 
+function buildAttachTunnelCommands(tunnelRecord) {
+  if (executionMode() !== "system") {
+    return [`# attach tunnel ${String(tunnelRecord.tunnel_id || "")} in filesystem mode`];
+  }
+  const quickCommand = resolveTunnelQuickCommand();
+  if (!quickCommand) {
+    throw new Error("System tunnel execution requires awg-quick, amneziawg-quick, or wg-quick in PATH");
+  }
+  const runtimeConfigPath = tunnelClientConfigPath(tunnelRecord);
+  const systemConfigPath = systemTunnelConfigPath(tunnelRecord);
+  const tunnelName = systemTunnelName(tunnelRecord);
+  return [
+    `install -d -m 700 ${systemTunnelRoot()}`,
+    `install -m 600 ${runtimeConfigPath} ${systemConfigPath}`,
+    `if ip link show dev ${tunnelName} >/dev/null 2>&1; then ${quickCommand} down ${tunnelName} || true; fi`,
+    `${quickCommand} up ${tunnelName}`
+  ];
+}
+
+function buildDetachTunnelCommands(tunnelRecord) {
+  if (executionMode() !== "system") {
+    return [`# detach tunnel ${String(tunnelRecord.tunnel_id || "")} in filesystem mode`];
+  }
+  const quickCommand = resolveTunnelQuickCommand();
+  if (!quickCommand) {
+    throw new Error("System tunnel execution requires awg-quick, amneziawg-quick, or wg-quick in PATH");
+  }
+  const systemConfigPath = systemTunnelConfigPath(tunnelRecord);
+  const tunnelName = systemTunnelName(tunnelRecord);
+  return [
+    `if ip link show dev ${tunnelName} >/dev/null 2>&1; then ${quickCommand} down ${tunnelName} || true; fi`,
+    `rm -f ${systemConfigPath}`
+  ];
+}
+
 function maybeRunSystemCommands(commands) {
   if (executionMode() !== "system") {
     return {
@@ -446,9 +582,17 @@ module.exports = {
   inspectRuntimeEnvironment,
   interfaceConfigPath,
   peerConfigPath,
+  tunnelDirectory,
+  tunnelMetaPath,
+  tunnelServerConfigPath,
+  tunnelClientConfigPath,
+  tunnelClientPayloadPath,
   syncInterfaceArtifacts,
   syncAllPeerArtifacts,
   syncPeerArtifacts,
+  syncTunnelArtifacts,
+  inspectTunnelArtifacts,
+  removeTunnelArtifacts,
   removePeerArtifacts,
   collectInterfaceBundleEntries,
   buildCreateInterfaceCommands,
@@ -457,7 +601,11 @@ module.exports = {
   buildRefreshInterfaceCommands,
   buildRecreatePeerCommands,
   buildDeletePeerCommands,
+  buildAttachTunnelCommands,
+  buildDetachTunnelCommands,
   maybeRunSystemCommands,
   systemInterfaceConfigPath,
-  systemPeerConfigPath
+  systemPeerConfigPath,
+  systemTunnelConfigPath,
+  systemTunnelName
 };

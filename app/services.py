@@ -194,6 +194,10 @@ ACTION_CAPABILITIES = {
     "create_server_backup": ["backup.server.v1"],
     "verify_server_backup_copy": ["backup.server.v1"],
     "cleanup_server_backups": ["backup.server.v1"],
+    "provision_tak_tunnel": ["tunnel.tak.provision.v1"],
+    "attach_tak_tunnel": ["tunnel.tak.attach.v1"],
+    "verify_tak_tunnel_status": ["tunnel.tak.status.v1"],
+    "detach_tak_tunnel": ["tunnel.tak.detach.v1"],
     "prepare_interface": ["interface.create.v1"],
     "create_interface": ["interface.create.v1"],
     "toggle_interface": ["interface.state.v1"],
@@ -254,6 +258,10 @@ AGENT_ACTION_LABELS_RU = {
     "cleanup_server_backups": "очистка бэкапов на сервере",
     "create_interface": "создание интерфейса",
     "create_server_backup": "создание серверного snapshot",
+    "provision_tak_tunnel": "подготовка межсерверного туннеля Tak",
+    "attach_tak_tunnel": "подключение межсерверного туннеля Tic",
+    "verify_tak_tunnel_status": "проверка межсерверного туннеля Tic/Tak",
+    "detach_tak_tunnel": "отключение межсерверного туннеля Tic/Tak",
     "delete_peer": "удаление пира",
     "download_interface_bundle": "скачивание архива интерфейса",
     "download_peer_config": "скачивание конфига пира",
@@ -305,6 +313,12 @@ def _component_from_server_type(server_type: ServerType | str | None) -> str:
 def _component_for_action(action: str) -> str:
     if action in {"bootstrap_server", "bootstrap_server_status", "bootstrap_server_input"}:
         return "server-agent"
+    if action == "provision_tak_tunnel":
+        return "tak-agent"
+    if action == "attach_tak_tunnel":
+        return "tic-agent"
+    if action in {"verify_tak_tunnel_status", "detach_tak_tunnel"}:
+        return "tic-agent / tak-agent"
     if action in {"prepare_interface", "create_interface", "toggle_interface", "update_interface_route_mode", "update_interface_tak_server", "update_interface_exclusion_filters", "toggle_peer", "recreate_peer", "delete_peer", "download_peer_config", "download_interface_bundle", "update_peer_block_filters"}:
         return "tic-agent"
     if action in {"create_server_backup", "verify_server_backup_copy", "cleanup_server_backups"}:
@@ -735,6 +749,10 @@ def _build_interface_executor_context(
     address_v4: str = "",
     agent_interface_id: str | None = None,
 ) -> SimpleNamespace:
+    if tic_server.server_type != ServerType.TIC:
+        raise InvalidInputError("Interface lifecycle can run only on Tic servers")
+    if tak_server is not None and tak_server.server_type != ServerType.TAK:
+        raise InvalidInputError("Tak endpoint must reference a Tak server")
     return SimpleNamespace(
         id=interface_id,
         agent_interface_id=agent_interface_id,
@@ -747,6 +765,13 @@ def _build_interface_executor_context(
         listen_port=listen_port,
         address_v4=address_v4,
     )
+
+
+def _ensure_interface_uses_tic_agent(interface: Interface) -> None:
+    if interface.tic_server is None or interface.tic_server.server_type != ServerType.TIC:
+        raise InvalidInputError("Interface lifecycle is available only for interfaces bound to Tic servers")
+    if interface.tak_server is not None and interface.tak_server.server_type != ServerType.TAK:
+        raise InvalidInputError("Interface has invalid Tak endpoint binding")
 
 
 def _build_server_executor_payload(
@@ -778,6 +803,177 @@ def _build_server_executor_payload(
     if extra:
         payload.update(extra)
     return payload
+
+
+def _server_agent_identity_payload(server: Server) -> dict[str, object]:
+    return {
+        "id": server.id,
+        "name": server.name,
+        "server_type": server.server_type.value,
+        "host": server.host,
+    }
+
+
+def _count_via_tak_interfaces_for_pair(
+    db: Session,
+    *,
+    tic_server_id: int,
+    tak_server_id: int,
+) -> int:
+    return int(
+        db.execute(
+            select(func.count(Interface.id)).where(
+                Interface.tic_server_id == tic_server_id,
+                Interface.tak_server_id == tak_server_id,
+                Interface.route_mode == RouteMode.VIA_TAK,
+            )
+        ).scalar_one()
+        or 0
+    )
+
+
+def _provision_and_attach_tak_tunnel(
+    db: Session,
+    *,
+    tic_server: Server,
+    tak_server: Server,
+    actor_user_id: int | None = None,
+) -> str:
+    provision_response = _run_agent_executor_logged(
+        db,
+        _build_server_executor_payload(
+            action="provision_tak_tunnel",
+            server=tak_server,
+            extra={"tic_server": _server_agent_identity_payload(tic_server)},
+        ),
+        actor_user_id=actor_user_id,
+    )
+    tunnel_id = str(provision_response.get("tunnel_id") or "").strip()
+    amnezia_config = provision_response.get("amnezia_config")
+    if not tunnel_id or not isinstance(amnezia_config, dict):
+        raise ServerOperationUnavailableError("Tak tunnel provision did not return tunnel_id/amnezia_config")
+    _run_agent_executor_logged(
+        db,
+        _build_server_executor_payload(
+            action="attach_tak_tunnel",
+            server=tic_server,
+            extra={
+                "tak_server": _server_agent_identity_payload(tak_server),
+                "tunnel_id": tunnel_id,
+                "amnezia_config": amnezia_config,
+            },
+        ),
+        actor_user_id=actor_user_id,
+    )
+    return tunnel_id
+
+
+def _detach_tak_tunnel_pair(
+    db: Session,
+    *,
+    tic_server: Server,
+    tak_server: Server,
+    actor_user_id: int | None = None,
+) -> None:
+    _run_agent_executor_logged(
+        db,
+        _build_server_executor_payload(
+            action="detach_tak_tunnel",
+            server=tic_server,
+            extra={"tak_server": _server_agent_identity_payload(tak_server)},
+        ),
+        actor_user_id=actor_user_id,
+    )
+    _run_agent_executor_logged(
+        db,
+        _build_server_executor_payload(
+            action="detach_tak_tunnel",
+            server=tak_server,
+            extra={"tic_server": _server_agent_identity_payload(tic_server)},
+        ),
+        actor_user_id=actor_user_id,
+    )
+
+
+def _reconcile_tak_tunnel_routes(db: Session) -> None:
+    if not settings.peer_agent_command:
+        return
+    interfaces = db.execute(
+        select(Interface)
+        .options(joinedload(Interface.tic_server), joinedload(Interface.tak_server))
+        .where(Interface.tak_server_id.is_not(None), Interface.route_mode == RouteMode.VIA_TAK)
+    ).scalars().all()
+    if not interfaces:
+        return
+
+    by_pair: dict[tuple[int, int], list[Interface]] = {}
+    for interface in interfaces:
+        if interface.tic_server is None or interface.tak_server is None:
+            continue
+        by_pair.setdefault((interface.tic_server_id, interface.tak_server_id), []).append(interface)
+
+    changed = False
+    for _, pair_interfaces in by_pair.items():
+        sample = pair_interfaces[0]
+        try:
+            response = _run_tic_executor(
+                _build_server_executor_payload(
+                    action="verify_tak_tunnel_status",
+                    server=sample.tic_server,
+                    extra={"tak_server": _server_agent_identity_payload(sample.tak_server)},
+                )
+            )
+            _validate_agent_contract_response(response)
+            if response.get("ok") is not True:
+                tunnel_status = {"is_active": False, "status": "error"}
+            else:
+                tunnel_status = response.get("tunnel_status") or {}
+        except Exception:
+            tunnel_status = {"is_active": False, "status": "error"}
+
+        is_active = bool(tunnel_status.get("is_active"))
+        status_label = str(tunnel_status.get("status") or ("active" if is_active else "error"))[:32]
+        for interface in pair_interfaces:
+            if is_active:
+                if interface.tak_tunnel_fallback_active:
+                    _run_agent_executor_logged(
+                        db,
+                        _build_tic_executor_payload(
+                            "update_interface_route_mode",
+                            interface,
+                            exclusion_filters_enabled=interface_exclusion_filters_enabled(db, interface),
+                            block_filters_enabled=block_filters_enabled(db),
+                            extra={"target_state": {"route_mode": RouteMode.VIA_TAK.value}},
+                        ),
+                    )
+                    interface.tak_tunnel_fallback_active = False
+                    changed = True
+                if interface.tak_tunnel_last_status != status_label:
+                    interface.tak_tunnel_last_status = status_label
+                    changed = True
+                db.add(interface)
+                continue
+
+            if not interface.tak_tunnel_fallback_active:
+                _run_agent_executor_logged(
+                    db,
+                    _build_tic_executor_payload(
+                        "update_interface_route_mode",
+                        interface,
+                        exclusion_filters_enabled=interface_exclusion_filters_enabled(db, interface),
+                        block_filters_enabled=block_filters_enabled(db),
+                        extra={"target_state": {"route_mode": RouteMode.STANDALONE.value}},
+                    ),
+                )
+                interface.tak_tunnel_fallback_active = True
+                changed = True
+            if interface.tak_tunnel_last_status != status_label:
+                interface.tak_tunnel_last_status = status_label
+                changed = True
+            db.add(interface)
+
+    if changed:
+        db.commit()
 
 
 def _validate_agent_contract_response(response: dict[str, object]) -> None:
@@ -1215,6 +1411,17 @@ def _build_diagnostics_recommendations(checks: list[DiagnosticsCheckView]) -> li
             action_url="/admin/servers",
         )
 
+    tak_tunnels_check = by_key.get("tak_tunnels")
+    if tak_tunnels_check and tak_tunnels_check.status != "ok":
+        add(
+            "tak_tunnels",
+            "Проверить межсерверные туннели Tic ↔ Tak",
+            "Часть интерфейсов с режимом via_tak может работать в fallback standalone. Нужно проверить проблемные пары Tic/Tak и восстановить общий межсерверный туннель.",
+            severity="warning" if tak_tunnels_check.status == "warning" else "error",
+            action_label="Открыть серверы",
+            action_url="/admin/servers",
+        )
+
     access_check = by_key.get("access_routes")
     if access_check and access_check.status != "ok":
         add(
@@ -1492,6 +1699,93 @@ def run_panel_diagnostics(db: Session, actor: User) -> DiagnosticsPageView:
     )
     if runtime_status != "ok":
         problem_nodes.append("Runtime серверных агентов")
+
+    tak_tunnel_status = "ok"
+    tak_tunnel_details: list[str] = []
+    via_tak_interfaces = (
+        db.execute(
+            select(Interface)
+            .options(joinedload(Interface.tic_server), joinedload(Interface.tak_server))
+            .where(Interface.route_mode == RouteMode.VIA_TAK, Interface.tak_server_id.is_not(None))
+            .order_by(Interface.id.asc())
+        )
+        .scalars()
+        .all()
+    )
+    if not via_tak_interfaces:
+        tak_tunnel_details.append("Активных связок via_tak нет.")
+    elif not settings.peer_agent_command:
+        tak_tunnel_status = "warning"
+        tak_tunnel_details.append("PEER_AGENT_COMMAND не задан, состояние межсерверных туннелей проверить нельзя.")
+    else:
+        tak_tunnel_action_links: list[DiagnosticsCheckView.ActionLinkView] = []
+        tak_tunnel_pairs: dict[tuple[int, int], list[Interface]] = {}
+        for interface in via_tak_interfaces:
+            if interface.tic_server is None or interface.tak_server is None:
+                continue
+            tak_tunnel_pairs.setdefault((interface.tic_server_id, interface.tak_server_id), []).append(interface)
+        tak_tunnel_details.append(f"Проверено пар Tic/Tak: {len(tak_tunnel_pairs)}")
+        degraded_pairs: list[str] = []
+        failed_pairs: list[str] = []
+        for pair_interfaces in tak_tunnel_pairs.values():
+            sample = pair_interfaces[0]
+            pair_label = f"{sample.tic_server.name} → {sample.tak_server.name}"
+            try:
+                response = _run_tic_executor(
+                    _build_server_executor_payload(
+                        action="verify_tak_tunnel_status",
+                        server=sample.tic_server,
+                        extra={"tak_server": _server_agent_identity_payload(sample.tak_server)},
+                    )
+                )
+                _validate_agent_contract_response(response)
+                tunnel_status = response.get("tunnel_status") or {}
+                is_active = bool(tunnel_status.get("is_active"))
+                status_value = str(tunnel_status.get("status") or ("active" if is_active else "unknown"))
+                if not is_active:
+                    tak_tunnel_status = "warning" if tak_tunnel_status == "ok" else tak_tunnel_status
+                    interface_names = ", ".join(sorted(interface.name for interface in pair_interfaces))
+                    degraded_pairs.append(f"{pair_label} ({status_value}) · интерфейсы: {interface_names}")
+            except ServerOperationUnavailableError as exc:
+                tak_tunnel_status = "warning" if tak_tunnel_status == "ok" else tak_tunnel_status
+                failed_pairs.append(f"{pair_label}: {exc}")
+                tak_tunnel_action_links.append(
+                    DiagnosticsCheckView.ActionLinkView(
+                        label=f"{sample.tic_server.name} ↔ {sample.tak_server.name}",
+                        url=f"/admin/servers?bucket=active&server_type=tic&selected_server_id={sample.tic_server.id}",
+                    )
+                )
+        if degraded_pairs:
+            tak_tunnel_details.append(f"Проблемные туннели: {'; '.join(degraded_pairs[:5])}")
+        if failed_pairs:
+            tak_tunnel_details.append(f"Не удалось проверить: {'; '.join(failed_pairs[:5])}")
+    if "tak_tunnel_action_links" in locals() and not tak_tunnel_action_links:
+        for pair_interfaces in tak_tunnel_pairs.values():
+            sample = pair_interfaces[0]
+            if not any(interface.tak_tunnel_fallback_active for interface in pair_interfaces):
+                continue
+            tak_tunnel_action_links.append(
+                DiagnosticsCheckView.ActionLinkView(
+                    label=f"{sample.tic_server.name} ↔ {sample.tak_server.name}",
+                    url=f"/admin/servers?bucket=active&server_type=tic&selected_server_id={sample.tic_server.id}",
+                )
+            )
+            if len(tak_tunnel_action_links) >= 5:
+                break
+    checks.append(
+        DiagnosticsCheckView(
+            key="tak_tunnels",
+            title="Межсерверные туннели Tic ↔ Tak",
+            status=tak_tunnel_status,
+            message="Общие туннели Tic/Tak для интерфейсов via_tak работают штатно." if tak_tunnel_status == "ok" else "Есть проблемы с общими туннелями Tic/Tak или их не удалось проверить.",
+            details=tak_tunnel_details,
+            source_label="Открыть серверы",
+            source_url="/admin/servers",
+        )
+    )
+    checks[-1].action_links = tak_tunnel_action_links[:5] if "tak_tunnel_action_links" in locals() else []
+    if tak_tunnel_status != "ok":
+        problem_nodes.append("Межсерверные туннели Tic ↔ Tak")
 
     access_status, access_message, access_details = _run_access_routes_diagnostics()
     checks.append(
@@ -1938,6 +2232,7 @@ def purge_expired_peers(db: Session, peer_ids: set[int] | None = None) -> int:
 
 def get_dashboard_data(db: Session, user: User, preview_mode: bool = False) -> UserDashboardView:
     purge_expired_peers(db)
+    _reconcile_tak_tunnel_routes(db)
     hydrated_user = db.execute(
         select(User)
         .options(
@@ -4541,6 +4836,7 @@ def get_admin_page_data(
     require_admin(actor)
     ensure_users_have_resources(db)
     ensure_default_settings(db)
+    _reconcile_tak_tunnel_routes(db)
 
     tic_servers = db.execute(
         select(Server).where(Server.server_type == ServerType.TIC).order_by(Server.id.asc())
@@ -4624,6 +4920,7 @@ def get_servers_page_data(
 ) -> ServersPageView:
     purge_expired_peers(db)
     require_admin(actor)
+    _reconcile_tak_tunnel_routes(db)
     bucket = bucket if bucket in {"active", "excluded"} else "active"
     server_type = server_type if server_type in {"all", "tic", "tak", "storage"} else "all"
     sort = sort if sort in {"load_desc", "load_asc"} else "load_desc"
@@ -4681,6 +4978,10 @@ def get_servers_page_data(
         if server_type != "all" and server_kind != server_type:
             continue
         interface_count = len(server.tic_interfaces)
+        tak_fallback_interfaces = sorted(
+            (interface.name for interface in server.tic_interfaces if interface.tak_tunnel_fallback_active),
+            key=str.lower,
+        )
         endpoint_count = len(server.tak_interfaces) if server.server_type == ServerType.TAK else len(server.tic_interfaces)
         peer_count = sum(len(interface.peers) for interface in server.tic_interfaces) if server.server_type == ServerType.TIC else 0
         status = _server_status(server)
@@ -4708,6 +5009,8 @@ def get_servers_page_data(
             is_excluded=server.is_excluded,
             owner_interface_names=sorted(interface.name for interface in server.tic_interfaces),
             endpoint_interface_names=sorted(interface.name for interface in server.tak_interfaces),
+            tak_fallback_interface_count=len(tak_fallback_interfaces),
+            tak_fallback_interface_names=tak_fallback_interfaces,
         )
         if server.is_excluded:
             excluded_servers.append(item)
@@ -4744,6 +5047,8 @@ def get_servers_page_data(
             is_excluded=selected_server.is_excluded,
             owner_interface_names=selected_server.owner_interface_names,
             endpoint_interface_names=selected_server.endpoint_interface_names,
+            tak_fallback_interface_count=selected_server.tak_fallback_interface_count,
+            tak_fallback_interface_names=selected_server.tak_fallback_interface_names,
         )
     return serialize_servers_page(
         active_servers,
@@ -5790,6 +6095,7 @@ def toggle_interface_state(db: Session, actor: User, interface_id: int) -> bool:
     require_admin(actor)
     interface = get_interface_by_id(db, interface_id)
     ensure_interface_is_valid(interface)
+    _ensure_interface_uses_tic_agent(interface)
     next_state = not any(peer.is_enabled for peer in interface.peers)
     if interface.is_pending_owner and next_state:
         raise PermissionDeniedError("Assign an owner before enabling the interface")
@@ -5840,11 +6146,21 @@ def update_interface_route_mode(
     require_admin(actor)
     interface = get_interface_by_id(db, interface_id)
     ensure_interface_is_valid(interface)
+    _ensure_interface_uses_tic_agent(interface)
+    previous_tak_server = interface.tak_server
+    previous_route_mode = interface.route_mode
     next_mode = payload.route_mode
     if next_mode == RouteMode.VIA_TAK and interface.tak_server_id is None:
         raise PermissionDeniedError("Tak server is required for via_tak mode")
     if interface.tak_server_id is None:
         next_mode = RouteMode.STANDALONE
+    if next_mode == RouteMode.VIA_TAK and interface.tak_server is not None:
+        _provision_and_attach_tak_tunnel(
+            db,
+            tic_server=interface.tic_server,
+            tak_server=interface.tak_server,
+            actor_user_id=actor.id,
+        )
     _run_agent_executor_logged(
         db,
         _build_tic_executor_payload(
@@ -5857,7 +6173,28 @@ def update_interface_route_mode(
         actor_user_id=actor.id,
     )
     interface.route_mode = next_mode
+    if next_mode != RouteMode.VIA_TAK:
+        interface.tak_tunnel_fallback_active = False
+        interface.tak_tunnel_last_status = None
     db.add(interface)
+    db.flush()
+    if (
+        previous_tak_server is not None
+        and previous_route_mode == RouteMode.VIA_TAK
+        and next_mode != RouteMode.VIA_TAK
+        and _count_via_tak_interfaces_for_pair(
+            db,
+            tic_server_id=interface.tic_server_id,
+            tak_server_id=previous_tak_server.id,
+        )
+        == 0
+    ):
+        _detach_tak_tunnel_pair(
+            db,
+            tic_server=interface.tic_server,
+            tak_server=previous_tak_server,
+            actor_user_id=actor.id,
+        )
     db.commit()
     db.refresh(interface)
     return interface.route_mode if interface.tak_server_id else RouteMode.STANDALONE
@@ -5872,6 +6209,9 @@ def update_interface_tak_server(
     require_admin(actor)
     interface = get_interface_by_id(db, interface_id)
     ensure_interface_is_valid(interface)
+    _ensure_interface_uses_tic_agent(interface)
+    previous_tak_server = interface.tak_server
+    previous_route_mode = interface.route_mode
     next_tak_server = None
     next_route_mode = interface.route_mode
     if payload.tak_server_id is not None:
@@ -5891,6 +6231,13 @@ def update_interface_tak_server(
         listen_port=interface.listen_port,
         address_v4=interface.address_v4,
     )
+    if next_tak_server is not None and next_route_mode == RouteMode.VIA_TAK:
+        _provision_and_attach_tak_tunnel(
+            db,
+            tic_server=interface.tic_server,
+            tak_server=next_tak_server,
+            actor_user_id=actor.id,
+        )
     _run_agent_executor_logged(
         db,
         _build_tic_executor_payload(
@@ -5909,7 +6256,32 @@ def update_interface_tak_server(
     )
     interface.tak_server_id = next_tak_server.id if next_tak_server else None
     interface.route_mode = next_route_mode if next_tak_server else RouteMode.STANDALONE
+    if next_tak_server is None or next_route_mode != RouteMode.VIA_TAK:
+        interface.tak_tunnel_fallback_active = False
+        interface.tak_tunnel_last_status = None
     db.add(interface)
+    db.flush()
+    if (
+        previous_tak_server is not None
+        and previous_route_mode == RouteMode.VIA_TAK
+        and (
+            next_tak_server is None
+            or next_route_mode != RouteMode.VIA_TAK
+            or previous_tak_server.id != next_tak_server.id
+        )
+        and _count_via_tak_interfaces_for_pair(
+            db,
+            tic_server_id=interface.tic_server_id,
+            tak_server_id=previous_tak_server.id,
+        )
+        == 0
+    ):
+        _detach_tak_tunnel_pair(
+            db,
+            tic_server=interface.tic_server,
+            tak_server=previous_tak_server,
+            actor_user_id=actor.id,
+        )
     db.commit()
     db.refresh(interface)
     return interface.tak_server_id, interface.route_mode if interface.tak_server_id else RouteMode.STANDALONE
@@ -5924,6 +6296,7 @@ def update_interface_exclusion_filters(
     require_admin(actor)
     interface = get_interface_by_id(db, interface_id)
     ensure_interface_is_valid(interface)
+    _ensure_interface_uses_tic_agent(interface)
     next_enabled = payload.enabled if exclusion_filters_enabled(db) else False
     _run_agent_executor_logged(
         db,
@@ -5950,6 +6323,7 @@ def create_peer_for_interface(db: Session, actor: User, interface_id: int, previ
     if actor.role != UserRole.ADMIN and interface.user_id != actor.id:
         raise PermissionDeniedError("Users can edit only their own interfaces")
     ensure_interface_is_valid(interface)
+    _ensure_interface_uses_tic_agent(interface)
     if len(interface.peers) >= interface.peer_limit:
         raise PermissionDeniedError("Peer limit reached")
     next_slot = next_free_peer_slot(db, interface.id)
@@ -5974,6 +6348,7 @@ def toggle_peer_state(db: Session, actor: User, peer_id: int, preview_mode: bool
     if actor.role != UserRole.ADMIN and peer.interface.user_id != actor.id:
         raise PermissionDeniedError("Users can edit only their own peers")
     ensure_interface_is_valid(peer.interface)
+    _ensure_interface_uses_tic_agent(peer.interface)
     next_state = not peer.is_enabled
     _run_agent_executor_logged(
         db,
@@ -6001,6 +6376,7 @@ def update_peer_comment(db: Session, actor: User, peer_id: int, payload: PeerCom
     if actor.role != UserRole.ADMIN and peer.interface.user_id != actor.id:
         raise PermissionDeniedError("Users can edit only their own peers")
     ensure_interface_is_valid(peer.interface)
+    _ensure_interface_uses_tic_agent(peer.interface)
     peer.comment = payload.comment.strip() if payload.comment and payload.comment.strip() else None
     db.add(peer)
     db.commit()
@@ -6015,6 +6391,7 @@ def recreate_peer(db: Session, actor: User, peer_id: int, preview_mode: bool) ->
     if actor.role != UserRole.ADMIN and peer.interface.user_id != actor.id:
         raise PermissionDeniedError("Users can edit only their own peers")
     ensure_interface_is_valid(peer.interface)
+    _ensure_interface_uses_tic_agent(peer.interface)
     _run_peer_agent_action(db, "recreate_peer", peer.interface, peer, actor_user_id=actor.id)
     peer.handshake_at = None
     peer.traffic_7d_mb = 0
@@ -6034,6 +6411,7 @@ def delete_peer(db: Session, actor: User, peer_id: int, preview_mode: bool) -> N
     if actor.role != UserRole.ADMIN and peer.interface.user_id != actor.id:
         raise PermissionDeniedError("Users can edit only their own peers")
     ensure_interface_is_valid(peer.interface)
+    _ensure_interface_uses_tic_agent(peer.interface)
     _run_peer_agent_action(db, "delete_peer", peer.interface, peer, actor_user_id=actor.id)
     db.delete(peer)
     db.commit()
@@ -6044,6 +6422,7 @@ def download_peer_config(db: Session, actor: User, peer_id: int) -> dict[str, ob
     if actor.role != UserRole.ADMIN and peer.interface.user_id != actor.id:
         raise PermissionDeniedError("Users can download only their own peers")
     ensure_interface_is_valid(peer.interface)
+    _ensure_interface_uses_tic_agent(peer.interface)
     response = _run_peer_agent_action(db, "download_peer_config", peer.interface, peer, actor_user_id=actor.id)
     return _extract_download_payload(
         response,
@@ -6064,6 +6443,7 @@ def download_peer_config_public(db: Session, peer_id: int, token_id: str) -> dic
     if peer_expires_at is not None and peer_expires_at <= now:
         raise EntityNotFoundError("Peer expired")
     ensure_interface_is_valid(peer.interface)
+    _ensure_interface_uses_tic_agent(peer.interface)
     response = _run_peer_agent_action(db, "download_peer_config", peer.interface, peer)
     return _extract_download_payload(
         response,
@@ -6077,6 +6457,7 @@ def download_interface_bundle(db: Session, actor: User, interface_id: int) -> di
     if actor.role != UserRole.ADMIN and interface.user_id != actor.id:
         raise PermissionDeniedError("Users can download only their own interfaces")
     ensure_interface_is_valid(interface)
+    _ensure_interface_uses_tic_agent(interface)
     response = _run_agent_executor_logged(
         db,
         _build_tic_executor_payload(
@@ -6119,6 +6500,7 @@ def update_peer_block_filters(
     require_admin(actor)
     peer = get_peer_by_id(db, peer_id)
     ensure_interface_is_valid(peer.interface)
+    _ensure_interface_uses_tic_agent(peer.interface)
     next_enabled = payload.enabled if block_filters_enabled(db) else False
     _run_agent_executor_logged(
         db,

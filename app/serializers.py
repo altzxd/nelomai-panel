@@ -21,14 +21,19 @@ from app.version import get_panel_version
 
 
 def serialize_interface(interface: Interface, expires_at) -> InterfaceView:
+    configured_route_mode = interface.route_mode if interface.tak_server_id else RouteMode.STANDALONE
+    effective_route_mode = RouteMode.STANDALONE if interface.tak_tunnel_fallback_active else configured_route_mode
     return InterfaceView(
         id=interface.id,
         agent_interface_id=interface.agent_interface_id,
         name=interface.name,
         tic_server_name=interface.tic_server.name,
-        route_mode=interface.route_mode if interface.tak_server_id else RouteMode.STANDALONE,
+        route_mode=configured_route_mode,
+        effective_route_mode=effective_route_mode,
         tak_server_id=interface.tak_server_id,
         tak_server_name=interface.tak_server.name if getattr(interface, "tak_server", None) is not None else None,
+        tak_tunnel_fallback_active=interface.tak_tunnel_fallback_active,
+        tak_tunnel_last_status=interface.tak_tunnel_last_status,
         available_tak_options=[
             {"id": server.id, "name": server.name}
             for server in getattr(interface, "available_tak_options", [])
@@ -130,6 +135,8 @@ def serialize_interface_summary(interface: Interface) -> InterfaceSummaryView:
     traffic_30d_total_gb = round(sum(peer.traffic_30d_mb for peer in interface.peers) / 1024, 1)
     active_peers = sum(1 for peer in interface.peers if peer.is_enabled)
     is_pending_owner = interface.is_pending_owner
+    configured_route_mode = interface.route_mode if interface.tak_server_id else RouteMode.STANDALONE
+    effective_route_mode = RouteMode.STANDALONE if interface.tak_tunnel_fallback_active else configured_route_mode
     return InterfaceSummaryView(
         id=interface.id,
         agent_interface_id=interface.agent_interface_id,
@@ -139,7 +146,10 @@ def serialize_interface_summary(interface: Interface) -> InterfaceSummaryView:
         owner_login=None if is_pending_owner else interface.user.login,
         tic_server_id=interface.tic_server_id,
         tic_server_name=interface.tic_server.name,
-        route_mode=interface.route_mode if interface.tak_server_id else RouteMode.STANDALONE,
+        route_mode=configured_route_mode,
+        effective_route_mode=effective_route_mode,
+        tak_tunnel_fallback_active=interface.tak_tunnel_fallback_active,
+        tak_tunnel_last_status=interface.tak_tunnel_last_status,
         traffic_30d_gb=traffic_30d_total_gb,
         active_peers=active_peers,
         peer_limit=interface.peer_limit,

@@ -53,6 +53,22 @@ const ACTION_REGISTRY = {
     components: ["tic-agent", "tak-agent"],
     capabilities: ["backup.server.v1"]
   },
+  provision_tak_tunnel: {
+    components: ["tak-agent"],
+    capabilities: ["tunnel.tak.provision.v1"]
+  },
+  attach_tak_tunnel: {
+    components: ["tic-agent"],
+    capabilities: ["tunnel.tak.attach.v1"]
+  },
+  verify_tak_tunnel_status: {
+    components: ["tic-agent", "tak-agent"],
+    capabilities: ["tunnel.tak.status.v1"]
+  },
+  detach_tak_tunnel: {
+    components: ["tic-agent", "tak-agent"],
+    capabilities: ["tunnel.tak.detach.v1"]
+  },
   prepare_interface: {
     components: ["tic-agent"],
     capabilities: ["interface.create.v1"]

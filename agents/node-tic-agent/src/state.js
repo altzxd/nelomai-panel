@@ -3,6 +3,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { buildBootstrapPlan, bootstrapExecutionMode, executeBootstrapPlan } = require("./bootstrap");
+const { randomBase64, buildTakTunnelClientPayload } = require("./render");
 
 function deployedStateRoot() {
   const nodeAgentRoot = path.resolve(__dirname, "..");
@@ -67,7 +68,8 @@ function defaultState() {
   return {
     interfaces: [],
     servers: [],
-    bootstrap_tasks: []
+    bootstrap_tasks: [],
+    tunnels: []
   };
 }
 
@@ -93,6 +95,9 @@ function loadState() {
   if (!Array.isArray(parsed.bootstrap_tasks)) {
     parsed.bootstrap_tasks = [];
   }
+  if (!Array.isArray(parsed.tunnels)) {
+    parsed.tunnels = [];
+  }
   return parsed;
 }
 
@@ -115,6 +120,11 @@ function applyPendingInput(task, executionResult) {
 
 function nextSequence(items) {
   const max = items.reduce((current, item) => Math.max(current, Number(item.id) || 0), 0);
+  return max + 1;
+}
+
+function nextTunnelSequence(items) {
+  const max = items.reduce((current, item) => Math.max(current, Number(item.sequence) || 0), 0);
   return max + 1;
 }
 
@@ -223,6 +233,240 @@ function ensureServerRecord(state, serverPayload) {
       touch(record);
     }
   return record;
+}
+
+function findTunnelRecord(state, payload) {
+  const tunnelId = String((payload && payload.tunnel_id) || "").trim();
+  const serverPayload = payload && payload.server && typeof payload.server === "object" ? payload.server : null;
+  const ticServerPayload = payload && payload.tic_server && typeof payload.tic_server === "object" ? payload.tic_server : null;
+  const takServerPayload = payload && payload.tak_server && typeof payload.tak_server === "object" ? payload.tak_server : null;
+  const selfServerId = Number(serverPayload && serverPayload.id);
+  const ticServerId = Number(
+    (ticServerPayload && ticServerPayload.id) ||
+    (serverPayload && serverPayload.server_type === "tic" ? serverPayload.id : 0)
+  );
+  const takServerId = Number(
+    (takServerPayload && takServerPayload.id) ||
+    (serverPayload && serverPayload.server_type === "tak" ? serverPayload.id : 0)
+  );
+  const tunnels = Array.isArray(state && state.tunnels) ? state.tunnels : [];
+  return (
+    tunnels.find((item) => tunnelId && String(item.tunnel_id || "") === tunnelId) ||
+    tunnels.find((item) =>
+      Number.isInteger(ticServerId) && ticServerId > 0 &&
+      Number.isInteger(takServerId) && takServerId > 0 &&
+      Number(item.tic_server_id) === ticServerId &&
+      Number(item.tak_server_id) === takServerId
+    ) ||
+    tunnels.find((item) =>
+      Number.isInteger(selfServerId) && selfServerId > 0 &&
+      (Number(item.tic_server_id) === selfServerId || Number(item.tak_server_id) === selfServerId)
+    ) ||
+    null
+  );
+}
+
+function buildAmneziaConfig(record) {
+  return buildTakTunnelClientPayload(record);
+}
+
+function buildTakTunnelPlan(state, payload) {
+  const serverPayload = payload && payload.server && typeof payload.server === "object" ? payload.server : null;
+  const ticServerPayload = payload && payload.tic_server && typeof payload.tic_server === "object" ? payload.tic_server : null;
+  const takServerPayload = payload && payload.tak_server && typeof payload.tak_server === "object" ? payload.tak_server : serverPayload;
+  if (!ticServerPayload || !takServerPayload) {
+    throw new Error("Tunnel payload must include Tic and Tak server metadata");
+  }
+  const ticServerId = Number(ticServerPayload.id);
+  const takServerId = Number(takServerPayload.id);
+  if (!Number.isInteger(ticServerId) || ticServerId <= 0 || !Number.isInteger(takServerId) || takServerId <= 0) {
+    throw new Error("Tunnel payload must include valid Tic/Tak server ids");
+  }
+  const existing = findTunnelRecord(state, payload);
+  if (existing) {
+    return {
+      ...existing,
+      amnezia_config: buildAmneziaConfig(existing)
+    };
+  }
+
+  const tunnels = Array.isArray(state.tunnels) ? state.tunnels : [];
+  const sequence = nextTunnelSequence(tunnels);
+  const subnetOctet = Math.min(10 + sequence, 254);
+  const listenPort = 42000 + sequence;
+  const record = {
+    id: nextSequence(tunnels),
+    sequence,
+    tunnel_id: `tak-tunnel-${takServerId}-${String(sequence).padStart(5, "0")}`,
+    protocol: "amneziawg-2.0",
+    tic_server_id: ticServerId,
+    tic_server_name: String(ticServerPayload.name || `tic-${ticServerId}`),
+    tic_server_host: String(ticServerPayload.host || ""),
+    tak_server_id: takServerId,
+    tak_server_name: String(takServerPayload.name || `tak-${takServerId}`),
+    tak_server_host: String(takServerPayload.host || ""),
+    listen_port: listenPort,
+    network_cidr: `172.27.${subnetOctet}.0/30`,
+    tak_address_v4: `172.27.${subnetOctet}.1/30`,
+    tic_address_v4: `172.27.${subnetOctet}.2/30`,
+    server_private_key: randomBase64(),
+    server_public_key: randomBase64(),
+    client_private_key: randomBase64(),
+    client_public_key: randomBase64(),
+    nat_mode: "masquerade",
+    status: "planned",
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+  return {
+    ...record,
+    amnezia_config: buildAmneziaConfig(record)
+  };
+}
+
+function provisionTakTunnelRecord(state, payload) {
+  if (!Array.isArray(state.tunnels)) {
+    state.tunnels = [];
+  }
+  const existing = findTunnelRecord(state, payload);
+  if (existing) {
+    existing.status = "provisioned";
+    touch(existing);
+    saveState(state);
+    return {
+      ...existing,
+      amnezia_config: buildAmneziaConfig(existing)
+    };
+  }
+
+  const plan = buildTakTunnelPlan(state, payload);
+  const persisted = {
+    id: plan.id,
+    sequence: plan.sequence,
+    tunnel_id: plan.tunnel_id,
+    protocol: plan.protocol,
+    tic_server_id: plan.tic_server_id,
+    tic_server_name: plan.tic_server_name,
+    tic_server_host: plan.tic_server_host,
+    tak_server_id: plan.tak_server_id,
+    tak_server_name: plan.tak_server_name,
+    tak_server_host: plan.tak_server_host,
+    listen_port: plan.listen_port,
+    network_cidr: plan.network_cidr,
+    tak_address_v4: plan.tak_address_v4,
+    tic_address_v4: plan.tic_address_v4,
+    server_private_key: plan.server_private_key,
+    server_public_key: plan.server_public_key,
+    client_private_key: plan.client_private_key,
+    client_public_key: plan.client_public_key,
+    nat_mode: plan.nat_mode,
+    status: "provisioned",
+    created_at: plan.created_at,
+    updated_at: new Date().toISOString()
+  };
+  state.tunnels.push(persisted);
+  saveState(state);
+  return {
+    ...persisted,
+    amnezia_config: buildAmneziaConfig(persisted)
+  };
+}
+
+function getTakTunnelRecord(state, payload) {
+  const existing = findTunnelRecord(state, payload);
+  if (!existing) {
+    return null;
+  }
+  return {
+    ...existing,
+    amnezia_config: buildAmneziaConfig(existing)
+  };
+}
+
+function attachTakTunnelRecord(state, payload) {
+  if (!Array.isArray(state.tunnels)) {
+    state.tunnels = [];
+  }
+  const serverPayload = payload && payload.server && typeof payload.server === "object" ? payload.server : null;
+  const takServerPayload = payload && payload.tak_server && typeof payload.tak_server === "object" ? payload.tak_server : null;
+  const amneziaConfig = payload && payload.amnezia_config && typeof payload.amnezia_config === "object" ? payload.amnezia_config : null;
+  if (!serverPayload || String(serverPayload.server_type || "").trim() !== "tic") {
+    throw new Error("attach_tak_tunnel requires Tic server payload");
+  }
+  if (!takServerPayload || String(takServerPayload.server_type || "").trim() !== "tak") {
+    throw new Error("attach_tak_tunnel requires Tak server payload");
+  }
+  if (!amneziaConfig) {
+    throw new Error("attach_tak_tunnel requires amnezia_config");
+  }
+
+  const tunnelId = String(amneziaConfig.tunnel_id || payload.tunnel_id || "").trim();
+  if (!tunnelId) {
+    throw new Error("attach_tak_tunnel requires tunnel_id");
+  }
+
+  let existing = state.tunnels.find((item) => String(item.tunnel_id || "") === tunnelId) || null;
+  if (!existing) {
+    existing = {
+      id: nextSequence(state.tunnels),
+      sequence: nextTunnelSequence(state.tunnels),
+      tunnel_id: tunnelId,
+      protocol: String(amneziaConfig.protocol || "amneziawg-2.0"),
+      tic_server_id: Number(serverPayload.id) || 0,
+      tic_server_name: String(serverPayload.name || ""),
+      tic_server_host: String(serverPayload.host || ""),
+      tak_server_id: Number(takServerPayload.id) || 0,
+      tak_server_name: String(takServerPayload.name || ""),
+      tak_server_host: String(takServerPayload.host || ""),
+      created_at: new Date().toISOString(),
+    };
+    state.tunnels.push(existing);
+  }
+
+  existing.local_role = "tic";
+  existing.protocol = String(amneziaConfig.protocol || existing.protocol || "amneziawg-2.0");
+  existing.tic_server_id = Number(serverPayload.id) || existing.tic_server_id || 0;
+  existing.tic_server_name = String(serverPayload.name || existing.tic_server_name || "");
+  existing.tic_server_host = String(serverPayload.host || existing.tic_server_host || "");
+  existing.tak_server_id = Number(takServerPayload.id) || existing.tak_server_id || 0;
+  existing.tak_server_name = String(takServerPayload.name || existing.tak_server_name || "");
+  existing.tak_server_host = String(takServerPayload.host || existing.tak_server_host || "");
+  existing.listen_port = Number(amneziaConfig.endpoint_port) || Number(existing.listen_port) || 0;
+  existing.network_cidr = String(amneziaConfig.network_cidr || existing.network_cidr || "");
+  existing.tak_address_v4 = String(amneziaConfig.tak_address_v4 || existing.tak_address_v4 || "");
+  existing.tic_address_v4 = String(amneziaConfig.tic_address_v4 || existing.tic_address_v4 || "");
+  existing.client_private_key = String(amneziaConfig.client_private_key || existing.client_private_key || "");
+  existing.client_public_key = String(amneziaConfig.client_public_key || existing.client_public_key || "");
+  existing.server_public_key = String(amneziaConfig.server_public_key || existing.server_public_key || "");
+  existing.nat_mode = String(amneziaConfig.nat_mode || existing.nat_mode || "masquerade");
+  existing.status = "attached";
+  touch(existing);
+  saveState(state);
+  return {
+    ...existing,
+    amnezia_config: {
+      ...amneziaConfig
+    }
+  };
+}
+
+function detachTakTunnelRecord(state, payload) {
+  if (!Array.isArray(state.tunnels)) {
+    state.tunnels = [];
+  }
+  const existing = findTunnelRecord(state, payload);
+  if (!existing) {
+    throw new Error("detach_tak_tunnel requires known tunnel");
+  }
+  existing.status = "detached";
+  existing.last_error = null;
+  existing.last_handshake_at = null;
+  touch(existing);
+  saveState(state);
+  return {
+    ...existing,
+    amnezia_config: buildAmneziaConfig(existing)
+  };
 }
 
 function createBootstrapTaskRecord(state, payload) {
@@ -775,6 +1019,12 @@ function deletePeerRecord(state, payload) {
 module.exports = {
   loadState,
   saveState,
+  findTunnelRecord,
+  buildTakTunnelPlan,
+  provisionTakTunnelRecord,
+  getTakTunnelRecord,
+  attachTakTunnelRecord,
+  detachTakTunnelRecord,
   findFirstFreePort,
   findFirstFreeAddress,
   createInterfaceRecord,

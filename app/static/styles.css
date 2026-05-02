@@ -507,6 +507,18 @@ textarea[disabled] {
 
 .peer-name { font-weight: 800; font-size: 1.1rem; }
 .peer-card p, .route-mode { color: var(--muted); margin-top: 6px; }
+.interface-tak-fallback,
+.interface-tak-status {
+    margin-top: 8px;
+}
+.interface-tak-fallback,
+.interface-inline-warning {
+    color: #c95656;
+}
+.interface-tak-status,
+.interface-inline-note {
+    color: var(--muted);
+}
 .peer-metrics {
     display: grid;
     gap: 10px;
@@ -1214,6 +1226,14 @@ textarea[disabled] {
 .admin-interface-head p,
 .interface-status-line {
     color: var(--muted);
+}
+
+.interface-inline-warning,
+.interface-inline-note {
+    display: block;
+    margin-top: 8px;
+    max-width: 260px;
+    font-size: 0.92rem;
 }
 
 .admin-interface-metrics,
@@ -2235,4 +2255,13 @@ textarea[disabled] {
     .client-list {
         grid-template-columns: repeat(4, minmax(0, 1fr));
     }
+}
+
+.server-inline-warning {
+    margin: 12px 0 0;
+    color: #c95656;
+}
+
+.server-inline-warning strong {
+    color: inherit;
 }

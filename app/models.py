@@ -156,6 +156,8 @@ class Interface(Base):
     tic_server_id: Mapped[int] = mapped_column(ForeignKey("servers.id"))
     tak_server_id: Mapped[int | None] = mapped_column(ForeignKey("servers.id"), nullable=True)
     route_mode: Mapped[RouteMode] = mapped_column(Enum(RouteMode), default=RouteMode.STANDALONE)
+    tak_tunnel_fallback_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    tak_tunnel_last_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     listen_port: Mapped[int] = mapped_column(Integer)
     address_v4: Mapped[str] = mapped_column(String(64))
     address_v6: Mapped[str | None] = mapped_column(String(64), nullable=True)

@@ -44,6 +44,17 @@ def apply_legacy_runtime_schema_updates(engine: Engine) -> list[str]:
             connection.execute(text("ALTER TABLE interfaces ADD COLUMN exclusion_filters_enabled BOOLEAN DEFAULT 1"))
             connection.execute(text("UPDATE interfaces SET exclusion_filters_enabled = 1 WHERE exclusion_filters_enabled IS NULL"))
         applied.append("interfaces.exclusion_filters_enabled")
+    if "tak_tunnel_fallback_active" not in interface_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE interfaces ADD COLUMN tak_tunnel_fallback_active BOOLEAN DEFAULT 0"))
+            connection.execute(
+                text("UPDATE interfaces SET tak_tunnel_fallback_active = 0 WHERE tak_tunnel_fallback_active IS NULL")
+            )
+        applied.append("interfaces.tak_tunnel_fallback_active")
+    if "tak_tunnel_last_status" not in interface_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE interfaces ADD COLUMN tak_tunnel_last_status VARCHAR(32)"))
+        applied.append("interfaces.tak_tunnel_last_status")
 
     server_columns = {column["name"] for column in inspect(engine).get_columns("servers")}
     with engine.begin() as connection:

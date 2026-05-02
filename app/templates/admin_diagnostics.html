@@ -119,6 +119,13 @@
                     <a class="ghost-button small" href="{{ check.source_url }}">{{ check.source_label or "Открыть" }}</a>
                 </div>
                 {% endif %}
+                {% if check.action_links %}
+                <div class="job-actions">
+                    {% for action in check.action_links %}
+                    <a class="ghost-button small" href="{{ action.url }}">{{ action.label }}</a>
+                    {% endfor %}
+                </div>
+                {% endif %}
             </article>
             {% endfor %}
         </section>

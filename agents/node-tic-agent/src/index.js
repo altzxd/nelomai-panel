@@ -9,12 +9,17 @@ const { ok, fail } = require("./response");
 const {
   loadState,
   saveState,
+  findTunnelRecord,
   findFirstFreePort,
   findFirstFreeAddress,
   createInterfaceRecord,
   createBootstrapTaskRecord,
   findBootstrapTaskRecord,
   completeBootstrapTaskRecord,
+  buildTakTunnelPlan,
+  provisionTakTunnelRecord,
+  attachTakTunnelRecord,
+  detachTakTunnelRecord,
   refreshServerStatusRecord,
   checkServerUpdateRecord,
   applyServerUpdateRecord,
@@ -37,6 +42,11 @@ const {
 } = require("./backup");
 const {
   peerConfigPath,
+  tunnelDirectory,
+  tunnelMetaPath,
+  tunnelServerConfigPath,
+  tunnelClientConfigPath,
+  tunnelClientPayloadPath,
   syncInterfaceArtifacts,
   syncAllPeerArtifacts,
   syncPeerArtifacts,
@@ -48,9 +58,14 @@ const {
   buildRefreshInterfaceCommands,
   buildRecreatePeerCommands,
   buildDeletePeerCommands,
+  buildAttachTunnelCommands,
+  buildDetachTunnelCommands,
   inspectRuntimeEnvironment,
   maybeRunSystemCommands,
-  ensureSystemKeyMaterial
+  ensureSystemKeyMaterial,
+  syncTunnelArtifacts,
+  inspectTunnelArtifacts,
+  removeTunnelArtifacts
 } = require("./runtime");
 
 function readStdin() {
@@ -104,6 +119,109 @@ function bootstrapExecutionSnapshot(task) {
       prompt: pendingInput.prompt || null,
       step_index: Number(pendingInput.step_index) || null,
     } : null,
+  };
+}
+
+function pathExistsAs(targetPath, kind) {
+  if (!targetPath || !fs.existsSync(targetPath)) {
+    return false;
+  }
+  const stat = fs.statSync(targetPath);
+  if (kind === "file") {
+    return stat.isFile();
+  }
+  if (kind === "dir") {
+    return stat.isDirectory();
+  }
+  return true;
+}
+
+function tunnelArtifactSnapshot(tunnelRecord) {
+  if (!tunnelRecord || typeof tunnelRecord !== "object") {
+    return {
+      directory: null,
+      meta_path: null,
+      server_config_path: null,
+      client_config_path: null,
+      client_payload_path: null,
+      system_config_path: null,
+      system_interface_name: null,
+      directory_exists: false,
+      meta_exists: false,
+      server_config_exists: false,
+      client_config_exists: false,
+      client_payload_exists: false,
+      system_config_exists: false,
+      system_interface_exists: false
+    };
+  }
+  return inspectTunnelArtifacts(tunnelRecord);
+}
+
+function tunnelStatusEnvelope(state, payload) {
+  const component = String(payload.component || process.env.NELOMAI_AGENT_COMPONENT || "tic-agent").trim() || "tic-agent";
+  const record = findTunnelRecord(state, payload);
+  const artifacts = tunnelArtifactSnapshot(record);
+  const requestedTunnelId = String((payload && payload.tunnel_id) || "").trim() || null;
+  const serverPayload = payload && payload.server && typeof payload.server === "object" ? payload.server : null;
+  const ticServerPayload = payload && payload.tic_server && typeof payload.tic_server === "object" ? payload.tic_server : null;
+  const takServerPayload = payload && payload.tak_server && typeof payload.tak_server === "object" ? payload.tak_server : null;
+  const inferredTicServerId = Number((ticServerPayload && ticServerPayload.id) || (serverPayload && serverPayload.server_type === "tic" ? serverPayload.id : 0));
+  const inferredTakServerId = Number((takServerPayload && takServerPayload.id) || (serverPayload && serverPayload.server_type === "tak" ? serverPayload.id : 0));
+  const recordStatus = record ? String(record.status || "").trim().toLowerCase() : "";
+  const exists = Boolean(
+    record ||
+    artifacts.directory_exists ||
+    artifacts.meta_exists ||
+    artifacts.server_config_exists ||
+    artifacts.client_payload_exists
+  );
+  const localRole = record ? String(record.local_role || "").trim().toLowerCase() : "";
+  const isActive =
+    localRole === "tic"
+      ? Boolean(artifacts.system_interface_exists)
+      : ["active", "attached", "provisioned"].includes(recordStatus);
+  const computedStatus =
+    !exists
+      ? "missing"
+      : localRole === "tic" && ["active", "attached"].includes(recordStatus) && !artifacts.system_interface_exists
+        ? "degraded"
+        : record
+          ? String(record.status || "present")
+          : "present";
+
+  return {
+    tunnel_id: record ? String(record.tunnel_id || "") || requestedTunnelId : requestedTunnelId,
+    protocol: record ? String(record.protocol || "amneziawg-2.0") : "amneziawg-2.0",
+    exists,
+    is_active: isActive,
+    status: computedStatus,
+    component,
+    tic_server_id: record
+      ? Number(record.tic_server_id) || null
+      : Number.isInteger(inferredTicServerId) && inferredTicServerId > 0
+        ? inferredTicServerId
+        : null,
+    tak_server_id: record
+      ? Number(record.tak_server_id) || null
+      : Number.isInteger(inferredTakServerId) && inferredTakServerId > 0
+        ? inferredTakServerId
+        : null,
+    tic_server_name: record
+      ? String(record.tic_server_name || "") || null
+      : ticServerPayload
+        ? String(ticServerPayload.name || "") || null
+        : null,
+    tak_server_name: record
+      ? String(record.tak_server_name || "") || null
+      : takServerPayload
+        ? String(takServerPayload.name || "") || null
+        : null,
+    listen_port: record ? Number(record.listen_port) || null : null,
+    network_cidr: record ? String(record.network_cidr || "") || null : null,
+    last_handshake_at: record && record.last_handshake_at ? String(record.last_handshake_at) : null,
+    last_error: record && record.last_error ? String(record.last_error) : null,
+    runtime_artifacts: artifacts
   };
 }
 
@@ -387,6 +505,85 @@ function realInterfaceResponse(payload) {
 function realServerResponse(payload) {
   const action = String(payload.action || "");
   const state = loadState();
+
+  if (action === "provision_tak_tunnel") {
+    try {
+      const tunnel = provisionTakTunnelRecord(state, payload);
+      syncTunnelArtifacts(tunnel);
+      return ok({
+        status: "provisioned",
+        tunnel_id: tunnel.tunnel_id,
+        protocol: tunnel.protocol,
+        listen_port: tunnel.listen_port,
+        network_cidr: tunnel.network_cidr,
+        tak_address_v4: tunnel.tak_address_v4,
+        tic_address_v4: tunnel.tic_address_v4,
+        nat_mode: tunnel.nat_mode,
+        amnezia_config: tunnel.amnezia_config
+      });
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (action === "attach_tak_tunnel") {
+    try {
+      const tunnel = attachTakTunnelRecord(state, payload);
+      syncTunnelArtifacts(tunnel);
+      const execution = maybeRunSystemCommands(buildAttachTunnelCommands(tunnel));
+      return ok({
+        status: "attached",
+        tunnel_id: tunnel.tunnel_id,
+        protocol: tunnel.protocol,
+        listen_port: tunnel.listen_port,
+        network_cidr: tunnel.network_cidr,
+        tak_address_v4: tunnel.tak_address_v4,
+        tic_address_v4: tunnel.tic_address_v4,
+        nat_mode: tunnel.nat_mode,
+        amnezia_config: tunnel.amnezia_config,
+        execution_mode: execution.mode,
+        system_commands_applied: execution.applied
+      });
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (action === "verify_tak_tunnel_status") {
+    try {
+      return ok({
+        status: "checked",
+        action,
+        component: payload.component,
+        tunnel_status: tunnelStatusEnvelope(state, payload)
+      });
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (action === "detach_tak_tunnel") {
+    try {
+      const tunnel = detachTakTunnelRecord(state, payload);
+      const execution = maybeRunSystemCommands(buildDetachTunnelCommands(tunnel));
+      removeTunnelArtifacts(tunnel);
+      return ok({
+        status: "detached",
+        tunnel_id: tunnel.tunnel_id,
+        protocol: tunnel.protocol,
+        execution_mode: execution.mode,
+        system_commands_applied: execution.applied,
+        tunnel_status: {
+          tunnel_id: tunnel.tunnel_id,
+          protocol: tunnel.protocol,
+          detached: true,
+          is_active: false
+        }
+      });
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : String(error));
+    }
+  }
 
   if (action === "bootstrap_server") {
     try {
