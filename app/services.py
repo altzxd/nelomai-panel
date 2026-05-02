@@ -250,6 +250,7 @@ AUDIT_EVENT_TYPE_LABELS = {
     "updates.agent_check": "Проверка обновлений агента",
     "updates.panel_check": "Проверка обновлений панели",
     "updates.panel_check_failed": "Ошибка проверки обновлений панели",
+    "tak_tunnels.manual_attention_required": "Туннель Tic/Tak требует ручного вмешательства",
 }
 
 AGENT_ACTION_LABELS_RU = {
@@ -413,6 +414,9 @@ def write_audit_log(
 PANEL_JOB_STUCK_AFTER = timedelta(minutes=15)
 PANEL_JOB_PROBLEM_STATUSES = {PanelJobStatus.FAILED, PanelJobStatus.STUCK}
 PANEL_JOB_ACTIVE_STATUSES = {PanelJobStatus.QUEUED, PanelJobStatus.RUNNING, PanelJobStatus.STUCK}
+TAK_TUNNEL_REPAIR_STATE_KEY = "tak_tunnel_repair_state_json"
+TAK_TUNNEL_AUTO_REPAIR_FAILURE_LIMIT = 5
+TAK_TUNNEL_AUTO_REPAIR_BACKOFF_SECONDS = (60, 300, 900, 3600, 10800)
 PANEL_JOB_TYPE_LABELS = {
     "server_bootstrap": "Добавление сервера",
     "expired_peers_cleanup": "Очистка истёкших пиров",
@@ -432,6 +436,118 @@ PANEL_JOB_STATUS_LABELS = {
     PanelJobStatus.CANCELLED: "Остановлена",
     PanelJobStatus.STUCK: "Зависла",
 }
+
+
+def _tak_tunnel_pair_key(tic_server_id: int, tak_server_id: int) -> str:
+    return f"tic:{tic_server_id}|tak:{tak_server_id}"
+
+
+def _tak_tunnel_parse_datetime(raw_value: object) -> datetime | None:
+    if not raw_value:
+        return None
+    try:
+        value = datetime.fromisoformat(str(raw_value))
+    except (TypeError, ValueError):
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _load_tak_tunnel_repair_state(db: Session) -> dict[str, dict[str, object]]:
+    row = db.get(AppSetting, TAK_TUNNEL_REPAIR_STATE_KEY)
+    if row is None or not row.value:
+        return {}
+    try:
+        payload = json.loads(row.value)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    normalized: dict[str, dict[str, object]] = {}
+    for key, value in payload.items():
+        if isinstance(key, str) and isinstance(value, dict):
+            normalized[key] = dict(value)
+    return normalized
+
+
+def _save_tak_tunnel_repair_state(db: Session, state: dict[str, dict[str, object]]) -> None:
+    row = db.get(AppSetting, TAK_TUNNEL_REPAIR_STATE_KEY)
+    payload = json.dumps(state, ensure_ascii=False) if state else ""
+    if row is None:
+        row = AppSetting(key=TAK_TUNNEL_REPAIR_STATE_KEY, value=payload)
+    else:
+        row.value = payload
+    db.add(row)
+
+
+def _tak_tunnel_auto_repair_backoff_seconds(failure_count: int) -> int:
+    if failure_count <= 0:
+        return 0
+    index = min(failure_count - 1, len(TAK_TUNNEL_AUTO_REPAIR_BACKOFF_SECONDS) - 1)
+    return TAK_TUNNEL_AUTO_REPAIR_BACKOFF_SECONDS[index]
+
+
+def _tak_tunnel_pair_runtime_status(
+    pair_state: dict[str, object],
+    *,
+    now: datetime,
+) -> tuple[str | None, datetime | None]:
+    if bool(pair_state.get("manual_attention_required")):
+        return "manual_attention_required", None
+    cooldown_until = _tak_tunnel_parse_datetime(pair_state.get("cooldown_until"))
+    if cooldown_until is not None and cooldown_until > now:
+        return "cooldown", cooldown_until
+    return None, cooldown_until
+
+
+def _tak_tunnel_register_failure(
+    repair_state: dict[str, dict[str, object]],
+    *,
+    tic_server_id: int,
+    tak_server_id: int,
+    now: datetime,
+) -> tuple[dict[str, object], bool]:
+    pair_key = _tak_tunnel_pair_key(tic_server_id, tak_server_id)
+    current = dict(repair_state.get(pair_key) or {})
+    failure_count = int(current.get("failure_count") or 0) + 1
+    backoff_seconds = _tak_tunnel_auto_repair_backoff_seconds(failure_count)
+    updated = {
+        "failure_count": failure_count,
+        "last_failure_at": now.isoformat(),
+        "last_attempt_at": now.isoformat(),
+        "cooldown_until": (now + timedelta(seconds=backoff_seconds)).isoformat() if backoff_seconds else "",
+        "manual_attention_required": failure_count >= TAK_TUNNEL_AUTO_REPAIR_FAILURE_LIMIT,
+        "last_recovered_at": current.get("last_recovered_at") or "",
+    }
+    changed = current != updated
+    repair_state[pair_key] = updated
+    return updated, changed
+
+
+def _tak_tunnel_register_success(
+    repair_state: dict[str, dict[str, object]],
+    *,
+    tic_server_id: int,
+    tak_server_id: int,
+    now: datetime,
+) -> bool:
+    pair_key = _tak_tunnel_pair_key(tic_server_id, tak_server_id)
+    current = dict(repair_state.get(pair_key) or {})
+    if not current:
+        return False
+    updated = {
+        "failure_count": 0,
+        "last_failure_at": "",
+        "last_attempt_at": now.isoformat(),
+        "cooldown_until": "",
+        "manual_attention_required": False,
+        "last_recovered_at": now.isoformat(),
+    }
+    if current == updated:
+        return False
+    repair_state[pair_key] = updated
+    return True
 
 
 def _job_logs(job: PanelJob) -> list[str]:
@@ -908,6 +1024,8 @@ def _reconcile_tak_tunnel_routes(db: Session) -> None:
     if not interfaces:
         return
 
+    now = utc_now()
+    repair_state = _load_tak_tunnel_repair_state(db)
     by_pair: dict[tuple[int, int], list[Interface]] = {}
     for interface in interfaces:
         if interface.tic_server is None or interface.tak_server is None:
@@ -919,6 +1037,9 @@ def _reconcile_tak_tunnel_routes(db: Session) -> None:
         sample = pair_interfaces[0]
         healed_during_reconcile = False
         previous_status_label = "unknown"
+        pair_state_changed = False
+        pair_state = dict(repair_state.get(_tak_tunnel_pair_key(sample.tic_server_id, sample.tak_server_id)) or {})
+        blocked_status, cooldown_until = _tak_tunnel_pair_runtime_status(pair_state, now=now)
         try:
             response = _run_tic_executor(
                 _build_server_executor_payload(
@@ -939,7 +1060,11 @@ def _reconcile_tak_tunnel_routes(db: Session) -> None:
             tunnel_status.get("status") or ("active" if bool(tunnel_status.get("is_active")) else "error")
         )[:32]
 
-        if not bool(tunnel_status.get("is_active")):
+        if not bool(tunnel_status.get("is_active")) and blocked_status is None:
+            focused_pair_state = _load_tak_tunnel_repair_state(db).get(
+                _tak_tunnel_pair_key(focused_tic_server_id, focused_tak_server_id),
+                {},
+            )
             try:
                 _provision_and_attach_tak_tunnel(
                     db,
@@ -961,9 +1086,28 @@ def _reconcile_tak_tunnel_routes(db: Session) -> None:
                         healed_during_reconcile = True
             except Exception:
                 db.rollback()
+            if not healed_during_reconcile:
+                pair_state, state_changed = _tak_tunnel_register_failure(
+                    repair_state,
+                    tic_server_id=sample.tic_server_id,
+                    tak_server_id=sample.tak_server_id,
+                    now=now,
+                )
+                blocked_status, cooldown_until = _tak_tunnel_pair_runtime_status(pair_state, now=now)
+                pair_state_changed = pair_state_changed or state_changed
+                changed = changed or state_changed
 
         is_active = bool(tunnel_status.get("is_active"))
         status_label = str(tunnel_status.get("status") or ("active" if is_active else "error"))[:32]
+        if is_active:
+            changed = _tak_tunnel_register_success(
+                repair_state,
+                tic_server_id=sample.tic_server_id,
+                tak_server_id=sample.tak_server_id,
+                now=now,
+            ) or changed
+        elif blocked_status is not None:
+            status_label = blocked_status
         if healed_during_reconcile and is_active:
             status_label = "recovered"
             write_audit_log(
@@ -980,10 +1124,32 @@ def _reconcile_tak_tunnel_routes(db: Session) -> None:
                         "tak_server_id": sample.tak_server.id,
                         "tak_server_name": sample.tak_server.name,
                         "previous_status": previous_status_label,
+                        "failure_count_before_recovery": int(pair_state.get("failure_count") or 0),
                         "interface_names": sorted(interface.name for interface in pair_interfaces),
                     },
                     ensure_ascii=False,
                 ),
+                commit=False,
+            )
+        if status_label == "manual_attention_required" and pair_state_changed:
+            details = {
+                "tic_server_id": sample.tic_server.id,
+                "tic_server_name": sample.tic_server.name,
+                "tak_server_id": sample.tak_server.id,
+                "tak_server_name": sample.tak_server.name,
+                "failure_count": int(pair_state.get("failure_count") or 0),
+                "interface_names": sorted(interface.name for interface in pair_interfaces),
+            }
+            if cooldown_until is not None:
+                details["cooldown_until"] = cooldown_until.isoformat()
+            write_audit_log(
+                db,
+                event_type="tak_tunnels.manual_attention_required",
+                severity="warning",
+                message=f"Tak tunnel requires manual attention: tic={sample.tic_server.name}, tak={sample.tak_server.name}",
+                message_ru=f"Автовосстановление туннеля Tic/Tak остановлено: требуется ручное вмешательство для пары {sample.tic_server.name} → {sample.tak_server.name}",
+                server_id=sample.tic_server.id,
+                details=json.dumps(details, ensure_ascii=False),
                 commit=False,
             )
         for interface in pair_interfaces:
@@ -1032,6 +1198,7 @@ def _reconcile_tak_tunnel_routes(db: Session) -> None:
                     changed = True
 
     if changed:
+        _save_tak_tunnel_repair_state(db, repair_state)
         db.commit()
 
 
@@ -1096,6 +1263,23 @@ def _format_audit_details_ru(log: AuditLog) -> str | None:
             parts.append(f"пара: {tic_server_name} → {tak_server_name}".strip())
         if previous_status:
             parts.append(f"до восстановления: {previous_status}")
+        if isinstance(interface_names, list) and interface_names:
+            parts.append(f"интерфейсы: {', '.join(str(item) for item in interface_names[:6])}")
+        return " | ".join(part for part in parts if part) or log.details
+
+    if log.event_type == "tak_tunnels.manual_attention_required" and isinstance(details, dict):
+        tic_server_name = str(details.get("tic_server_name") or "")
+        tak_server_name = str(details.get("tak_server_name") or "")
+        failure_count = int(details.get("failure_count") or 0)
+        cooldown_until = str(details.get("cooldown_until") or "")
+        interface_names = details.get("interface_names") or []
+        parts = []
+        if tic_server_name or tak_server_name:
+            parts.append(f"пара: {tic_server_name} → {tak_server_name}".strip())
+        if failure_count:
+            parts.append(f"неудачных попыток: {failure_count}")
+        if cooldown_until:
+            parts.append(f"cooldown до: {cooldown_until}")
         if isinstance(interface_names, list) and interface_names:
             parts.append(f"интерфейсы: {', '.join(str(item) for item in interface_names[:6])}")
         return " | ".join(part for part in parts if part) or log.details
@@ -1840,6 +2024,9 @@ def run_panel_diagnostics(
         degraded_pairs: list[str] = []
         failed_pairs: list[str] = []
         recovered_pairs: list[str] = []
+        cooldown_pairs: list[str] = []
+        manual_attention_pairs: list[str] = []
+        repair_state = _load_tak_tunnel_repair_state(db)
         for pair_interfaces in tak_tunnel_pairs.values():
             sample = pair_interfaces[0]
             if focused_tic_server_id is not None and sample.tic_server_id != focused_tic_server_id:
@@ -1847,6 +2034,13 @@ def run_panel_diagnostics(
             if focused_tak_server_id is not None and sample.tak_server_id != focused_tak_server_id:
                 continue
             pair_label = f"{sample.tic_server.name} → {sample.tak_server.name}"
+            pair_state = dict(repair_state.get(_tak_tunnel_pair_key(sample.tic_server_id, sample.tak_server_id)) or {})
+            failure_count = int(pair_state.get("failure_count") or 0)
+            cooldown_until = _tak_tunnel_parse_datetime(pair_state.get("cooldown_until"))
+            if bool(pair_state.get("manual_attention_required")):
+                manual_attention_pairs.append(f"{pair_label} В· РЅРµСѓРґР°С‡РЅС‹С… РїРѕРїС‹С‚РѕРє: {failure_count}")
+            elif cooldown_until is not None and cooldown_until > utc_now():
+                cooldown_pairs.append(f"{pair_label} В· retry after {cooldown_until.isoformat()}")
             if any(
                 interface.tak_tunnel_last_status == "recovered" and not interface.tak_tunnel_fallback_active
                 for interface in pair_interfaces
@@ -1884,6 +2078,22 @@ def run_panel_diagnostics(
             tak_tunnel_details.append(f"Не удалось проверить: {'; '.join(failed_pairs[:5])}")
         if recovered_pairs:
             tak_tunnel_details.append(f"Автовосстановлены: {'; '.join(recovered_pairs[:5])}")
+        if cooldown_pairs:
+            tak_tunnel_details.append(f"Р’ cooldown: {'; '.join(cooldown_pairs[:5])}")
+        if manual_attention_pairs:
+            tak_tunnel_details.append(f"РўСЂРµР±СѓСЋС‚ СЂСѓС‡РЅРѕРіРѕ РІРјРµС€Р°С‚РµР»СЊСЃС‚РІР°: {'; '.join(manual_attention_pairs[:5])}")
+        tak_tunnel_action_links.append(
+            DiagnosticsCheckView.ActionLinkView(
+                label="Логи автовосстановления",
+                url="/admin/logs?event_type=tak_tunnels.auto_recovered",
+            )
+        )
+        tak_tunnel_action_links.append(
+            DiagnosticsCheckView.ActionLinkView(
+                label="Логи ручного внимания",
+                url="/admin/logs?event_type=tak_tunnels.manual_attention_required",
+            )
+        )
     if "tak_tunnel_action_links" in locals() and not tak_tunnel_action_links:
         for pair_interfaces in tak_tunnel_pairs.values():
             sample = pair_interfaces[0]
@@ -1932,6 +2142,14 @@ def run_panel_diagnostics(
                     else "Туннель выбранной пары неактивен или требует внимания."
                 )
                 pair_details.append(f"Статус агента: {raw_status}")
+                failure_count = int(focused_pair_state.get("failure_count") or 0)
+                if bool(focused_pair_state.get("manual_attention_required")):
+                    pair_details.append("РђРІС‚РѕРІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёРµ РѕСЃС‚Р°РЅРѕРІР»РµРЅРѕ: С‚СЂРµР±СѓРµС‚СЃСЏ СЂСѓС‡РЅРѕРµ РІРјРµС€Р°С‚РµР»СЊСЃС‚РІРѕ.")
+                elif failure_count:
+                    pair_details.append(f"РќРµСѓРґР°С‡РЅС‹С… РїРѕРїС‹С‚РѕРє РїРѕРґСЂСЏРґ: {failure_count}")
+                cooldown_until = _tak_tunnel_parse_datetime(focused_pair_state.get("cooldown_until"))
+                if cooldown_until is not None and cooldown_until > utc_now():
+                    pair_details.append(f"РџРѕРІС‚РѕСЂРЅР°СЏ РїРѕРїС‹С‚РєР° РЅРµ СЂР°РЅСЊС€Рµ: {cooldown_until.isoformat()}")
                 interface_names = sorted(
                     interface.name
                     for interface in tak_tunnel_pairs.get((focused_tic_server_id, focused_tak_server_id), [])
@@ -1960,6 +2178,8 @@ def run_panel_diagnostics(
                 message=pair_message,
                 details=pair_details,
                 server_url=f"/admin/servers?bucket=active&selected_server_id={focused_pair.tic_server.id}",
+                auto_recovered_logs_url=f"/admin/logs?event_type=tak_tunnels.auto_recovered&server_id={focused_pair.tic_server.id}",
+                manual_attention_logs_url=f"/admin/logs?event_type=tak_tunnels.manual_attention_required&server_id={focused_pair.tic_server.id}",
             )
     checks.append(
         DiagnosticsCheckView(
@@ -5285,6 +5505,9 @@ def repair_tak_tunnel_pair(db: Session, actor: User, *, tic_server_id: int, tak_
         tak_server=tak_server,
         actor_user_id=actor.id,
     )
+    repair_state = _load_tak_tunnel_repair_state(db)
+    if _tak_tunnel_register_success(repair_state, tic_server_id=tic_server_id, tak_server_id=tak_server_id, now=utc_now()):
+        _save_tak_tunnel_repair_state(db, repair_state)
     _reconcile_tak_tunnel_routes(db)
 
 

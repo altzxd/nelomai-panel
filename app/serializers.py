@@ -33,6 +33,8 @@ def _tak_tunnel_status_label(status: str | None) -> str | None:
         "provisioned": "подготовлен",
         "missing": "отсутствует",
     }
+    labels["cooldown"] = "ожидает повторную попытку"
+    labels["manual_attention_required"] = "требует ручного вмешательства"
     return labels.get(normalized, normalized)
 
 
