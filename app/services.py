@@ -5271,6 +5271,23 @@ def get_server_by_id(db: Session, server_id: int) -> Server:
     return server
 
 
+def repair_tak_tunnel_pair(db: Session, actor: User, *, tic_server_id: int, tak_server_id: int) -> None:
+    require_admin(actor)
+    tic_server = get_server_by_id(db, tic_server_id)
+    tak_server = get_server_by_id(db, tak_server_id)
+    if tic_server.server_type != ServerType.TIC:
+        raise EntityNotFoundError("Tic server not found")
+    if tak_server.server_type != ServerType.TAK:
+        raise EntityNotFoundError("Tak server not found")
+    _provision_and_attach_tak_tunnel(
+        db,
+        tic_server=tic_server,
+        tak_server=tak_server,
+        actor_user_id=actor.id,
+    )
+    _reconcile_tak_tunnel_routes(db)
+
+
 def get_server_bootstrap_task(db: Session, task_id: int) -> ServerBootstrapTask:
     task = db.execute(select(ServerBootstrapTask).where(ServerBootstrapTask.id == task_id)).scalar_one_or_none()
     if task is None:

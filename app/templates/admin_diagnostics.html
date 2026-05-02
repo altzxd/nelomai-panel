@@ -78,6 +78,11 @@
             {% if diagnostics_page.focused_tak_tunnel.server_url %}
             <div class="job-actions">
                 <a class="ghost-button small" href="{{ diagnostics_page.focused_tak_tunnel.server_url }}">Открыть Tic-сервер</a>
+                <form method="post" action="/admin/diagnostics/tak-tunnels/repair">
+                    <input type="hidden" name="focused_tic_server_id" value="{{ request.query_params.get('focused_tic_server_id', '') }}">
+                    <input type="hidden" name="focused_tak_server_id" value="{{ request.query_params.get('focused_tak_server_id', '') }}">
+                    <button type="submit" class="primary-button small">Восстановить пару</button>
+                </form>
             </div>
             {% endif %}
         </section>

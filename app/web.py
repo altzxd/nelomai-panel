@@ -4,7 +4,7 @@ from datetime import UTC
 from zoneinfo import ZoneInfo
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Response, status
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -109,6 +109,7 @@ from app.services import (
     get_agent_contract_page,
     get_panel_jobs_page,
     get_panel_diagnostics_page,
+    repair_tak_tunnel_pair,
     get_server_bootstrap_task_view,
     get_servers_page_data,
     get_shared_peer_links_page,
@@ -658,6 +659,42 @@ def run_admin_diagnostics(
     try:
         diagnostics_page = run_panel_diagnostics(db, current_user)
     except PermissionDeniedError as exc:
+        raise_service_http_error(exc)
+    return templates.TemplateResponse(
+        request,
+        "admin_diagnostics.html",
+        {
+            "diagnostics_page": diagnostics_page,
+            "current_user": current_user,
+            "has_problem_jobs": has_problem_panel_jobs(db),
+        },
+    )
+
+
+@router.post("/admin/diagnostics/tak-tunnels/repair", response_class=HTMLResponse)
+def repair_admin_tak_tunnel_pair(
+    request: Request,
+    focused_tic_server_id: int = Form(...),
+    focused_tak_server_id: int = Form(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    try:
+        repair_tak_tunnel_pair(
+            db,
+            current_user,
+            tic_server_id=focused_tic_server_id,
+            tak_server_id=focused_tak_server_id,
+        )
+        diagnostics_page = run_panel_diagnostics(
+            db,
+            current_user,
+            focused_tic_server_id=focused_tic_server_id,
+            focused_tak_server_id=focused_tak_server_id,
+        )
+    except PermissionDeniedError as exc:
+        raise_service_http_error(exc)
+    except EntityNotFoundError as exc:
         raise_service_http_error(exc)
     return templates.TemplateResponse(
         request,

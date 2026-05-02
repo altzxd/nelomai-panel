@@ -32,6 +32,7 @@ ROUTE_RULES = [
     RouteRule(("GET",), "/admin/jobs", "admin", "panel background jobs page"),
     RouteRule(("GET",), "/admin/diagnostics", "admin", "panel self-diagnostics page"),
     RouteRule(("POST",), "/admin/diagnostics/run", "admin", "run panel self-diagnostics"),
+    RouteRule(("POST",), "/admin/diagnostics/tak-tunnels/repair", "admin/agent-backed", "repair focused Tic/Tak tunnel pair from diagnostics"),
     RouteRule(("GET",), "/admin/agent-contract", "admin", "panel to Node-agent contract page"),
     RouteRule(("POST",), "/admin/logs/delete-all", "admin", "delete all audit logs form action"),
     RouteRule(("GET",), "/api/admin/agent-contract", "admin", "JSON contract manifest for future Node-agent"),
