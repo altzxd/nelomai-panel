@@ -564,8 +564,10 @@ Planned payload highlights:
   - `server` (`Tic`);
   - `tak_server` metadata;
   - `tunnel_id`;
-  - the `Tak`-generated canonical `tunnel_artifacts` payload;
-  - optional legacy `amnezia_config` payload for backward compatibility.
+  - the `Tak`-generated canonical `tunnel_artifacts` payload.
+- Legacy `amnezia_config` may still appear in provision/status responses as a
+  compatibility mirror, but it is no longer part of the `attach_tak_tunnel`
+  request contract.
 - `verify_tak_tunnel_status` should return:
   - `exists`;
   - `is_active`;

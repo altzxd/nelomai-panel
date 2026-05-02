@@ -113,7 +113,6 @@ def run() -> None:
         "tak_server": tak_server,
         "tunnel_id": tunnel_id,
         "tunnel_artifacts": tunnel_artifacts,
-        "amnezia_config": amnezia_config,
     }
     attach = run_agent(attach_payload, component_env="tic-agent", state_file=state_file, runtime_root=runtime_root)
     require(attach.get("ok") is True, "attach_tak_tunnel must succeed")

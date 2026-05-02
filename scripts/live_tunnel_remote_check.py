@@ -156,8 +156,8 @@ def main() -> None:
     tunnel_id = str(provision.get("tunnel_id") or "").strip()
     tunnel_artifacts = provision.get("tunnel_artifacts")
     amnezia_config = provision.get("amnezia_config")
-    if not tunnel_id or not isinstance(tunnel_artifacts, dict) or not isinstance(amnezia_config, dict):
-        raise LiveTunnelCheckFailure("provision_tak_tunnel did not return tunnel_id + tunnel_artifacts + amnezia_config")
+    if not tunnel_id or not isinstance(tunnel_artifacts, dict):
+        raise LiveTunnelCheckFailure("provision_tak_tunnel did not return tunnel_id + tunnel_artifacts")
     if not isinstance(tunnel_artifacts.get("endpoint"), dict):
         raise LiveTunnelCheckFailure(f"provision_tak_tunnel did not return structured tunnel_artifacts.endpoint: {provision}")
     if not isinstance(tunnel_artifacts.get("addressing"), dict):
@@ -225,7 +225,6 @@ def main() -> None:
             "tak_server": tak_server,
             "tunnel_id": tunnel_id,
             "tunnel_artifacts": tunnel_artifacts,
-            "amnezia_config": amnezia_config,
         },
     )
     if attach.get("ok") is not True:

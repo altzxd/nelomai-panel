@@ -462,20 +462,16 @@ function attachTakTunnelRecord(state, payload) {
   const tunnelArtifactsPayload = payload && payload.tunnel_artifacts && typeof payload.tunnel_artifacts === "object"
     ? payload.tunnel_artifacts
     : null;
-  const amneziaConfig = tunnelArtifactsPayload
-    ? buildLegacyAmneziaConfig(tunnelArtifactsPayload, {})
-    : payload && payload.amnezia_config && typeof payload.amnezia_config === "object"
-      ? payload.amnezia_config
-      : null;
   if (!serverPayload || String(serverPayload.server_type || "").trim() !== "tic") {
     throw new Error("attach_tak_tunnel requires Tic server payload");
   }
   if (!takServerPayload || String(takServerPayload.server_type || "").trim() !== "tak") {
     throw new Error("attach_tak_tunnel requires Tak server payload");
   }
-  if (!amneziaConfig) {
-    throw new Error("attach_tak_tunnel requires tunnel_artifacts or amnezia_config");
+  if (!tunnelArtifactsPayload) {
+    throw new Error("attach_tak_tunnel requires tunnel_artifacts");
   }
+  const amneziaConfig = buildLegacyAmneziaConfig(tunnelArtifactsPayload, {});
 
   const tunnelId = String(amneziaConfig.tunnel_id || payload.tunnel_id || "").trim();
   if (!tunnelId) {

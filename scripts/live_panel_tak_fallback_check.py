@@ -274,7 +274,6 @@ def main() -> None:
                     "tak_server": tak_server,
                     "tunnel_id": provision.get("tunnel_id"),
                     "tunnel_artifacts": provision.get("tunnel_artifacts"),
-                    "amnezia_config": provision.get("amnezia_config"),
                 }
             )
             if attach.get("ok") is not True:

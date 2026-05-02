@@ -850,8 +850,7 @@ def _provision_and_attach_tak_tunnel(
     )
     tunnel_id = str(provision_response.get("tunnel_id") or "").strip()
     tunnel_artifacts = provision_response.get("tunnel_artifacts")
-    amnezia_config = provision_response.get("amnezia_config")
-    if not tunnel_id or (not isinstance(tunnel_artifacts, dict) and not isinstance(amnezia_config, dict)):
+    if not tunnel_id or not isinstance(tunnel_artifacts, dict):
         raise ServerOperationUnavailableError("Tak tunnel provision did not return tunnel_id/tunnel_artifacts")
     _run_agent_executor_logged(
         db,
@@ -862,7 +861,6 @@ def _provision_and_attach_tak_tunnel(
                 "tak_server": _server_agent_identity_payload(tak_server),
                 "tunnel_id": tunnel_id,
                 "tunnel_artifacts": tunnel_artifacts,
-                "amnezia_config": amnezia_config,
             },
         ),
         actor_user_id=actor_user_id,

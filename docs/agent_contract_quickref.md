@@ -252,7 +252,9 @@ Planned first payload/result minimums:
   - `addressing`
   - `keys`
   - `awg_parameters`
-- Panel should prefer `tunnel_artifacts`; `amnezia_config` is fallback-only.
+- Panel should use `tunnel_artifacts` as the only attach carrier.
+- `amnezia_config` may still appear in provision/status responses as a compatibility mirror,
+  but `attach_tak_tunnel` must not require or send it.
 - `attach_tak_tunnel` -> `ok`, `tunnel_id`, optional `is_active`
 - `verify_tak_tunnel_status` -> `ok`, `exists`, `is_active`, `tunnel_id`
 - `detach_tak_tunnel` -> `ok`, `tunnel_id`, optional `detached`

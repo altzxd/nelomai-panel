@@ -519,8 +519,8 @@ def run() -> None:
             raise ContractFailure("attach_tak_tunnel must target Tic contract server")
         if not isinstance(attach_tunnel_payload.get("tunnel_artifacts"), dict):
             raise ContractFailure("attach_tak_tunnel payload must include tunnel_artifacts")
-        if not isinstance(attach_tunnel_payload.get("amnezia_config"), dict):
-            raise ContractFailure("attach_tak_tunnel payload must keep legacy amnezia_config for compatibility")
+        if "amnezia_config" in attach_tunnel_payload:
+            raise ContractFailure("attach_tak_tunnel payload must not include legacy amnezia_config")
 
         toggle_interface_payload = find_payload(payloads, "toggle_interface")
         if "is_enabled" not in toggle_interface_payload.get("target_state", {}):
