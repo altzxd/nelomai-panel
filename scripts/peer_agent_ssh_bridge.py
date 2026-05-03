@@ -1,0 +1,163 @@
+from __future__ import annotations
+
+import base64
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from app.database import SessionLocal
+from app.models import Server
+
+
+PLINK_BIN = Path(os.environ.get("NELOMAI_PANEL_PLINK_BIN", r"C:\Program Files\PuTTY\plink.exe"))
+SSH_STRICT_HOST_KEY_CHECKING = os.environ.get("NELOMAI_PANEL_SSH_STRICT_HOST_KEY_CHECKING", "accept-new").strip() or "accept-new"
+SSH_CONNECT_TIMEOUT = os.environ.get("NELOMAI_PANEL_SSH_CONNECT_TIMEOUT", "10").strip() or "10"
+SSH_KNOWN_HOSTS_FILE = os.environ.get("NELOMAI_PANEL_SSH_KNOWN_HOSTS_FILE", "").strip()
+SSH_PASS_BIN = os.environ.get("NELOMAI_PANEL_SSHPASS_BIN", "sshpass").strip() or "sshpass"
+SSH_BIN = os.environ.get("NELOMAI_PANEL_SSH_BIN", "ssh").strip() or "ssh"
+
+
+def fail(message: str, code: int = 1) -> None:
+    print(message, file=sys.stderr)
+    raise SystemExit(code)
+
+
+def _env_file_for(component: str) -> str:
+    normalized = component.replace("-agent", "")
+    return f"/etc/default/nelomai-{normalized}-agent"
+
+
+def _load_server_from_payload(payload: dict[str, object]) -> dict[str, object]:
+    server = payload.get("server")
+    if not isinstance(server, dict):
+        server = payload.get("tic_server")
+    if not isinstance(server, dict):
+        fail("missing server payload")
+    return server
+
+
+def _resolve_server_identity(server: dict[str, object]) -> tuple[str, str, str, int]:
+    host = str(server.get("host") or "").strip()
+    ssh_login = str(server.get("ssh_login") or "").strip() or "root"
+    ssh_password = str(server.get("ssh_password") or "").strip()
+    ssh_port = int(server.get("ssh_port") or 22)
+    server_id = server.get("id")
+    if (not host or not ssh_password) and isinstance(server_id, int):
+        with SessionLocal() as db:
+            record = db.get(Server, server_id)
+            if record is not None:
+                host = host or record.host
+                ssh_login = ssh_login or record.ssh_login or "root"
+                ssh_password = ssh_password or record.ssh_password or ""
+                ssh_port = ssh_port or record.ssh_port or 22
+    if not host or not ssh_password:
+        fail("server payload must include host and ssh_password")
+    return host, ssh_login, ssh_password, ssh_port
+
+
+def _remote_command(component: str, exec_mode: str, payload_b64: str) -> str:
+    env_file = _env_file_for(component)
+    return (
+        "bash -lc "
+        f"\"set -a && test -f '{env_file}' && . '{env_file}'; set +a; "
+        f"tmp=\\$(mktemp /tmp/nelomai-bridge-XXXXXX.json) && "
+        f"printf %s '{payload_b64}' | base64 -d > \\\"\\$tmp\\\" && "
+        f"NELOMAI_AGENT_COMPONENT={component} "
+        f"NELOMAI_AGENT_EXEC_MODE={exec_mode} "
+        f"/usr/bin/node /opt/nelomai/current/agents/node-tic-agent/src/index.js < \\\"\\$tmp\\\"; "
+        f"status=\\$?; rm -f \\\"\\$tmp\\\"; exit \\$status\""
+    )
+
+
+def _run_windows_plink(host: str, ssh_login: str, ssh_password: str, ssh_port: int, remote_command: str) -> subprocess.CompletedProcess[str]:
+    if not PLINK_BIN.exists():
+        fail(f"plink not found: {PLINK_BIN}")
+    return subprocess.run(
+        [
+            str(PLINK_BIN),
+            "-batch",
+            "-ssh",
+            f"{ssh_login}@{host}",
+            "-P",
+            str(ssh_port),
+            "-pw",
+            ssh_password,
+            remote_command,
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+
+
+def _run_linux_ssh(host: str, ssh_login: str, ssh_password: str, ssh_port: int, remote_command: str) -> subprocess.CompletedProcess[str]:
+    command = [
+        SSH_PASS_BIN,
+        "-p",
+        ssh_password,
+        SSH_BIN,
+        "-o",
+        f"StrictHostKeyChecking={SSH_STRICT_HOST_KEY_CHECKING}",
+        "-o",
+        f"ConnectTimeout={SSH_CONNECT_TIMEOUT}",
+    ]
+    if SSH_KNOWN_HOSTS_FILE:
+        command.extend(["-o", f"UserKnownHostsFile={SSH_KNOWN_HOSTS_FILE}"])
+    command.extend(
+        [
+            "-p",
+            str(ssh_port),
+            f"{ssh_login}@{host}",
+            remote_command,
+        ]
+    )
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+
+
+def main() -> None:
+    raw_payload = sys.stdin.read()
+    try:
+        payload = json.loads(raw_payload or "{}")
+    except json.JSONDecodeError:
+        fail("invalid json payload")
+
+    server = _load_server_from_payload(payload)
+    host, ssh_login, ssh_password, ssh_port = _resolve_server_identity(server)
+    component = str(payload.get("component") or "tic-agent").strip() or "tic-agent"
+    exec_mode = str(payload.get("exec_mode") or "system").strip() or "system"
+    payload_b64 = base64.b64encode(json.dumps(payload, ensure_ascii=False).encode("utf-8")).decode("ascii")
+    remote_command = _remote_command(component, exec_mode, payload_b64)
+
+    if sys.platform == "win32":
+        completed = _run_windows_plink(host, ssh_login, ssh_password, ssh_port, remote_command)
+    else:
+        completed = _run_linux_ssh(host, ssh_login, ssh_password, ssh_port, remote_command)
+
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or f"exit={completed.returncode}").strip()
+        fail(detail)
+
+    stdout = (completed.stdout or "").strip()
+    if not stdout:
+        print("{}")
+        return
+    print(stdout)
+
+
+if __name__ == "__main__":
+    main()

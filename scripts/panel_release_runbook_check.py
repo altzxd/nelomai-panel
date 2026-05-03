@@ -16,7 +16,8 @@ REQUIRED_ENV_LINES = {
     "DEBUG=false",
     "SECRET_KEY=<generate-a-long-random-production-secret>",
     "DATABASE_URL=postgresql+psycopg://nelomai:change-me@db.example.local:5432/nelomai_panel",
-    "PEER_AGENT_COMMAND=node agents/node-tic-agent/src/index.js",
+    "PANEL_PUBLIC_BASE_URL=https://nelomai.ru",
+    "PEER_AGENT_COMMAND=.venv/bin/python scripts/peer_agent_ssh_bridge.py",
 }
 
 REQUIRED_DOC_TOKENS = [
@@ -24,12 +25,16 @@ REQUIRED_DOC_TOKENS = [
     "DEBUG=false",
     "SECRET_KEY",
     "DATABASE_URL",
+    "PANEL_PUBLIC_BASE_URL",
     "PEER_AGENT_COMMAND",
+    "scripts/install_panel_server.sh",
     "alembic upgrade head",
     "reverse proxy",
     "TLS",
     "systemd",
     "preflight_check.py",
+    "Initial admin setup link:",
+    "/bootstrap-admin/{token}",
 ]
 
 

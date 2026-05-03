@@ -27,7 +27,9 @@
             {% endif %}
             <button type="submit" class="primary-button">Войти</button>
         </form>
-        <p class="demo-hint">Демо: `admin/admin` и `demo/demo`</p>
+        {% if initial_admin_pending %}
+        <p class="demo-hint">Первый администратор ещё не создан. Используйте одноразовую ссылку из терминала панели.</p>
+        {% endif %}
     </section>
 </main>
 {% endblock %}

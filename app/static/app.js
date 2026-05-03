@@ -254,7 +254,7 @@ document.addEventListener("DOMContentLoaded", () => {
           });
 
         section
-          .querySelectorAll('a[href^="/api/peers/"], a[href^="/api/interfaces/"]')
+          .querySelectorAll('a[href^="/api/peers/"], a[href^="/api/interfaces/"], a[href^="/downloads/auth/"]')
           .forEach((link) => {
             link.classList.add("is-disabled-control");
             link.setAttribute("aria-disabled", "true");
@@ -809,30 +809,24 @@ document.addEventListener("DOMContentLoaded", () => {
     syncTakOptions();
     showInterfaceStep(0);
 
-    document.querySelector("[data-interface-next]")?.addEventListener("click", () => {
-      const nameInput = interfaceCreateForm?.querySelector('input[name="name"]');
-      if (!interfaceTicSelect?.value || !nameInput?.value.trim()) {
-        window.alert("Выберите Tic сервер и укажите название интерфейса.");
-        return;
-      }
-      showInterfaceStep(1);
-    });
     document.querySelector("[data-interface-back]")?.addEventListener("click", () => {
       showInterfaceStep(0);
     });
     document.querySelector("[data-interface-next]")?.addEventListener("click", async (event) => {
       event.preventDefault();
       event.stopImmediatePropagation();
+      const nextButton = event.currentTarget;
       const statusNode = interfaceCreateForm?.querySelector("[data-interface-status]");
       const nameInput = interfaceCreateForm?.querySelector('input[name="name"]');
       const listenPortInput = interfaceCreateForm?.querySelector('input[name="listen_port"]');
       const addressInput = interfaceCreateForm?.querySelector('input[name="address_v4"]');
       if (!interfaceTicSelect?.value || !nameInput?.value.trim()) {
-        window.alert("Выберите Tic сервер и укажите название интерфейса.");
+        window.alert("???????? Tic ?????? ? ??????? ???????? ??????????.");
         return;
       }
       try {
-        setStatus(statusNode, "Запрашиваем свободные порт и адрес...");
+        setActionBusy(nextButton, true);
+        setStatus(statusNode, "??????????? ????????? ???? ? ?????...");
         const allocation = await requestJson("/api/admin/interfaces/prepare", {
           method: "POST",
           body: JSON.stringify({
@@ -851,6 +845,9 @@ document.addEventListener("DOMContentLoaded", () => {
         showInterfaceStep(1);
       } catch (error) {
         setStatus(statusNode, error.message, true);
+        showToast("??????", error.message, "error");
+      } finally {
+        setActionBusy(nextButton, false);
       }
     }, true);
 

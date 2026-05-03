@@ -28,7 +28,9 @@ Before release, confirm:
 
 - `SECRET_KEY` is a real production secret;
 - `DATABASE_URL` points to PostgreSQL;
-- `PEER_AGENT_COMMAND` points to the production agent path;
+- `PANEL_PUBLIC_BASE_URL` points to the real external panel URL;
+- `PANEL_TLS_EMAIL` is set if TLS is provisioned through the install script;
+- `PEER_AGENT_COMMAND` points to the production SSH bridge path;
 - production `.env` values are not development placeholders.
 
 ## 4. Panel Service Layer
@@ -39,6 +41,7 @@ Before release, confirm:
 - panel service is enabled;
 - panel service starts cleanly after restart;
 - schema migrations are applied.
+- Nginx config proxies to the panel service.
 
 ## 5. Storage and Backups
 
@@ -57,6 +60,8 @@ The first release is blocked until all of these are true:
 3. Panel `systemd` unit is installed, enabled, and restartable.
 4. Production `SECRET_KEY` is set.
 5. Production `DATABASE_URL` is set.
-6. Production `PEER_AGENT_COMMAND` is set.
-7. Migrations are applied.
-8. Backup storage path is writable.
+6. Production `PANEL_PUBLIC_BASE_URL` is set.
+7. Production `PEER_AGENT_COMMAND` is set.
+8. Migrations are applied.
+9. Nginx and TLS front the panel service.
+10. Backup storage path is writable.

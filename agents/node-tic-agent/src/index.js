@@ -63,7 +63,7 @@ const {
   buildDetachTunnelCommands,
   inspectRuntimeEnvironment,
   maybeRunSystemCommands,
-  ensureSystemKeyMaterial,
+  ensureWireGuardKeyMaterial,
   syncTunnelArtifacts,
   inspectTunnelArtifacts,
   removeTunnelArtifacts
@@ -264,7 +264,7 @@ function realInterfaceResponse(payload) {
   if (action === "create_interface") {
     try {
       const record = createInterfaceRecord(state, payload);
-      if (ensureSystemKeyMaterial(record)) {
+      if (ensureWireGuardKeyMaterial(record)) {
         saveState(state);
       }
       syncInterfaceArtifacts(record);
@@ -282,10 +282,10 @@ function realInterfaceResponse(payload) {
   if (action === "toggle_interface") {
     try {
       const record = toggleInterfaceRecord(state, payload);
-      if (record.is_enabled && ensureSystemKeyMaterial(record)) {
+      if (record.is_enabled && ensureWireGuardKeyMaterial(record)) {
         saveState(state);
       }
-      syncInterfaceArtifacts(record);
+      syncAllPeerArtifacts(record);
       const execution = maybeRunSystemCommands(buildToggleInterfaceCommands(record));
       return ok({
         status: "updated",
@@ -305,7 +305,7 @@ function realInterfaceResponse(payload) {
   if (action === "update_interface_route_mode") {
     try {
       const record = updateInterfaceRouteModeRecord(state, payload);
-      if (ensureSystemKeyMaterial(record)) {
+      if (ensureWireGuardKeyMaterial(record)) {
         saveState(state);
       }
       syncAllPeerArtifacts(record);
@@ -328,7 +328,7 @@ function realInterfaceResponse(payload) {
   if (action === "update_interface_tak_server") {
     try {
       const record = updateInterfaceTakServerRecord(state, payload);
-      if (ensureSystemKeyMaterial(record)) {
+      if (ensureWireGuardKeyMaterial(record)) {
         saveState(state);
       }
       syncAllPeerArtifacts(record);
@@ -370,7 +370,7 @@ function realInterfaceResponse(payload) {
     try {
       const record = togglePeerRecord(state, payload);
       const persisted = ensurePeerRecordPersisted(state, payload);
-      if (ensureSystemKeyMaterial(persisted.interfaceRecord)) {
+      if (ensureWireGuardKeyMaterial(persisted.interfaceRecord)) {
         saveState(state);
       }
       syncPeerArtifacts(persisted.interfaceRecord, persisted.peerRecord);
@@ -413,7 +413,7 @@ function realInterfaceResponse(payload) {
     try {
       const record = recreatePeerRecord(state, payload);
       const persisted = ensurePeerRecordPersisted(state, payload);
-      if (ensureSystemKeyMaterial(persisted.interfaceRecord, { rotate_peer_slots: [record.slot] })) {
+      if (ensureWireGuardKeyMaterial(persisted.interfaceRecord, { rotate_peer_slots: [record.slot] })) {
         saveState(state);
       }
       syncPeerArtifacts(persisted.interfaceRecord, record);
@@ -458,10 +458,13 @@ function realInterfaceResponse(payload) {
   if (action === "download_peer_config") {
     try {
       const { interfaceRecord, peerRecord } = ensurePeerRecordPersisted(state, payload);
+      if (ensureWireGuardKeyMaterial(interfaceRecord)) {
+        saveState(state);
+      }
       syncPeerArtifacts(interfaceRecord, peerRecord);
       const content = fs.readFileSync(peerConfigPath(interfaceRecord, peerRecord), "utf8");
       return ok({
-        filename: `${interfaceRecord.name}-peer-${peerRecord.slot}.conf`,
+        filename: `${interfaceRecord.name}-${peerRecord.slot}.conf`,
         content_type: "text/plain; charset=utf-8",
         content_base64: Buffer.from(content, "utf8").toString("base64")
       });
@@ -473,6 +476,9 @@ function realInterfaceResponse(payload) {
   if (action === "download_interface_bundle") {
     try {
       const interfaceRecord = ensureInterfaceRecordPersisted(state, payload);
+      if (ensureWireGuardKeyMaterial(interfaceRecord)) {
+        saveState(state);
+      }
       syncInterfaceArtifacts(interfaceRecord);
       const peers = Array.isArray(interfaceRecord.peers) ? [...interfaceRecord.peers] : [];
       peers.sort((left, right) => Number(left.slot) - Number(right.slot));

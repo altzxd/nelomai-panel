@@ -55,9 +55,27 @@
         <section class="settings-card">
             <h3>Сводка</h3>
             <p class="muted-note">Доступно обновлений: {{ updates_page.update_available_count }} · Требуют внимания: {{ updates_page.version_issue_count }}</p>
+            <div class="toolbar-row">
+                <span class="status-text">Можно обновить массово: {{ updates_page.bulk_updatable_agent_count }}</span>
+                <span class="status-text">Требуют ручного разбора: {{ updates_page.manual_review_agent_count }}</span>
+            </div>
+            <div class="toolbar-row">
+                <a class="ghost-button small {% if updates_page.selected_server_type == 'all' %}active{% endif %}" href="/admin/updates{% if updates_page.attention_only %}?attention_only=1{% endif %}">Все</a>
+                <a class="ghost-button small {% if updates_page.selected_server_type == 'tic' %}active{% endif %}" href="/admin/updates?server_type=tic{% if updates_page.attention_only %}&attention_only=1{% endif %}">Tic</a>
+                <a class="ghost-button small {% if updates_page.selected_server_type == 'tak' %}active{% endif %}" href="/admin/updates?server_type=tak{% if updates_page.attention_only %}&attention_only=1{% endif %}">Tak</a>
+                <a class="ghost-button small {% if updates_page.selected_server_type == 'storage' %}active{% endif %}" href="/admin/updates?server_type=storage{% if updates_page.attention_only %}&attention_only=1{% endif %}">Storage</a>
+            </div>
+            <div class="toolbar-row">
+                {% if updates_page.attention_only %}
+                <a class="ghost-button small" href="/admin/updates{% if updates_page.selected_server_type != 'all' %}?server_type={{ updates_page.selected_server_type }}{% endif %}">Показать все</a>
+                {% else %}
+                <a class="ghost-button small" href="/admin/updates?attention_only=1{% if updates_page.selected_server_type != 'all' %}&server_type={{ updates_page.selected_server_type }}{% endif %}">Только требуют внимания</a>
+                {% endif %}
+            </div>
         </section>
 
         <section class="settings-card">
+            <h3>Панель</h3>
             <div class="toolbar-row">
                 <button class="ghost-button small" type="button" data-panel-update-check>Проверить панель</button>
                 <span class="status-text" data-update-settings-status></span>
@@ -72,13 +90,14 @@
         </section>
 
         <section class="settings-card">
+            <h3>Агенты, требующие внимания</h3>
             <div class="toolbar-row">
                 <button class="ghost-button small" type="button" data-agent-updates-check>Проверить все серверы</button>
                 <button class="primary-button small" type="button" data-agent-updates-apply-all>Обновить все</button>
                 <span class="status-text" data-agent-updates-status></span>
             </div>
             <div class="agent-update-list" data-agent-updates-result>
-                {% for item in updates_page.agent_update_summaries %}
+                {% for item in updates_page.problem_agent_update_summaries %}
                 <div class="agent-update-row {% if item.status == 'error' %}is-error{% endif %}">
                     <div>
                         <strong>{{ item.name }} · {{ item.server_type|upper }}</strong>
@@ -90,10 +109,29 @@
                     <button class="ghost-button small" type="button" data-agent-update-server="{{ item.server_id }}" {% if item.status in ['repo_missing', 'excluded'] %}disabled{% endif %}>Обновить</button>
                 </div>
                 {% else %}
-                <p class="muted-note">Серверов для проверки пока нет.</p>
+                <p class="muted-note">Серверов, требующих внимания, сейчас нет.</p>
                 {% endfor %}
             </div>
         </section>
+
+        {% if not updates_page.attention_only %}
+        <section class="settings-card">
+            <h3>Агенты без проблем</h3>
+            <div class="agent-update-list">
+                {% for item in updates_page.healthy_agent_update_summaries %}
+                <div class="agent-update-row">
+                    <div>
+                        <strong>{{ item.name }} · {{ item.server_type|upper }}</strong>
+                        <p>{{ item.message }}. Текущая: {{ item.current_version or "неизвестно" }}. Последняя: {{ item.latest_version or "неизвестно" }}. contract: {{ item.contract_version or "неизвестно" }}.</p>
+                    </div>
+                    <span class="availability is-online">{{ item.status }}</span>
+                </div>
+                {% else %}
+                <p class="muted-note">Серверов без проблем сейчас нет.</p>
+                {% endfor %}
+            </div>
+        </section>
+        {% endif %}
     </section>
 </main>
 {% endblock %}

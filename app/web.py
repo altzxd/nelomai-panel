@@ -30,6 +30,7 @@ from app.schemas import (
     ServerBackupCleanupView,
     BackupSettingsUpdate,
     BasicSettingsUpdate,
+    FirstAdminRegistrationCreate,
     FilterCreate,
     FilterUpdate,
     FilterView,
@@ -60,7 +61,7 @@ from app.schemas import (
     UserExpiresUpdate,
     UserResourceUpdate,
 )
-from app.security import create_access_token, decode_access_token, decode_peer_download_token
+from app.security import create_access_token, decode_access_token, decode_auth_download_token, decode_peer_download_token
 
 
 def normalize_service_error_detail(detail: str) -> str:
@@ -104,11 +105,12 @@ from app.services import (
     delete_user_resources,
     ensure_can_edit_filter,
     ensure_can_write_user_resources,
-    ensure_seed_data,
+    complete_initial_admin_setup,
     get_basic_settings,
     get_audit_logs_page,
     get_admin_page_data,
     get_dashboard_data,
+    get_initial_admin_setup_token,
     get_public_registration_link,
     get_registration_links_page,
     get_filter_by_id,
@@ -120,6 +122,7 @@ from app.services import (
     clear_tak_tunnel_backoff,
     repair_tak_tunnel_pair,
     rotate_tak_tunnel_pair,
+    has_admin_user,
     get_server_bootstrap_task_view,
     get_servers_page_data,
     get_shared_peer_links_page,
@@ -200,8 +203,31 @@ def format_handshake(value):
     return value.astimezone(moscow_tz).strftime("%d.%m.%Y %H:%M:%S")
 
 
+def format_bytes_compact(value):
+    if value is None:
+        return "РќРµС‚ РґР°РЅРЅС‹С…"
+    size = float(value)
+    units = ["B", "KB", "MB", "GB", "TB"]
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(size)} {unit}"
+            return f"{size:.1f} {unit}"
+        size /= 1024.0
+
+
 templates.env.filters["handshake_moscow"] = format_handshake
 templates.env.filters["datetime_moscow"] = format_handshake
+templates.env.filters["bytes_compact"] = format_bytes_compact
+
+
+def format_bytes_compact_safe(value):
+    if value is None:
+        return "\u041d\u0435\u0442 \u0434\u0430\u043d\u043d\u044b\u0445"
+    return format_bytes_compact(value)
+
+
+templates.env.filters["bytes_compact"] = format_bytes_compact_safe
 
 
 def audit_event_type_for_status(status_code: int) -> str:
@@ -242,10 +268,10 @@ def is_preview_mode(request: Request, current_user: User) -> bool:
     return current_user.role == UserRole.ADMIN and preview_flag in {"1", "true", "yes", "on"}
 
 
-def admin_chrome_context(db: Session) -> dict[str, bool]:
+def admin_chrome_context(db: Session, *, include_updates: bool = False) -> dict[str, bool]:
     return {
         "has_problem_jobs": has_problem_panel_jobs(db),
-        "has_available_updates": has_available_updates(db),
+        "has_available_updates": has_available_updates(db) if include_updates else False,
     }
 
 
@@ -388,9 +414,74 @@ def normalize_service_error_detail(detail: str) -> str:
 
 @router.get("/", response_class=HTMLResponse)
 def login_page(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
-    ensure_seed_data(db)
     info_message = "Аккаунт создан, вы можете войти." if request.query_params.get("registered") == "1" else None
-    return templates.TemplateResponse(request, "login.html", {"error": None, "info_message": info_message})
+    return templates.TemplateResponse(
+        request,
+        "login.html",
+        {
+            "error": None,
+            "info_message": info_message,
+            "initial_admin_pending": not has_admin_user(db),
+        },
+    )
+
+
+@router.get("/bootstrap-admin/{token}", response_class=HTMLResponse)
+def initial_admin_registration_page(token: str, request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    try:
+        get_initial_admin_setup_token(db, token)
+    except EntityNotFoundError:
+        return Response(
+            content="Initial admin setup link is invalid or already used.",
+            status_code=status.HTTP_404_NOT_FOUND,
+            media_type="text/plain; charset=utf-8",
+        )
+    return templates.TemplateResponse(
+        request,
+        "first_admin_registration.html",
+        {
+            "token": token,
+            "error": None,
+            "values": {},
+        },
+    )
+
+
+@router.post("/bootstrap-admin/{token}")
+async def initial_admin_registration_submit(
+    token: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Response:
+    form_data = await request.form()
+    values = {
+        "login": str(form_data.get("login", "")),
+    }
+    try:
+        payload = FirstAdminRegistrationCreate(
+            login=values["login"],
+            password=str(form_data.get("password", "")),
+        )
+        complete_initial_admin_setup(db, token, payload)
+    except ValidationError:
+        return templates.TemplateResponse(
+            request,
+            "first_admin_registration.html",
+            {"token": token, "error": "Заполните логин и пароль корректно.", "values": values},
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    except (EntityNotFoundError, PermissionDeniedError, InvalidInputError) as exc:
+        detail = normalize_service_error_detail(str(exc))
+        status_code_value = status.HTTP_404_NOT_FOUND if isinstance(exc, EntityNotFoundError) else status.HTTP_400_BAD_REQUEST
+        if isinstance(exc, PermissionDeniedError):
+            status_code_value = status.HTTP_403_FORBIDDEN
+        return templates.TemplateResponse(
+            request,
+            "first_admin_registration.html",
+            {"token": token, "error": detail, "values": values},
+            status_code=status_code_value,
+        )
+    return RedirectResponse(url="/?registered=1", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.get("/registration/{token}", response_class=HTMLResponse)
@@ -620,6 +711,8 @@ def admin_home(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
+    active_tab = tab if tab in {"overview", "settings", "clients", "access"} else "overview"
+    active_settings_view = settings_view if settings_view in {"basic", "logs", "updates", "backups", "shared_peers", "filters", "block_filters"} else "basic"
     try:
         require_admin(current_user)
         admin_page = get_admin_page_data(
@@ -628,8 +721,10 @@ def admin_home(
             tic_server_id=tic_server_id,
             tak_server_id=tak_server_id,
             client_scope=client_scope,
+            active_tab=active_tab,
+            settings_view=active_settings_view,
             filter_scope=filter_scope,
-            filter_kind=FilterKind.BLOCK if settings_view == "block_filters" else FilterKind.EXCLUSION,
+            filter_kind=FilterKind.BLOCK if active_settings_view == "block_filters" else FilterKind.EXCLUSION,
         )
     except (EntityNotFoundError, InvalidInputError, PermissionDeniedError) as exc:
         raise_service_http_error(exc)
@@ -640,17 +735,17 @@ def admin_home(
         {
             "admin_page": admin_page,
             "current_user": current_user,
-            "active_tab": tab if tab in {"overview", "settings", "clients", "access"} else "overview",
+            "active_tab": active_tab,
             "client_scope": client_scope if client_scope in {"all", "without_interfaces"} else "all",
             "access_view": access_view if access_view in {"dated", "no_expiry"} else "dated",
             "filter_scope": filter_scope if filter_scope in {"all", "global", "user"} else "all",
-            "settings_view": settings_view if settings_view in {"basic", "logs", "updates", "backups", "shared_peers", "filters", "block_filters"} else "basic",
+            "settings_view": active_settings_view,
             "exclusion_filters_enabled": admin_page.settings.exclusion_filters_enabled,
             "block_filters_enabled": admin_page.settings.block_filters_enabled,
-            "filter_kind": "block" if settings_view == "block_filters" else "exclusion",
+            "filter_kind": "block" if active_settings_view == "block_filters" else "exclusion",
             "interface_tic_server_id": interface_tic_server_id,
-            "backups_page": get_backups_page(db, current_user) if settings_view == "backups" else None,
-            "shared_peers_page": get_shared_peer_links_page(db, current_user) if settings_view == "shared_peers" else None,
+            "backups_page": get_backups_page(db, current_user) if active_settings_view == "backups" else None,
+            "shared_peers_page": get_shared_peer_links_page(db, current_user) if active_settings_view == "shared_peers" else None,
             **admin_chrome_context(db),
         },
     )
@@ -687,11 +782,18 @@ def admin_registration_links(
 @router.get("/admin/updates", response_class=HTMLResponse)
 def admin_updates(
     request: Request,
+    attention_only: str = Query(default="0"),
+    server_type: str = Query(default="all"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     try:
-        updates_page = get_updates_page_data(db, current_user)
+        updates_page = get_updates_page_data(
+            db,
+            current_user,
+            attention_only=attention_only in {"1", "true", "yes", "on"},
+            server_type=server_type,
+        )
     except (EntityNotFoundError, InvalidInputError, PermissionDeniedError) as exc:
         raise_service_http_error(exc)
     return templates.TemplateResponse(
@@ -700,7 +802,7 @@ def admin_updates(
         {
             "updates_page": updates_page,
             "current_user": current_user,
-            **admin_chrome_context(db),
+            **admin_chrome_context(db, include_updates=True),
         },
     )
 
@@ -840,6 +942,7 @@ def admin_diagnostics(
             current_user,
             focused_tic_server_id=focused_tic_server_id,
             focused_tak_server_id=focused_tak_server_id,
+            include_live_checks=False,
         )
     except PermissionDeniedError as exc:
         raise_service_http_error(exc)
@@ -861,7 +964,7 @@ def run_admin_diagnostics(
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     try:
-        diagnostics_page = run_panel_diagnostics(db, current_user)
+        diagnostics_page = run_panel_diagnostics(db, current_user, include_live_checks=True)
     except PermissionDeniedError as exc:
         raise_service_http_error(exc)
     return templates.TemplateResponse(
@@ -1870,6 +1973,32 @@ def public_peer_download(
         return Response(content="Download link is invalid or expired.", status_code=status.HTTP_404_NOT_FOUND, media_type="text/plain; charset=utf-8")
 
 
+@router.get("/downloads/auth/{token}")
+def authenticated_download(
+    token: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    try:
+        payload = decode_auth_download_token(token)
+        owner_user_id = int(payload.get("owner_user_id") or 0)
+        if current_user.role != UserRole.ADMIN and current_user.id != owner_user_id:
+            raise PermissionDeniedError("You can download only your own files")
+        scope = str(payload.get("scope") or "")
+        resource_id = int(payload.get("rid") or 0)
+        if scope == "peer_auth_download":
+            download_payload = download_peer_config(db, current_user, resource_id)
+        elif scope == "interface_auth_download":
+            download_payload = download_interface_bundle(db, current_user, resource_id)
+        else:
+            raise PermissionDeniedError("Invalid download scope")
+        return build_download_response(download_payload)
+    except (EntityNotFoundError, PermissionDeniedError, ServerOperationUnavailableError) as exc:
+        raise_service_http_error(exc)
+    except Exception:
+        return Response(content="Download link is invalid or expired.", status_code=status.HTTP_404_NOT_FOUND, media_type="text/plain; charset=utf-8")
+
+
 @router.delete("/api/peers/{peer_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_peer_endpoint(
     request: Request,
@@ -2008,4 +2137,3 @@ def save_user_name(
         return {"value": value}
     except (EntityNotFoundError, PermissionDeniedError) as exc:
         raise_service_http_error(exc)
-from app.security import create_access_token, decode_access_token, decode_peer_download_token

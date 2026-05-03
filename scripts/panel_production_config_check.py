@@ -21,7 +21,7 @@ def run_case(label: str, env_overrides: dict[str, str], should_pass: bool) -> No
         "SECRET_KEY": "prod-secret-key-with-at-least-32-chars-123456",
         "DATABASE_URL": "postgresql+psycopg://nelomai:secret@db.example.local/nelomai",
         "NELOMAI_GIT_REPO": "https://github.com/altzxd/nelomai-panel.git",
-        "PEER_AGENT_COMMAND": "node agents/node-tic-agent/src/index.js",
+        "PEER_AGENT_COMMAND": ".venv/bin/python scripts/peer_agent_ssh_bridge.py",
         **env_overrides,
     }
     result = subprocess.run(

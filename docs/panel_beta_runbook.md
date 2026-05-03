@@ -29,6 +29,7 @@ The beta topology should already use:
 - `systemd`;
 - production `SECRET_KEY`;
 - production `DATABASE_URL`;
+- production `PANEL_PUBLIC_BASE_URL`;
 - production `PEER_AGENT_COMMAND`.
 
 ## 3. Required Beta Checks
@@ -37,6 +38,8 @@ Before inviting users, confirm:
 
 - `preflight_check.py` passes without failures;
 - `clean_start_check.py` passes;
+- the first clean panel startup prints the one-time first-admin link;
+- the first admin can be created through `/bootstrap-admin/{token}`;
 - panel diagnostics page works;
 - panel logs page works;
 - panel jobs page works;
@@ -63,6 +66,7 @@ Do not expand beta scope until these flows are stable for the pilot group.
 
 Before beta, the operator must know how to:
 
+- create the first administrator from the terminal bootstrap link;
 - add a server through the panel;
 - read `/admin/diagnostics`;
 - inspect `/admin/logs`;

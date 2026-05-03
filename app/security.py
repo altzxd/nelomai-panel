@@ -42,3 +42,20 @@ def decode_peer_download_token(token: str) -> dict:
     if payload.get("scope") != "peer_download":
         raise jwt.InvalidTokenError("Invalid peer download scope")
     return payload
+
+
+def create_auth_download_token(*, scope: str, resource_id: int, owner_user_id: int) -> str:
+    payload = {
+        "scope": scope,
+        "rid": resource_id,
+        "owner_user_id": owner_user_id,
+    }
+    return jwt.encode(payload, settings.secret_key, algorithm="HS256")
+
+
+def decode_auth_download_token(token: str) -> dict:
+    payload = jwt.decode(token, settings.secret_key, algorithms=["HS256"])
+    scope = str(payload.get("scope") or "")
+    if scope not in {"peer_auth_download", "interface_auth_download"}:
+        raise jwt.InvalidTokenError("Invalid authenticated download scope")
+    return payload

@@ -131,6 +131,8 @@ def upgrade() -> None:
         sa.Column("block_filters_enabled", sa.Boolean(), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("handshake_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("live_rx_bytes", sa.Integer(), nullable=True),
+        sa.Column("live_tx_bytes", sa.Integer(), nullable=True),
         sa.Column("traffic_7d_mb", sa.Integer(), nullable=False),
         sa.Column("traffic_30d_mb", sa.Integer(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),

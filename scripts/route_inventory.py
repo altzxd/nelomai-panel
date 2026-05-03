@@ -23,6 +23,8 @@ class RouteRule:
 
 ROUTE_RULES = [
     RouteRule(("GET",), "/", "public", "login page"),
+    RouteRule(("GET",), "/bootstrap-admin/{token}", "public-token", "one-time initial admin registration form"),
+    RouteRule(("POST",), "/bootstrap-admin/{token}", "public-token", "submit one-time initial admin registration"),
     RouteRule(("GET",), "/registration/{token}", "public-token", "one-time public registration form"),
     RouteRule(("POST",), "/registration/{token}", "public-token", "submit one-time public registration"),
     RouteRule(("POST",), "/login", "public", "sets JWT cookie"),
@@ -103,6 +105,7 @@ ROUTE_RULES = [
     RouteRule(("POST",), "/api/admin/peer-download-links/revoke-all", "admin", "revoke all public peer links or lifetime-only links"),
     RouteRule(("POST",), "/api/peers/{peer_id}/recreate", "auth/owner-or-admin/agent-backed", "recreate own peer; preview denied"),
     RouteRule(("POST",), "/api/peers/{peer_id}/toggle", "auth/owner-or-admin/agent-backed", "toggle own peer; preview denied"),
+    RouteRule(("GET",), "/downloads/auth/{token}", "auth/owner-or-admin/agent-backed", "opaque authenticated peer or interface download"),
     RouteRule(("GET",), "/downloads/peer/{token}", "public-token", "direct config download only"),
     RouteRule(("DELETE",), "/api/peers/{peer_id}", "auth/owner-or-admin/agent-backed", "delete own peer; preview denied"),
     RouteRule(("GET",), "/api/peers/{peer_id}/download", "auth/owner-or-admin/agent-backed", "download own peer config"),

@@ -34,6 +34,14 @@ def apply_legacy_runtime_schema_updates(engine: Engine) -> list[str]:
             connection.execute(text("ALTER TABLE peers ADD COLUMN block_filters_enabled BOOLEAN DEFAULT 1"))
             connection.execute(text("UPDATE peers SET block_filters_enabled = 1 WHERE block_filters_enabled IS NULL"))
         applied.append("peers.block_filters_enabled")
+    if "live_rx_bytes" not in peer_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE peers ADD COLUMN live_rx_bytes INTEGER"))
+        applied.append("peers.live_rx_bytes")
+    if "live_tx_bytes" not in peer_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE peers ADD COLUMN live_tx_bytes INTEGER"))
+        applied.append("peers.live_tx_bytes")
 
     interface_columns = {column["name"] for column in inspect(engine).get_columns("interfaces")}
     if "agent_interface_id" not in interface_columns:
@@ -147,8 +155,12 @@ def apply_legacy_runtime_schema_updates(engine: Engine) -> list[str]:
         applied.append("resource_filters.kind")
     else:
         with engine.begin() as connection:
-            connection.execute(text("UPDATE resource_filters SET kind = 'EXCLUSION' WHERE kind = 'exclusion'"))
-            connection.execute(text("UPDATE resource_filters SET kind = 'BLOCK' WHERE kind = 'block'"))
+            if engine.dialect.name == "postgresql":
+                connection.execute(text("UPDATE resource_filters SET kind = 'EXCLUSION' WHERE kind::text = 'exclusion'"))
+                connection.execute(text("UPDATE resource_filters SET kind = 'BLOCK' WHERE kind::text = 'block'"))
+            else:
+                connection.execute(text("UPDATE resource_filters SET kind = 'EXCLUSION' WHERE kind = 'exclusion'"))
+                connection.execute(text("UPDATE resource_filters SET kind = 'BLOCK' WHERE kind = 'block'"))
 
     table_names = set(inspect(engine).get_table_names())
     if "registration_links" not in table_names:

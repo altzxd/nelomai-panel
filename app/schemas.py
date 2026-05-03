@@ -18,14 +18,22 @@ class PublicRegistrationCreate(BaseModel):
     region: str = Field(pattern="^(europe|east|unknown)$")
 
 
+class FirstAdminRegistrationCreate(BaseModel):
+    login: str = Field(min_length=1, max_length=20)
+    password: str = Field(min_length=4, max_length=255)
+
+
 class PeerView(BaseModel):
     id: int
     slot: int
+    download_url: str | None = None
     comment: str | None
     is_enabled: bool
     block_filters_enabled: bool = True
     expires_at: datetime | None
     handshake_at: datetime | None
+    live_rx_bytes: int | None = None
+    live_tx_bytes: int | None = None
     traffic_7d_mb: int
     traffic_30d_mb: int
 
@@ -78,6 +86,7 @@ class InterfaceView(BaseModel):
     id: int
     agent_interface_id: str | None = None
     name: str
+    download_url: str | None = None
     tic_server_name: str
     route_mode: RouteMode
     effective_route_mode: RouteMode
@@ -576,8 +585,14 @@ class ServerAgentUpdateApplyRequest(BaseModel):
 class UpdatesPageView(BaseModel):
     panel_update_summary: PanelUpdateCheckView
     agent_update_summaries: list[ServerAgentUpdateView] = []
+    problem_agent_update_summaries: list[ServerAgentUpdateView] = []
+    healthy_agent_update_summaries: list[ServerAgentUpdateView] = []
     update_available_count: int = 0
     version_issue_count: int = 0
+    attention_only: bool = False
+    bulk_updatable_agent_count: int = 0
+    manual_review_agent_count: int = 0
+    selected_server_type: str = "all"
 
 
 class BackupSettingsUpdate(BaseModel):

@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from app.models import AppSetting, FilterKind, FilterScope, Interface, ResourceFilter, RouteMode, Server, User, UserRegion, UserResource, UserRole
+from app.security import create_auth_download_token
 from app.schemas import (
     AccessUserView,
     AdminPageView,
@@ -61,6 +62,33 @@ def _user_region_label(value: UserRegion | None) -> str | None:
     return None
 
 
+def _peer_download_url(peer) -> str | None:
+    interface = getattr(peer, "interface", None)
+    owner_user_id = getattr(interface, "user_id", None)
+    peer_id = getattr(peer, "id", None)
+    if not isinstance(peer_id, int) or not isinstance(owner_user_id, int):
+        return None
+    token = create_auth_download_token(
+        scope="peer_auth_download",
+        resource_id=peer_id,
+        owner_user_id=owner_user_id,
+    )
+    return f"/downloads/auth/{token}"
+
+
+def _interface_download_url(interface: Interface) -> str | None:
+    interface_id = getattr(interface, "id", None)
+    owner_user_id = getattr(interface, "user_id", None)
+    if not isinstance(interface_id, int) or not isinstance(owner_user_id, int):
+        return None
+    token = create_auth_download_token(
+        scope="interface_auth_download",
+        resource_id=interface_id,
+        owner_user_id=owner_user_id,
+    )
+    return f"/downloads/auth/{token}"
+
+
 def serialize_interface(interface: Interface, expires_at) -> InterfaceView:
     configured_route_mode = interface.route_mode if interface.tak_server_id else RouteMode.STANDALONE
     effective_route_mode = RouteMode.STANDALONE if interface.tak_tunnel_fallback_active else configured_route_mode
@@ -68,6 +96,7 @@ def serialize_interface(interface: Interface, expires_at) -> InterfaceView:
         id=interface.id,
         agent_interface_id=interface.agent_interface_id,
         name=interface.name,
+        download_url=_interface_download_url(interface),
         tic_server_name=interface.tic_server.name,
         route_mode=configured_route_mode,
         effective_route_mode=effective_route_mode,
@@ -90,11 +119,14 @@ def serialize_interface(interface: Interface, expires_at) -> InterfaceView:
             PeerView(
                 id=peer.id,
                 slot=peer.slot,
+                download_url=_peer_download_url(peer),
                 comment=peer.comment,
                 is_enabled=peer.is_enabled,
                 block_filters_enabled=peer.block_filters_enabled,
                 expires_at=peer.expires_at,
                 handshake_at=peer.handshake_at,
+                live_rx_bytes=peer.live_rx_bytes,
+                live_tx_bytes=peer.live_tx_bytes,
                 traffic_7d_mb=peer.traffic_7d_mb,
                 traffic_30d_mb=peer.traffic_30d_mb,
             )

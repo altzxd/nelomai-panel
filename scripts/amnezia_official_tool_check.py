@@ -25,6 +25,7 @@ def run_agent(payload: dict[str, object], *, state_file: Path, runtime_root: Pat
     env["NELOMAI_AGENT_RUNTIME_ROOT"] = str(runtime_root)
     env["NELOMAI_AGENT_EXEC_MODE"] = "filesystem"
     env["NELOMAI_AMNEZIAWG_TOOL_MODULE"] = str(ROOT_DIR / "scripts" / "fake_amnezia_tool_module.js")
+    env["NELOMAI_ALLOW_FAKE_TUNNEL_KEYS"] = "1"
     completed = subprocess.run(
         [node_bin(), str(ROOT_DIR / "agents" / "node-tic-agent" / "src" / "index.js")],
         input=json.dumps(payload),

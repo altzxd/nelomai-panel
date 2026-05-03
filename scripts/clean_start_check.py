@@ -43,8 +43,8 @@ def run() -> None:
 
     from app.database import SessionLocal
     from app.main import app
-    from app.models import AppSetting, Server, User, UserRole
-    from app.services import ensure_default_settings, ensure_seed_data
+    from app.models import AppSetting, User, UserRole
+    from app.services import INITIAL_ADMIN_TOKEN_SETTING_KEY, ensure_default_settings
 
     with TestClient(app) as client:
         response = client.get("/")
@@ -52,22 +52,12 @@ def run() -> None:
         raise CleanStartFailure(f"startup check failed: expected 200 from /, got {response.status_code}")
 
     with SessionLocal() as db:
-        ensure_seed_data(db)
         ensure_default_settings(db)
         db.commit()
 
-        user_count = db.execute(select(User)).scalars().all()
-        if len(user_count) < 2:
-            raise CleanStartFailure("seed data did not create the minimum users set")
-
         admin = db.execute(select(User).where(User.role == UserRole.ADMIN)).scalars().first()
-        regular_user = db.execute(select(User).where(User.role == UserRole.USER)).scalars().first()
-        if admin is None or regular_user is None:
-            raise CleanStartFailure("seed data did not create admin and regular user")
-
-        server_count = db.execute(select(Server)).scalars().all()
-        if len(server_count) < 2:
-            raise CleanStartFailure("seed data did not create baseline Tic/Tak servers")
+        if admin is not None:
+            raise CleanStartFailure("clean start must not auto-create admin user")
 
         setting_keys = set(db.execute(select(AppSetting.key)).scalars().all())
         for required in {
@@ -81,6 +71,9 @@ def run() -> None:
         }:
             if required not in setting_keys:
                 raise CleanStartFailure(f"default settings miss key {required}")
+        token_row = db.get(AppSetting, INITIAL_ADMIN_TOKEN_SETTING_KEY)
+        if token_row is None or not token_row.value.strip():
+            raise CleanStartFailure("clean start did not create initial admin bootstrap token")
 
     print("OK: clean start check passed")
 

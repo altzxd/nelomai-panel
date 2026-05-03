@@ -193,7 +193,9 @@
                                 {% elif not preview_mode and interface.peers|length < interface.peer_limit %}
                                 <button class="primary-button small" type="button" data-peer-create="{{ interface.id }}">Создать пир</button>
                                 {% endif %}
-                                <a class="ghost-button small" href="/api/interfaces/{{ interface.id }}/download-all{% if preview_mode %}?preview=1{% endif %}">Скачать всё</a>
+                                {% if interface.download_url %}
+                                <a class="ghost-button small" href="{{ interface.download_url }}">Скачать всё</a>
+                                {% endif %}
                                 {% if is_admin_view %}
                                 <button class="ghost-button small danger" type="button" data-interface-detach="{{ interface.id }}">Отвязать интерфейс</button>
                                 {% endif %}
@@ -279,6 +281,8 @@
                                 {% endif %}
                                 <dl class="peer-metrics">
                                     <div><dt>Handshake</dt><dd>{{ peer.handshake_at|handshake_moscow }}</dd></div>
+                                    <div><dt>RX live</dt><dd>{{ peer.live_rx_bytes|bytes_compact }}</dd></div>
+                                    <div><dt>TX live</dt><dd>{{ peer.live_tx_bytes|bytes_compact }}</dd></div>
                                     <div><dt>Трафик 7 дней</dt><dd>{{ "%.1f"|format(peer.traffic_7d_mb / 1024) }} ГБ</dd></div>
                                     <div><dt>Трафик 30 дней</dt><dd>{{ "%.1f"|format(peer.traffic_30d_mb / 1024) }} ГБ</dd></div>
                                 </dl>
@@ -304,7 +308,9 @@
                                     <span class="availability is-preview">preview read-only</span>
                                     {% endif %}
                                     <button class="ghost-button small" type="button" {% if not preview_mode %}data-peer-recreate="{{ peer.id }}"{% else %}disabled{% endif %}>Пересоздать</button>
-                                    <a class="ghost-button small" href="/api/peers/{{ peer.id }}/download{% if preview_mode %}?preview=1{% endif %}">Скачать</a>
+                                    {% if peer.download_url %}
+                                    <a class="ghost-button small" href="{{ peer.download_url }}">Скачать</a>
+                                    {% endif %}
                                     <button class="ghost-button small danger" type="button" {% if not preview_mode %}data-peer-delete="{{ peer.id }}"{% else %}disabled{% endif %}>Удалить</button>
                                 </div>
                             </article>

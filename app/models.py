@@ -210,6 +210,8 @@ class Peer(Base):
     block_filters_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     handshake_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    live_rx_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    live_tx_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     traffic_7d_mb: Mapped[int] = mapped_column(Integer, default=0)
     traffic_30d_mb: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

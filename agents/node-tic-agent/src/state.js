@@ -41,6 +41,12 @@ function generateTunnelKeyPair() {
       public_key: publicKey,
     };
   }
+  if (String(process.env.NELOMAI_ALLOW_FAKE_TUNNEL_KEYS || "").trim() === "1") {
+    return {
+      private_key: randomBase64(32),
+      public_key: randomBase64(32),
+    };
+  }
   throw new Error("Unable to generate tunnel key pair with awg or wg");
 }
 

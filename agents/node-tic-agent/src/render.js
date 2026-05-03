@@ -22,9 +22,6 @@ function peerAllowedIps(peerRecord) {
 }
 
 function endpointHost(interfaceRecord) {
-  if (String(interfaceRecord.route_mode || "").trim() === "via_tak" && interfaceRecord.tak_server_host) {
-    return String(interfaceRecord.tak_server_host).trim();
-  }
   if (interfaceRecord.tic_server_host) {
     return String(interfaceRecord.tic_server_host).trim();
   }
@@ -145,6 +142,7 @@ function renderTakTunnelServerConfig(tunnelRecord) {
     `ListenPort = ${Number(tunnelRecord.listen_port) || 0}`,
     `Address = ${String(tunnelRecord.tak_address_v4 || "")}`,
     `PrivateKey = ${String(tunnelRecord.server_private_key || "")}`,
+    `Table = off`,
     `H1 = ${String(header.H1 || "0")}`,
     `H2 = ${String(header.H2 || "0")}`,
     `H3 = ${String(header.H3 || "0")}`,
@@ -178,6 +176,7 @@ function renderTicTunnelClientConfig(tunnelRecord) {
     `[Interface]`,
     `Address = ${String(tunnelRecord.tic_address_v4 || "")}`,
     `PrivateKey = ${String(tunnelRecord.client_private_key || "")}`,
+    `Table = off`,
     `Jc = ${Number(junk.Jc) || 0}`,
     `Jmin = ${Number(junk.Jmin) || 0}`,
     `Jmax = ${Number(junk.Jmax) || 0}`,
@@ -194,7 +193,7 @@ function renderTicTunnelClientConfig(tunnelRecord) {
     "",
     `[Peer]`,
     `# Role = tak-server`,
-    `AllowedIPs = ${String(tunnelRecord.network_cidr || tunnelRecord.tak_address_v4 || "")}`,
+    `AllowedIPs = 0.0.0.0/0`,
     `Endpoint = ${String(tunnelRecord.tak_server_host || "")}:${Number(tunnelRecord.listen_port) || 0}`,
     `PublicKey = ${String(tunnelRecord.server_public_key || "")}`,
     `PersistentKeepalive = 21`,
@@ -216,7 +215,7 @@ function buildTakTunnelClientPayload(tunnelRecord) {
       network_cidr: String(tunnelRecord.network_cidr || ""),
       tak_address_v4: String(tunnelRecord.tak_address_v4 || ""),
       tic_address_v4: String(tunnelRecord.tic_address_v4 || ""),
-      allowed_ips: [String(tunnelRecord.network_cidr || "")].filter(Boolean)
+      allowed_ips: ["0.0.0.0/0"]
     },
     keys: {
       client_private_key: String(tunnelRecord.client_private_key || ""),

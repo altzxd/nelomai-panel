@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import base64
+import ctypes
 import hashlib
 import io
 import json
+import os
 import re
 import secrets
+import shutil
+import time
 import zipfile
 import subprocess
 from datetime import UTC, datetime, timedelta
@@ -106,6 +110,7 @@ from app.schemas import (
     PeerBlockFiltersUpdate,
     PeerCommentUpdate,
     PeerExpiryUpdate,
+    FirstAdminRegistrationCreate,
     PanelUpdateCheckView,
     PanelJobView,
     PanelJobsPageView,
@@ -459,6 +464,7 @@ def _tak_tunnel_status_label_ui(status: str) -> str:
     }
     return mapping.get(status, status)
 TAK_TUNNEL_AUTO_REPAIR_BACKOFF_SECONDS = (60, 300, 900, 3600, 10800)
+UPDATES_CACHE_TTL_SECONDS = 120
 PANEL_JOB_TYPE_LABELS = {
     "server_bootstrap": "Добавление сервера",
     "expired_peers_cleanup": "Очистка истёкших пиров",
@@ -478,6 +484,8 @@ PANEL_JOB_STATUS_LABELS = {
     PanelJobStatus.CANCELLED: "Остановлена",
     PanelJobStatus.STUCK: "Зависла",
 }
+_PANEL_UPDATE_CACHE: dict[str, object] = {"fetched_at": 0.0, "value": None}
+_SERVER_AGENT_UPDATE_CACHE: dict[int, tuple[float, ServerAgentUpdateView]] = {}
 
 
 def _tak_tunnel_pair_key(tic_server_id: int, tak_server_id: int) -> str:
@@ -674,8 +682,13 @@ def _bootstrap_pending_command_for_job(db: Session, job: PanelJob) -> str | None
     return _task_pending_bootstrap_command(task)
 
 
-def serialize_panel_job(job: PanelJob, db: Session | None = None) -> PanelJobView:
-    bootstrap_task = _bootstrap_task_for_job(db, job) if db is not None else None
+def serialize_panel_job(
+    job: PanelJob,
+    db: Session | None = None,
+    bootstrap_task: ServerBootstrapTask | None = None,
+) -> PanelJobView:
+    if bootstrap_task is None and db is not None:
+        bootstrap_task = _bootstrap_task_for_job(db, job)
     source_label = "Открыть серверы" if job.job_type == "server_bootstrap" else None
     source_url = (
         f"/admin/servers?selected_bootstrap_task_id={bootstrap_task.id}#bootstrap-task-{bootstrap_task.id}"
@@ -739,8 +752,19 @@ def get_panel_jobs_page(
     if type_filter != "all":
         query = query.where(PanelJob.job_type == type_filter)
     jobs = db.execute(query.order_by(PanelJob.created_at.desc(), PanelJob.id.desc()).limit(200)).scalars().all()
+    bootstrap_tasks_by_job_id: dict[int, ServerBootstrapTask] = {}
+    bootstrap_job_ids = [job.id for job in jobs if job.job_type == "server_bootstrap"]
+    if bootstrap_job_ids:
+        bootstrap_tasks = db.execute(
+            select(ServerBootstrapTask).where(ServerBootstrapTask.panel_job_id.in_(bootstrap_job_ids))
+        ).scalars().all()
+        bootstrap_tasks_by_job_id = {
+            task.panel_job_id: task
+            for task in bootstrap_tasks
+            if task.panel_job_id is not None
+        }
     return PanelJobsPageView(
-        jobs=[serialize_panel_job(job, db) for job in jobs],
+        jobs=[serialize_panel_job(job, bootstrap_task=bootstrap_tasks_by_job_id.get(job.id)) for job in jobs],
         selected_status=status_filter,
         selected_type=type_filter,
         has_problem_jobs=has_problem_panel_jobs(db),
@@ -874,6 +898,17 @@ def _build_tic_executor_payload(
         interface_payload["listen_port"] = interface.listen_port
     if interface.address_v4:
         interface_payload["address_v4"] = interface.address_v4
+    interface_peers = list(getattr(interface, "peers", []) or [])
+    interface_payload["peers"] = [
+        {
+            "id": peer.id,
+            "slot": peer.slot,
+            "comment": peer.comment,
+            "is_enabled": peer.is_enabled,
+            "block_filters_enabled": peer.block_filters_enabled,
+        }
+        for peer in sorted(interface_peers, key=lambda item: item.slot)
+    ]
     payload["interface"] = interface_payload
     if interface.tak_server is not None:
         payload["tak_server"] = {
@@ -924,6 +959,22 @@ def _build_interface_executor_context(
         route_mode=route_mode,
         listen_port=listen_port,
         address_v4=address_v4,
+    )
+
+
+def _refresh_via_tak_interface_runtime(db: Session, interface: Interface, *, actor_user_id: int | None = None) -> None:
+    if interface.route_mode != RouteMode.VIA_TAK or interface.tak_server_id is None:
+        return
+    _run_agent_executor_logged(
+        db,
+        _build_tic_executor_payload(
+            "update_interface_route_mode",
+            interface,
+            exclusion_filters_enabled=interface_exclusion_filters_enabled(db, interface),
+            block_filters_enabled=block_filters_enabled(db),
+            extra={"target_state": {"route_mode": RouteMode.VIA_TAK.value}},
+        ),
+        actor_user_id=actor_user_id,
     )
 
 
@@ -2077,6 +2128,7 @@ def run_panel_diagnostics(
     *,
     focused_tic_server_id: int | None = None,
     focused_tak_server_id: int | None = None,
+    include_live_checks: bool = True,
 ) -> DiagnosticsPageView:
     require_admin(actor)
     checks: list[DiagnosticsCheckView] = []
@@ -2297,7 +2349,7 @@ def run_panel_diagnostics(
         runtime_details.append("PEER_AGENT_COMMAND не задан, agent-side runtime проверить нельзя.")
     elif not active_runtime_servers:
         runtime_details.append("Активных серверов для runtime-проверки нет.")
-    else:
+    elif include_live_checks:
         not_ready_servers: list[str] = []
         failed_servers: list[str] = []
         for server in active_runtime_servers:
@@ -2320,6 +2372,13 @@ def run_panel_diagnostics(
             runtime_details.append(f"Не готовы: {', '.join(not_ready_servers[:5])}")
         if failed_servers:
             runtime_details.append(f"Не удалось проверить: {', '.join(failed_servers[:5])}")
+    else:
+        offline_runtime_servers = [server.name for server in active_runtime_servers if not server.is_active]
+        runtime_details.append(f"Серверов в snapshot: {len(active_runtime_servers)}")
+        runtime_details.append("Live runtime-check выполняется только по кнопке «Запустить проверку».")
+        if offline_runtime_servers:
+            runtime_status = "warning"
+            runtime_details.append(f"Неактивные по состоянию панели: {', '.join(offline_runtime_servers[:5])}")
     checks.append(
         DiagnosticsCheckView(
             key="agent_runtime",
@@ -2386,19 +2445,43 @@ def run_panel_diagnostics(
             ):
                 interface_names = ", ".join(sorted(interface.name for interface in pair_interfaces))
                 recovered_pairs.append(f"{pair_label} · интерфейсы: {interface_names}")
-            try:
-                response = _run_tic_executor(
-                    _build_server_executor_payload(
-                        action="verify_tak_tunnel_status",
-                        server=sample.tic_server,
-                        extra={"tak_server": _server_agent_identity_payload(sample.tak_server)},
+            if include_live_checks:
+                try:
+                    response = _run_tic_executor(
+                        _build_server_executor_payload(
+                            action="verify_tak_tunnel_status",
+                            server=sample.tic_server,
+                            extra={"tak_server": _server_agent_identity_payload(sample.tak_server)},
+                        )
                     )
-                )
-                _validate_agent_contract_response(response)
-                tunnel_status = response.get("tunnel_status") or {}
-                is_active = bool(tunnel_status.get("is_active"))
-                status_value = str(tunnel_status.get("status") or ("active" if is_active else "unknown"))
-                artifact_revision = int(tunnel_status.get("artifact_revision") or 0)
+                    _validate_agent_contract_response(response)
+                    tunnel_status = response.get("tunnel_status") or {}
+                    is_active = bool(tunnel_status.get("is_active"))
+                    status_value = str(tunnel_status.get("status") or ("active" if is_active else "unknown"))
+                    artifact_revision = int(tunnel_status.get("artifact_revision") or 0)
+                    if artifact_revision > 0:
+                        rotation_event = _latest_tak_tunnel_rotation_event(
+                            db,
+                            tic_server_id=sample.tic_server_id,
+                            tak_server_id=sample.tak_server_id,
+                        )
+                        rotation_at = rotation_event.created_at.isoformat() if rotation_event is not None else "время неизвестно"
+                        rotated_pairs.append(f"{pair_label} · rev {artifact_revision} · {rotation_at}")
+                    if not is_active:
+                        tak_tunnel_status = "warning" if tak_tunnel_status == "ok" else tak_tunnel_status
+                        interface_names = ", ".join(sorted(interface.name for interface in pair_interfaces))
+                        degraded_pairs.append(f"{pair_label} ({status_value}) · интерфейсы: {interface_names}")
+                except ServerOperationUnavailableError as exc:
+                    tak_tunnel_status = "warning" if tak_tunnel_status == "ok" else tak_tunnel_status
+                    failed_pairs.append(f"{pair_label}: {exc}")
+                    tak_tunnel_action_links.append(
+                        DiagnosticsCheckView.ActionLinkView(
+                            label=f"{sample.tic_server.name} ↔ {sample.tak_server.name}",
+                            url=f"/admin/servers?bucket=active&server_type=tic&selected_server_id={sample.tic_server.id}",
+                        )
+                    )
+            else:
+                artifact_revision = int(sample.tak_tunnel_artifact_revision or 0)
                 if artifact_revision > 0:
                     rotation_event = _latest_tak_tunnel_rotation_event(
                         db,
@@ -2407,19 +2490,10 @@ def run_panel_diagnostics(
                     )
                     rotation_at = rotation_event.created_at.isoformat() if rotation_event is not None else "время неизвестно"
                     rotated_pairs.append(f"{pair_label} · rev {artifact_revision} · {rotation_at}")
-                if not is_active:
+                if any(interface.tak_tunnel_fallback_active for interface in pair_interfaces):
                     tak_tunnel_status = "warning" if tak_tunnel_status == "ok" else tak_tunnel_status
                     interface_names = ", ".join(sorted(interface.name for interface in pair_interfaces))
-                    degraded_pairs.append(f"{pair_label} ({status_value}) · интерфейсы: {interface_names}")
-            except ServerOperationUnavailableError as exc:
-                tak_tunnel_status = "warning" if tak_tunnel_status == "ok" else tak_tunnel_status
-                failed_pairs.append(f"{pair_label}: {exc}")
-                tak_tunnel_action_links.append(
-                    DiagnosticsCheckView.ActionLinkView(
-                        label=f"{sample.tic_server.name} ↔ {sample.tak_server.name}",
-                        url=f"/admin/servers?bucket=active&server_type=tic&selected_server_id={sample.tic_server.id}",
-                    )
-                )
+                    degraded_pairs.append(f"{pair_label} (fallback) · интерфейсы: {interface_names}")
         if degraded_pairs:
             tak_tunnel_details.append(f"Проблемные туннели: {'; '.join(degraded_pairs[:5])}")
         if failed_pairs:
@@ -2484,38 +2558,53 @@ def run_panel_diagnostics(
         if focused_pair is not None:
             pair_status = "warning"
             pair_details: list[str] = []
+            focused_pair_state = dict(repair_state.get(_tak_tunnel_pair_key(focused_pair.tic_server_id, focused_pair.tak_server_id)) or {})
             pair_message = "Не удалось получить актуальный статус туннеля для выбранной пары."
             try:
-                focused_response = _run_tic_executor(
-                    _build_server_executor_payload(
-                        action="verify_tak_tunnel_status",
-                        server=focused_pair.tic_server,
-                        extra={"tak_server": _server_agent_identity_payload(focused_pair.tak_server)},
-                    )
-                )
-                _validate_agent_contract_response(focused_response)
-                focused_status = focused_response.get("tunnel_status") or {}
-                is_active = bool(focused_status.get("is_active"))
-                raw_status = str(focused_status.get("status") or ("active" if is_active else "unknown"))
-                artifact_revision = int(focused_status.get("artifact_revision") or 0)
-                pair_status = "ok" if is_active else "warning"
-                pair_message = (
-                    "Туннель выбранной пары активен."
-                    if is_active
-                    else "Туннель выбранной пары неактивен или требует внимания."
-                )
-                pair_details.append(f"Статус агента: {raw_status}")
-                if artifact_revision > 0:
-                    pair_details.append(f"Ревизия артефактов: {artifact_revision}")
-                    rotation_event = _latest_tak_tunnel_rotation_event(
-                        db,
-                        tic_server_id=focused_pair.tic_server_id,
-                        tak_server_id=focused_pair.tak_server_id,
-                    )
-                    if rotation_event is not None:
-                        pair_details.append(
-                            f"Последняя ротация артефактов: {rotation_event.created_at.isoformat()}"
+                if include_live_checks:
+                    focused_response = _run_tic_executor(
+                        _build_server_executor_payload(
+                            action="verify_tak_tunnel_status",
+                            server=focused_pair.tic_server,
+                            extra={"tak_server": _server_agent_identity_payload(focused_pair.tak_server)},
                         )
+                    )
+                    _validate_agent_contract_response(focused_response)
+                    focused_status = focused_response.get("tunnel_status") or {}
+                    is_active = bool(focused_status.get("is_active"))
+                    raw_status = str(focused_status.get("status") or ("active" if is_active else "unknown"))
+                    artifact_revision = int(focused_status.get("artifact_revision") or 0)
+                    pair_status = "ok" if is_active else "warning"
+                    pair_message = (
+                        "Туннель выбранной пары активен."
+                        if is_active
+                        else "Туннель выбранной пары неактивен или требует внимания."
+                    )
+                    pair_details.append(f"Статус агента: {raw_status}")
+                    if artifact_revision > 0:
+                        pair_details.append(f"Ревизия артефактов: {artifact_revision}")
+                        rotation_event = _latest_tak_tunnel_rotation_event(
+                            db,
+                            tic_server_id=focused_pair.tic_server_id,
+                            tak_server_id=focused_pair.tak_server_id,
+                        )
+                        if rotation_event is not None:
+                            pair_details.append(
+                                f"Последняя ротация артефактов: {rotation_event.created_at.isoformat()}"
+                            )
+                else:
+                    raw_status = focused_pair.tak_tunnel_last_status or ("fallback" if focused_pair.tak_tunnel_fallback_active else "unknown")
+                    artifact_revision = int(focused_pair.tak_tunnel_artifact_revision or 0)
+                    pair_status = "warning" if focused_pair.tak_tunnel_fallback_active else "ok"
+                    pair_message = (
+                        "Снимок пары показывает fallback или деградацию."
+                        if focused_pair.tak_tunnel_fallback_active
+                        else "Снимок пары не показывает активного fallback."
+                    )
+                    pair_details.append(f"Snapshot-статус панели: {raw_status}")
+                    pair_details.append("Live tunnel-check выполняется только по кнопке «Запустить проверку».")
+                    if artifact_revision > 0:
+                        pair_details.append(f"Ревизия артефактов: {artifact_revision}")
                 failure_count = int(focused_pair_state.get("failure_count") or 0)
                 if bool(focused_pair_state.get("manual_attention_required")):
                     pair_details.append("РђРІС‚РѕРІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёРµ РѕСЃС‚Р°РЅРѕРІР»РµРЅРѕ: С‚СЂРµР±СѓРµС‚СЃСЏ СЂСѓС‡РЅРѕРµ РІРјРµС€Р°С‚РµР»СЊСЃС‚РІРѕ.")
@@ -2875,6 +2964,9 @@ REGISTRATION_PASSWORD_RE = re.compile(r"^[A-Za-z0-9]{4,255}$")
 REGISTRATION_DISPLAY_NAME_RE = re.compile(r"^[A-Za-zА-Яа-яЁё0-9 ]{1,120}$")
 REGISTRATION_CONTACT_RE = re.compile(r"^[A-Za-zА-Яа-яЁё0-9 @?_\\-\\.,]{1,255}$")
 REGISTRATION_USED_LINK_RETENTION_DAYS = 7
+INITIAL_ADMIN_TOKEN_SETTING_KEY = "initial_admin_setup_token"
+INITIAL_ADMIN_TOKEN_CREATED_AT_SETTING_KEY = "initial_admin_setup_token_created_at"
+INITIAL_ADMIN_TOKEN_ANNOUNCED_AT_SETTING_KEY = "initial_admin_setup_token_announced_at"
 
 
 def _user_region_label(value: UserRegion | str | None) -> str | None:
@@ -2889,6 +2981,26 @@ def _user_region_label(value: UserRegion | str | None) -> str | None:
 
 def _registration_link_url(token_id: str, base_url: str) -> str:
     return f"{base_url.rstrip('/')}/registration/{quote(token_id)}"
+
+
+def _initial_admin_setup_url(token_id: str, base_url: str) -> str:
+    return f"{base_url.rstrip('/')}/bootstrap-admin/{quote(token_id)}"
+
+
+def has_admin_user(db: Session) -> bool:
+    return db.execute(select(User.id).where(User.role == UserRole.ADMIN).limit(1)).scalar_one_or_none() is not None
+
+
+def _validate_first_admin_payload(db: Session, payload: FirstAdminRegistrationCreate) -> tuple[str, str]:
+    login = normalize_login(payload.login)
+    password = str(payload.password or "").strip()
+    if not REGISTRATION_LOGIN_RE.fullmatch(login):
+        raise PermissionDeniedError("Login must be 1-20 chars and contain only English letters and digits")
+    if db.execute(select(User).where(User.login == login)).scalar_one_or_none() is not None:
+        raise PermissionDeniedError("Login already exists")
+    if not REGISTRATION_PASSWORD_RE.fullmatch(password):
+        raise PermissionDeniedError("Password must be at least 4 chars and contain only English letters and digits")
+    return login, password
 
 
 def _validate_public_registration_payload(db: Session, payload: PublicRegistrationCreate) -> tuple[str, str, str, str, UserRegion]:
@@ -2954,6 +3066,94 @@ def ensure_default_settings(db: Session) -> None:
     purge_old_audit_logs(db)
     if missing or deprecated_rows or (repo_default and repo_row is not None and repo_row.value == repo_default):
         db.flush()
+
+
+def ensure_initial_admin_setup_token(db: Session) -> str | None:
+    ensure_default_settings(db)
+    if has_admin_user(db):
+        for key in (
+            INITIAL_ADMIN_TOKEN_SETTING_KEY,
+            INITIAL_ADMIN_TOKEN_CREATED_AT_SETTING_KEY,
+            INITIAL_ADMIN_TOKEN_ANNOUNCED_AT_SETTING_KEY,
+        ):
+            row = db.get(AppSetting, key)
+            if row is not None:
+                db.delete(row)
+        db.flush()
+        return None
+    existing = db.get(AppSetting, INITIAL_ADMIN_TOKEN_SETTING_KEY)
+    if existing is not None and existing.value.strip():
+        return existing.value.strip()
+    token = secrets.token_urlsafe(24)
+    now_iso = utc_now().isoformat()
+    db.merge(AppSetting(key=INITIAL_ADMIN_TOKEN_SETTING_KEY, value=token))
+    db.merge(AppSetting(key=INITIAL_ADMIN_TOKEN_CREATED_AT_SETTING_KEY, value=now_iso))
+    db.flush()
+    return token
+
+
+def get_initial_admin_setup_url(db: Session, base_url: str) -> str | None:
+    token = ensure_initial_admin_setup_token(db)
+    if not token:
+        return None
+    return _initial_admin_setup_url(token, base_url)
+
+
+def get_initial_admin_setup_token(db: Session, token_id: str) -> str:
+    if has_admin_user(db):
+        raise EntityNotFoundError("Initial admin setup link is invalid or already used")
+    token_row = db.get(AppSetting, INITIAL_ADMIN_TOKEN_SETTING_KEY)
+    if token_row is None or token_row.value.strip() != token_id.strip():
+        raise EntityNotFoundError("Initial admin setup link is invalid or already used")
+    return token_row.value.strip()
+
+
+def complete_initial_admin_setup(db: Session, token_id: str, payload: FirstAdminRegistrationCreate) -> User:
+    get_initial_admin_setup_token(db, token_id)
+    login, password = _validate_first_admin_payload(db, payload)
+    admin = User(
+        login=login,
+        password_hash=get_password_hash(password),
+        display_name=login,
+        role=UserRole.ADMIN,
+        expires_at=None,
+        is_active=True,
+    )
+    db.add(admin)
+    for key in (
+        INITIAL_ADMIN_TOKEN_SETTING_KEY,
+        INITIAL_ADMIN_TOKEN_CREATED_AT_SETTING_KEY,
+        INITIAL_ADMIN_TOKEN_ANNOUNCED_AT_SETTING_KEY,
+    ):
+        row = db.get(AppSetting, key)
+        if row is not None:
+            db.delete(row)
+    db.flush()
+    write_audit_log(
+        db,
+        event_type="admin_bootstrap.completed",
+        severity="info",
+        message=f"Initial admin account created: {login}",
+        message_ru=f"Создан первый администратор панели: {login}.",
+        actor_user_id=admin.id,
+        details="initial-admin-bootstrap",
+        commit=False,
+    )
+    db.commit()
+    db.refresh(admin)
+    return admin
+
+
+def announce_initial_admin_setup_if_needed(db: Session, base_url: str) -> str | None:
+    token = ensure_initial_admin_setup_token(db)
+    if not token:
+        return None
+    announced = db.get(AppSetting, INITIAL_ADMIN_TOKEN_ANNOUNCED_AT_SETTING_KEY)
+    if announced is None:
+        db.merge(AppSetting(key=INITIAL_ADMIN_TOKEN_ANNOUNCED_AT_SETTING_KEY, value=utc_now().isoformat()))
+        db.commit()
+        return _initial_admin_setup_url(token, base_url)
+    return None
 
 
 def ensure_seed_data(db: Session) -> None:
@@ -3102,7 +3302,6 @@ def purge_expired_peers(db: Session, peer_ids: set[int] | None = None) -> int:
 
 def get_dashboard_data(db: Session, user: User, preview_mode: bool = False) -> UserDashboardView:
     purge_expired_peers(db)
-    _reconcile_tak_tunnel_routes(db)
     hydrated_user = db.execute(
         select(User)
         .options(
@@ -3880,6 +4079,8 @@ def check_panel_updates(db: Session, actor: User) -> dict[str, object]:
             message_ru="Проверка обновлений панели пропущена: Git-репозиторий Nelomai не задан.",
             actor_user_id=actor.id,
         )
+        _PANEL_UPDATE_CACHE["fetched_at"] = time.time()
+        _PANEL_UPDATE_CACHE["value"] = dict(result)
         return result
 
     owner, name = repo
@@ -3930,6 +4131,8 @@ def check_panel_updates(db: Session, actor: User) -> dict[str, object]:
             message_ru="Проверка обновлений панели завершена: релизы или теги не найдены.",
             actor_user_id=actor.id,
         )
+        _PANEL_UPDATE_CACHE["fetched_at"] = time.time()
+        _PANEL_UPDATE_CACHE["value"] = dict(result)
         return result
 
     update_available = _version_parts(latest_version) > _version_parts(current_version)
@@ -3953,6 +4156,8 @@ def check_panel_updates(db: Session, actor: User) -> dict[str, object]:
         ),
         actor_user_id=actor.id,
     )
+    _PANEL_UPDATE_CACHE["fetched_at"] = time.time()
+    _PANEL_UPDATE_CACHE["value"] = dict(result)
     return result
 
 
@@ -4179,8 +4384,55 @@ def _server_agent_update_summary(db: Session, server: Server) -> ServerAgentUpda
     )
 
 
+def _check_panel_updates_summary_cached(db: Session, *, force: bool = False) -> dict[str, object]:
+    fetched_at = float(_PANEL_UPDATE_CACHE.get("fetched_at") or 0.0)
+    cached_value = _PANEL_UPDATE_CACHE.get("value")
+    if (
+        not force
+        and isinstance(cached_value, dict)
+        and (time.time() - fetched_at) < UPDATES_CACHE_TTL_SECONDS
+    ):
+        return dict(cached_value)
+    if not force:
+        basic_settings = get_basic_settings(db)
+        current_version = get_panel_version()
+        return {
+            "current_version": current_version,
+            "latest_version": None,
+            "update_available": False,
+            "repo_url": basic_settings.get("nelomai_git_repo", "").strip(),
+            "release_url": None,
+            "message": "Проверка обновлений ещё не запускалась в этой сессии",
+        }
+    value = _check_panel_updates_summary(db)
+    _PANEL_UPDATE_CACHE["fetched_at"] = time.time()
+    _PANEL_UPDATE_CACHE["value"] = dict(value)
+    return value
+
+
+def _server_agent_update_summary_cached(
+    db: Session,
+    server: Server,
+    *,
+    force: bool = False,
+) -> ServerAgentUpdateView:
+    cached = _SERVER_AGENT_UPDATE_CACHE.get(server.id)
+    if not force and cached is not None and (time.time() - cached[0]) < UPDATES_CACHE_TTL_SECONDS:
+        return cached[1]
+    if not force:
+        return _server_agent_update_view(
+            server=server,
+            repository_url=_server_agent_repository(get_basic_settings(db), server),
+            status="unchecked",
+            message="Проверка обновлений ещё не запускалась в этой сессии",
+        )
+    value = _server_agent_update_summary(db, server)
+    _SERVER_AGENT_UPDATE_CACHE[server.id] = (time.time(), value)
+    return value
+
+
 def has_available_updates(db: Session) -> bool:
-    panel_update_summary = _check_panel_updates_summary(db)
+    panel_update_summary = _check_panel_updates_summary_cached(db)
     if bool(panel_update_summary.get("update_available")):
         return True
     servers = db.execute(
@@ -4189,35 +4441,65 @@ def has_available_updates(db: Session) -> bool:
         .order_by(Server.id.asc())
     ).scalars().all()
     for server in servers:
-        if _server_agent_update_summary(db, server).update_available:
+        if _server_agent_update_summary_cached(db, server).update_available:
             return True
     return False
 
 
-def get_updates_page_data(db: Session, actor: User) -> UpdatesPageView:
+def _agent_update_problem_priority(item: ServerAgentUpdateView) -> tuple[int, str, int]:
+    if item.status in {"legacy", "repo_missing", "excluded", "error"}:
+        return (0, item.server_type, item.server_id)
+    if item.update_available:
+        return (1, item.server_type, item.server_id)
+    return (2, item.server_type, item.server_id)
+
+
+def get_updates_page_data(db: Session, actor: User, *, attention_only: bool = False, server_type: str = "all") -> UpdatesPageView:
     require_admin(actor)
-    panel_update_summary = PanelUpdateCheckView(**_check_panel_updates_summary(db))
+    panel_update_summary = PanelUpdateCheckView(**_check_panel_updates_summary_cached(db))
+    selected_server_type = server_type if server_type in {"all", "tic", "tak", "storage"} else "all"
     servers = db.execute(
         select(Server)
         .where(Server.server_type.in_([ServerType.TIC, ServerType.TAK, ServerType.STORAGE]))
         .order_by(Server.server_type.asc(), Server.name.asc(), Server.id.asc())
     ).scalars().all()
-    agent_update_summaries = [_server_agent_update_summary(db, server) for server in servers]
+    if selected_server_type != "all":
+        servers = [server for server in servers if server.server_type.value == selected_server_type]
+    all_agent_update_summaries = [_server_agent_update_summary_cached(db, server) for server in servers]
     update_available_count = (1 if panel_update_summary.update_available else 0) + len(
-        [item for item in agent_update_summaries if item.update_available]
+        [item for item in all_agent_update_summaries if item.update_available]
+    )
+    problem_agent_update_summaries = [
+        item
+        for item in all_agent_update_summaries
+        if item.update_available or item.status in {"legacy", "repo_missing", "excluded", "error"}
+    ]
+    healthy_agent_update_summaries = [
+        item
+        for item in all_agent_update_summaries
+        if not (item.update_available or item.status in {"legacy", "repo_missing", "excluded", "error"})
+    ]
+    problem_agent_update_summaries = sorted(problem_agent_update_summaries, key=_agent_update_problem_priority)
+    healthy_agent_update_summaries = sorted(healthy_agent_update_summaries, key=lambda item: (item.server_type, item.server_id))
+    bulk_updatable_agent_count = len([item for item in all_agent_update_summaries if item.update_available])
+    manual_review_agent_count = len(
+        [item for item in all_agent_update_summaries if item.status in {"legacy", "repo_missing", "excluded", "error"}]
     )
     version_issue_count = (1 if panel_update_summary.update_available else 0) + len(
-        [
-            item
-            for item in agent_update_summaries
-            if item.update_available or item.status in {"legacy", "repo_missing", "excluded", "error"}
-        ]
+        problem_agent_update_summaries
     )
+    agent_update_summaries = problem_agent_update_summaries if attention_only else all_agent_update_summaries
     return UpdatesPageView(
         panel_update_summary=panel_update_summary,
         agent_update_summaries=agent_update_summaries,
+        problem_agent_update_summaries=problem_agent_update_summaries,
+        healthy_agent_update_summaries=healthy_agent_update_summaries,
         update_available_count=update_available_count,
         version_issue_count=version_issue_count,
+        attention_only=attention_only,
+        bulk_updatable_agent_count=bulk_updatable_agent_count,
+        manual_review_agent_count=manual_review_agent_count,
+        selected_server_type=selected_server_type,
     )
 
 
@@ -4235,6 +4517,7 @@ def check_server_agent_updates(db: Session, actor: User) -> list[ServerAgentUpda
             update_panel_job_progress(db, job, 10 + int(index / total * 75), f"Проверяем {server.name} ({index}/{total})")
             result = _run_server_agent_update_action(db, actor, server, "check_server_agent_update")
             results.append(result)
+            _SERVER_AGENT_UPDATE_CACHE[server.id] = (time.time(), result)
             _write_agent_update_audit_log(db, actor, result, action="check")
         errors = len([item for item in results if item.status == "error"])
         available = len([item for item in results if item.update_available])
@@ -4267,6 +4550,7 @@ def apply_server_agent_updates(db: Session, actor: User, server_id: int | None =
             update_panel_job_progress(db, job, 10 + int(index / total * 75), f"Обновляем {server.name} ({index}/{total})")
             result = _run_server_agent_update_action(db, actor, server, "update_server_agent")
             results.append(result)
+            _SERVER_AGENT_UPDATE_CACHE[server.id] = (time.time(), result)
             _write_agent_update_audit_log(db, actor, result, action="apply")
         errors = len([item for item in results if item.status == "error"])
         updated = len([item for item in results if item.status == "updated"])
@@ -4502,7 +4786,7 @@ def _write_peer_configs(db: Session, zip_file: zipfile.ZipFile, manifest: dict[s
             response = _run_peer_agent_action(db, "download_peer_config", peer.interface, peer)
             payload = _extract_download_payload(
                 response,
-                default_filename=f"{peer.interface.name}-peer-{peer.slot}.conf",
+                default_filename=f"{peer.interface.name}-{peer.slot}.conf",
                 default_content_type="text/plain; charset=utf-8",
             )
             agent_filename = str(payload["filename"])
@@ -5775,6 +6059,124 @@ def _metric_seed(value: int) -> int:
     return (value * 37) + 11
 
 
+def _read_cpu_percent() -> float:
+    if os.name != "posix":
+        return 0.0
+    try:
+        with open("/proc/stat", "r", encoding="utf-8") as handle:
+            first_line = handle.readline().strip()
+        time.sleep(0.05)
+        with open("/proc/stat", "r", encoding="utf-8") as handle:
+            second_line = handle.readline().strip()
+        first_parts = [int(part) for part in first_line.split()[1:]]
+        second_parts = [int(part) for part in second_line.split()[1:]]
+        if len(first_parts) < 4 or len(second_parts) < 4:
+            return 0.0
+        first_idle = first_parts[3] + (first_parts[4] if len(first_parts) > 4 else 0)
+        second_idle = second_parts[3] + (second_parts[4] if len(second_parts) > 4 else 0)
+        first_total = sum(first_parts)
+        second_total = sum(second_parts)
+        total_delta = second_total - first_total
+        idle_delta = second_idle - first_idle
+        if total_delta <= 0:
+            return 0.0
+        usage = 100.0 * (1.0 - (idle_delta / total_delta))
+        return round(max(0.0, min(usage, 100.0)), 1)
+    except (FileNotFoundError, OSError, ValueError):
+        return 0.0
+
+
+def _read_ram_percent() -> float:
+    try:
+        if os.name == "posix":
+            meminfo: dict[str, int] = {}
+            try:
+                with open("/proc/meminfo", "r", encoding="utf-8") as handle:
+                    for line in handle:
+                        if ":" not in line:
+                            continue
+                        key, raw_value = line.split(":", 1)
+                        value_token = raw_value.strip().split()[0]
+                        meminfo[key] = int(value_token)
+                total_kb = meminfo.get("MemTotal")
+                available_kb = meminfo.get("MemAvailable")
+                if total_kb and available_kb is not None and total_kb > 0:
+                    total = total_kb * 1024
+                    available = available_kb * 1024
+                else:
+                    raise ValueError("incomplete meminfo")
+            except (FileNotFoundError, OSError, ValueError):
+                page_size = os.sysconf("SC_PAGE_SIZE")
+                total_pages = os.sysconf("SC_PHYS_PAGES")
+                available_pages = os.sysconf("SC_AVPHYS_PAGES")
+                total = page_size * total_pages
+                available = page_size * available_pages
+        elif os.name == "nt":
+            class _MemoryStatus(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+
+            status = _MemoryStatus()
+            status.dwLength = ctypes.sizeof(status)
+            if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                return 0.0
+            total = int(status.ullTotalPhys)
+            available = int(status.ullAvailPhys)
+        else:
+            return 0.0
+        if total <= 0:
+            return 0.0
+        usage = 100.0 * ((total - available) / total)
+        return round(max(0.0, min(usage, 100.0)), 1)
+    except (AttributeError, OSError, ValueError):
+        return 0.0
+
+
+def _read_disk_metrics(path: Path) -> tuple[float, float, float]:
+    try:
+        usage = shutil.disk_usage(path)
+    except OSError:
+        return 0.0, 0.0, 0.0
+    if usage.total <= 0:
+        return 0.0, 0.0, 0.0
+    total_gb = round(usage.total / (1024**3), 1)
+    used_gb = round((usage.total - usage.free) / (1024**3), 1)
+    percent = round((used_gb / total_gb) * 100, 1) if total_gb > 0 else 0.0
+    return used_gb, total_gb, max(0.0, min(percent, 100.0))
+
+
+def _build_panel_server_metrics() -> dict[str, float | None]:
+    disk_used_gb, disk_total_gb, disk_percent = _read_disk_metrics(Path.cwd())
+    return {
+        "cpu_percent": _read_cpu_percent(),
+        "ram_percent": _read_ram_percent(),
+        "disk_total_gb": disk_total_gb,
+        "disk_percent": disk_percent,
+        "disk_used_gb": disk_used_gb,
+        "traffic_mbps": None,
+    }
+
+
+def _build_unavailable_server_metrics() -> dict[str, float | None]:
+    return {
+        "cpu_percent": 0.0,
+        "ram_percent": 0.0,
+        "disk_total_gb": 0.0,
+        "disk_percent": 0.0,
+        "disk_used_gb": 0.0,
+        "traffic_mbps": None,
+    }
+
+
 def _server_status(server: Server | None) -> str:
     if server is None:
         return "unknown"
@@ -5786,28 +6188,15 @@ def _server_status(server: Server | None) -> str:
 
 
 def _build_server_metrics(seed_value: int, available: bool, traffic_enabled: bool) -> dict[str, float | None]:
-    seed = _metric_seed(seed_value)
-    cpu_percent = round(6 + (seed % 52) + ((seed // 3) % 10) / 10, 1) if available else 0.0
-    ram_percent = round(18 + (seed % 57) + ((seed // 7) % 10) / 10, 1) if available else 0.0
-    disk_total_gb = float(120 + (seed % 6) * 80)
-    disk_percent = round(12 + (seed % 63) + ((seed // 5) % 10) / 10, 1) if available else 0.0
-    disk_used_gb = round(disk_total_gb * disk_percent / 100, 1)
-    traffic_mbps = round(8 + (seed % 140) / 10, 1) if available and traffic_enabled else None
-    return {
-        "cpu_percent": cpu_percent,
-        "ram_percent": ram_percent,
-        "disk_total_gb": disk_total_gb,
-        "disk_percent": disk_percent,
-        "disk_used_gb": disk_used_gb,
-        "traffic_mbps": traffic_mbps,
-    }
+    _ = (seed_value, available, traffic_enabled)
+    return _build_unavailable_server_metrics()
 
 
 def _server_metrics_note(server: Server | None, status: str) -> str:
     if server is None:
         return "Нет данных."
     if status == "online" and server.last_seen_at is not None:
-        return "Последняя проверка"
+        return "Подключение проверено; реальные метрики сервера пока не собираются."
     if status == "offline":
         return "Проверка не удалась."
     if status == "excluded":
@@ -5833,7 +6222,7 @@ def _build_server_card(
         host=host,
         available=available,
         status="online" if available else "offline",
-        metrics_note="Последняя проверка" if available else "Нет данных.",
+        metrics_note="Подключение проверено; реальные метрики сервера пока не собираются." if available else "Нет данных.",
         cpu_percent=float(metrics["cpu_percent"]),
         ram_percent=float(metrics["ram_percent"]),
         disk_used_gb=float(metrics["disk_used_gb"]),
@@ -5842,6 +6231,26 @@ def _build_server_card(
         traffic_mbps=float(metrics["traffic_mbps"]) if metrics["traffic_mbps"] is not None else None,
         selected_id=selected_id,
         options=serialize_server_options(options or []),
+    )
+
+
+def _build_panel_server_card(*, host: str) -> ServerCardView:
+    metrics = _build_panel_server_metrics()
+    return ServerCardView(
+        key="panel",
+        name="Panel Server",
+        host=host,
+        available=True,
+        status="online",
+        metrics_note="Локальные метрики panel-host.",
+        cpu_percent=float(metrics["cpu_percent"]),
+        ram_percent=float(metrics["ram_percent"]),
+        disk_used_gb=float(metrics["disk_used_gb"]),
+        disk_total_gb=float(metrics["disk_total_gb"]),
+        disk_percent=float(metrics["disk_percent"]),
+        traffic_mbps=None,
+        selected_id=None,
+        options=[],
     )
 
 
@@ -5861,14 +6270,24 @@ def get_admin_page_data(
     tic_server_id: int | None = None,
     tak_server_id: int | None = None,
     client_scope: str = "all",
+    active_tab: str = "overview",
+    settings_view: str = "basic",
     filter_scope: str = "all",
     filter_kind: FilterKind = FilterKind.EXCLUSION,
 ) -> AdminPageView:
     purge_expired_peers(db)
     require_admin(actor)
-    ensure_users_have_resources(db)
     ensure_default_settings(db)
-    _reconcile_tak_tunnel_routes(db)
+    active_tab = active_tab if active_tab in {"overview", "settings", "clients", "access"} else "overview"
+    settings_view = settings_view if settings_view in {
+        "basic",
+        "logs",
+        "updates",
+        "backups",
+        "shared_peers",
+        "filters",
+        "block_filters",
+    } else "basic"
 
     tic_servers = db.execute(
         select(Server).where(Server.server_type == ServerType.TIC).order_by(Server.id.asc())
@@ -5878,48 +6297,70 @@ def get_admin_page_data(
     ).scalars().all()
     selected_tic = _select_server(tic_servers, tic_server_id)
     selected_tak = _select_server(tak_servers, tak_server_id)
-    panel_update_summary = PanelUpdateCheckView(**_check_panel_updates_summary(db))
-    agent_update_summaries = [
-        _server_agent_update_summary(db, server)
-        for server in [selected_tic, selected_tak]
-        if server is not None
-    ]
-
-    interfaces = db.execute(
-        select(Interface)
-        .options(joinedload(Interface.peers), joinedload(Interface.user), joinedload(Interface.tic_server))
-        .order_by(Interface.created_at.asc(), Interface.id.asc())
-    ).unique().scalars().all()
-    clients = db.execute(
-        select(User)
-        .options(joinedload(User.interfaces), joinedload(User.resources), joinedload(User.contact_link_record))
-        .order_by(User.role.asc(), User.created_at.asc(), User.id.asc())
-    ).unique().scalars().all()
-    if client_scope == "without_interfaces":
-        clients = [user for user in clients if user.role == UserRole.ADMIN or len(user.interfaces) == 0]
-    available_interfaces = [interface for interface in interfaces if interface.is_pending_owner]
-    filters = get_admin_filters_view(db, scope_filter=filter_scope, kind=filter_kind)
-    access_users = [
-        user
-        for user in clients
-        if user.role != UserRole.ADMIN and normalize_utc_datetime(user.expires_at) is not None
-    ]
-    access_users.sort(key=lambda user: normalize_utc_datetime(user.expires_at) or datetime.max.replace(tzinfo=UTC))
-    access_users_without_expiry = [
-        user
-        for user in clients
-        if user.role != UserRole.ADMIN and normalize_utc_datetime(user.expires_at) is None
-    ]
-    access_users_without_expiry.sort(key=lambda user: (user.display_name or user.login).lower())
-
-    panel_server = _build_server_card(
-        key="panel",
-        name="Panel Server",
-        host="nelomai-panel.local",
-        available=True,
-        seed_value=max(len(interfaces), 1) + len(clients),
-        traffic_enabled=False,
+    need_version_summary = False
+    panel_update_summary = PanelUpdateCheckView(**_check_panel_updates_summary(db)) if need_version_summary else None
+    agent_update_summaries = (
+        [
+            _server_agent_update_summary(db, server)
+            for server in [selected_tic, selected_tak]
+            if server is not None
+        ]
+        if need_version_summary
+        else []
     )
+
+    interfaces: list[Interface] = []
+    available_interfaces: list[Interface] = []
+    if active_tab == "overview":
+        interfaces = db.execute(
+            select(Interface)
+            .options(joinedload(Interface.peers), joinedload(Interface.user), joinedload(Interface.tic_server))
+            .order_by(Interface.created_at.asc(), Interface.id.asc())
+        ).unique().scalars().all()
+        available_interfaces = [interface for interface in interfaces if interface.is_pending_owner]
+    elif active_tab == "clients":
+        available_interfaces = db.execute(
+            select(Interface)
+            .options(joinedload(Interface.user))
+            .where(Interface.user_id.is_(None))
+            .order_by(Interface.created_at.asc(), Interface.id.asc())
+        ).unique().scalars().all()
+
+    clients: list[User] = []
+    if active_tab == "clients":
+        ensure_users_have_resources(db)
+        clients = db.execute(
+            select(User)
+            .options(joinedload(User.interfaces), joinedload(User.resources), joinedload(User.contact_link_record))
+            .order_by(User.role.asc(), User.created_at.asc(), User.id.asc())
+        ).unique().scalars().all()
+        if client_scope == "without_interfaces":
+            clients = [user for user in clients if user.role == UserRole.ADMIN or len(user.interfaces) == 0]
+
+    filters = get_admin_filters_view(db, scope_filter=filter_scope, kind=filter_kind) if active_tab == "settings" and settings_view in {"filters", "block_filters"} else []
+
+    access_users: list[User] = []
+    access_users_without_expiry: list[User] = []
+    if active_tab == "access":
+        access_candidates = db.execute(
+            select(User)
+            .where(User.role != UserRole.ADMIN)
+            .order_by(User.created_at.asc(), User.id.asc())
+        ).scalars().all()
+        access_users = [
+            user
+            for user in access_candidates
+            if normalize_utc_datetime(user.expires_at) is not None
+        ]
+        access_users.sort(key=lambda user: normalize_utc_datetime(user.expires_at) or datetime.max.replace(tzinfo=UTC))
+        access_users_without_expiry = [
+            user
+            for user in access_candidates
+            if normalize_utc_datetime(user.expires_at) is None
+        ]
+        access_users_without_expiry.sort(key=lambda user: (user.display_name or user.login).lower())
+
+    panel_server = _build_panel_server_card(host=urlparse(settings.panel_public_base_url).hostname or "panel-host")
     tic_card = _build_server_card(
         key="tic",
         name=selected_tic.name if selected_tic else "Tic Server",
@@ -5961,15 +6402,25 @@ def get_admin_page_data(
     for server in [*tic_servers, *tak_servers]:
         if not server.is_active and runtime_status == "ok":
             runtime_status = "warning"
-    for interface in interfaces:
-        if interface.route_mode == RouteMode.VIA_TAK and interface.tak_tunnel_fallback_active:
-            tak_tunnel_status = "warning"
-            break
-    beta_readiness = _build_beta_readiness_summary(
-        backup_status=backup_status,
-        latest_backup_status=latest_backup_status,
-        runtime_status=runtime_status,
-        tak_tunnel_status=tak_tunnel_status,
+    via_tak_fallback_exists = db.execute(
+        select(Interface.id)
+        .where(
+            Interface.route_mode == RouteMode.VIA_TAK,
+            Interface.tak_tunnel_fallback_active.is_(True),
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    if via_tak_fallback_exists is not None:
+        tak_tunnel_status = "warning"
+    beta_readiness = (
+        _build_beta_readiness_summary(
+            backup_status=backup_status,
+            latest_backup_status=latest_backup_status,
+            runtime_status=runtime_status,
+            tak_tunnel_status=tak_tunnel_status,
+        )
+        if active_tab in {"overview", "settings"}
+        else None
     )
 
     return serialize_admin_page(
@@ -6004,7 +6455,6 @@ def get_servers_page_data(
 ) -> ServersPageView:
     purge_expired_peers(db)
     require_admin(actor)
-    _reconcile_tak_tunnel_routes(db)
     view = view if view in {"servers", "tunnels"} else "servers"
     bucket = bucket if bucket in {"active", "excluded"} else "active"
     server_type = server_type if server_type in {"all", "tic", "tak", "storage"} else "all"
@@ -6017,7 +6467,7 @@ def get_servers_page_data(
     ).unique().scalars().all()
     bootstrap_tasks = db.execute(
         select(ServerBootstrapTask)
-        .where(ServerBootstrapTask.status.in_(["running", "input_required", "failed"]))
+        .where(ServerBootstrapTask.status.in_(["running", "input_required"]))
         .order_by(ServerBootstrapTask.updated_at.desc(), ServerBootstrapTask.id.desc())
     ).scalars().all()
 
@@ -6097,7 +6547,6 @@ def get_servers_page_data(
                     continue
             else:
                 continue
-        agent_update_summary = _server_agent_update_summary(db, server) if server.server_type in {ServerType.TIC, ServerType.TAK, ServerType.STORAGE} else None
         interface_count = len(server.tic_interfaces)
         tak_fallback_interfaces = sorted(
             (interface.name for interface in server.tic_interfaces if interface.tak_tunnel_fallback_active),
@@ -6146,12 +6595,12 @@ def get_servers_page_data(
             tak_fallback_interface_names=tak_fallback_interfaces,
             tak_recovered_interface_count=len(tak_recovered_interfaces),
             tak_recovered_interface_names=tak_recovered_interfaces,
-            agent_update_status=agent_update_summary.status if agent_update_summary is not None else None,
-            agent_version=agent_update_summary.agent_version if agent_update_summary is not None else None,
-            contract_version=agent_update_summary.contract_version if agent_update_summary is not None else None,
-            current_version=agent_update_summary.current_version if agent_update_summary is not None else None,
-            latest_version=agent_update_summary.latest_version if agent_update_summary is not None else None,
-            update_available=agent_update_summary.update_available if agent_update_summary is not None else False,
+            agent_update_status=None,
+            agent_version=None,
+            contract_version=None,
+            current_version=None,
+            latest_version=None,
+            update_available=False,
         )
         if server.is_excluded:
             excluded_servers.append(item)
@@ -7021,7 +7470,9 @@ def verify_server_status(db: Session, actor: User, server_id: int) -> bool:
 
 def _build_server_runtime_view(response: dict[str, object], server: Server) -> ServerRuntimeCheckView:
     checks: list[ServerRuntimeCheckItemView] = []
-    raw_checks = response.get("checks")
+    runtime_payload = response.get("runtime")
+    runtime_data = runtime_payload if isinstance(runtime_payload, dict) else response
+    raw_checks = runtime_data.get("checks") if isinstance(runtime_data, dict) else None
     if isinstance(raw_checks, list):
         for index, item in enumerate(raw_checks):
             if not isinstance(item, dict):
@@ -7030,19 +7481,108 @@ def _build_server_runtime_view(response: dict[str, object], server: Server) -> S
                 ServerRuntimeCheckItemView(
                     key=str(item.get("key") or f"check_{index + 1}"),
                     label=str(item.get("label") or item.get("title") or item.get("key") or f"check_{index + 1}"),
-                    status=str(item.get("status") or ("ok" if item.get("ready") else "error")),
+                    status=str(
+                        item.get("status")
+                        or ("ok" if bool(item.get("ok", item.get("ready", False))) else "error")
+                    ),
                     message=str(item.get("message") or item.get("detail") or ""),
                 )
             )
     return ServerRuntimeCheckView(
         server_id=server.id,
-        ready=bool(response.get("ready", False)),
-        mode=str(response.get("mode") or "unknown"),
-        runtime_root=str(response.get("runtime_root")) if response.get("runtime_root") else None,
-        wireguard_root=str(response.get("wireguard_root")) if response.get("wireguard_root") else None,
-        peers_root=str(response.get("peers_root")) if response.get("peers_root") else None,
+        ready=bool(runtime_data.get("ready", False)) if isinstance(runtime_data, dict) else False,
+        mode=str(runtime_data.get("mode") or "unknown") if isinstance(runtime_data, dict) else "unknown",
+        runtime_root=str(runtime_data.get("runtime_root")) if isinstance(runtime_data, dict) and runtime_data.get("runtime_root") else None,
+        wireguard_root=str(runtime_data.get("wireguard_root")) if isinstance(runtime_data, dict) and runtime_data.get("wireguard_root") else None,
+        peers_root=str(runtime_data.get("peers_root")) if isinstance(runtime_data, dict) and runtime_data.get("peers_root") else None,
         checks=checks,
     )
+
+
+def _parse_runtime_datetime(value: object) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _sync_server_runtime_peer_stats(db: Session, server: Server, response: dict[str, object]) -> None:
+    runtime_payload = response.get("runtime")
+    runtime_data = runtime_payload if isinstance(runtime_payload, dict) else response
+    live_interfaces = runtime_data.get("live_interfaces") if isinstance(runtime_data, dict) else None
+    if not isinstance(live_interfaces, list):
+        return
+    interfaces = (
+        db.execute(
+            select(Interface)
+            .options(joinedload(Interface.peers))
+            .where(Interface.tic_server_id == server.id)
+        )
+        .unique()
+        .scalars()
+        .all()
+    )
+    interface_by_agent_id = {
+        str(interface.agent_interface_id or "").strip(): interface
+        for interface in interfaces
+        if str(interface.agent_interface_id or "").strip()
+    }
+    changed = False
+    for interface_snapshot in live_interfaces:
+        if not isinstance(interface_snapshot, dict):
+            continue
+        agent_interface_id = str(interface_snapshot.get("agent_interface_id") or "").strip()
+        if not agent_interface_id:
+            continue
+        interface = interface_by_agent_id.get(agent_interface_id)
+        if interface is None:
+            continue
+        peers_by_slot = {int(peer.slot): peer for peer in interface.peers}
+        seen_slots: set[int] = set()
+        peer_snapshots = interface_snapshot.get("peers")
+        if isinstance(peer_snapshots, list):
+            for peer_snapshot in peer_snapshots:
+                if not isinstance(peer_snapshot, dict):
+                    continue
+                slot = int(peer_snapshot.get("slot") or 0)
+                if slot <= 0:
+                    continue
+                peer = peers_by_slot.get(slot)
+                if peer is None:
+                    continue
+                seen_slots.add(slot)
+                handshake_at = _parse_runtime_datetime(peer_snapshot.get("latest_handshake_at"))
+                rx_bytes = peer_snapshot.get("transfer_rx_bytes")
+                tx_bytes = peer_snapshot.get("transfer_tx_bytes")
+                rx_value = int(rx_bytes) if isinstance(rx_bytes, int) else None
+                tx_value = int(tx_bytes) if isinstance(tx_bytes, int) else None
+                if peer.handshake_at != handshake_at:
+                    peer.handshake_at = handshake_at
+                    changed = True
+                if peer.live_rx_bytes != rx_value:
+                    peer.live_rx_bytes = rx_value
+                    changed = True
+                if peer.live_tx_bytes != tx_value:
+                    peer.live_tx_bytes = tx_value
+                    changed = True
+                db.add(peer)
+        for peer in interface.peers:
+            if int(peer.slot) in seen_slots:
+                continue
+            if peer.handshake_at is not None or peer.live_rx_bytes is not None or peer.live_tx_bytes is not None:
+                peer.handshake_at = None
+                peer.live_rx_bytes = None
+                peer.live_tx_bytes = None
+                changed = True
+                db.add(peer)
+    if changed:
+        db.commit()
 
 
 def _fetch_server_runtime_view(db: Session, server: Server, *, actor_user_id: int | None = None) -> ServerRuntimeCheckView:
@@ -7059,7 +7599,13 @@ def verify_server_runtime(db: Session, actor: User, server_id: int) -> ServerRun
     server = get_server_by_id(db, server_id)
     if server.is_excluded:
         raise PermissionDeniedError("Server is excluded")
-    runtime_view = _fetch_server_runtime_view(db, server, actor_user_id=actor.id)
+    response = _run_agent_executor_logged(
+        db,
+        _build_server_executor_payload(action="verify_server_runtime", server=server),
+        actor_user_id=actor.id,
+    )
+    _sync_server_runtime_peer_stats(db, server, response)
+    runtime_view = _build_server_runtime_view(response, server)
     ready = runtime_view.ready
     write_audit_log(
         db,
@@ -7526,6 +8072,7 @@ def toggle_interface_state(db: Session, actor: User, interface_id: int) -> bool:
         ),
         actor_user_id=actor.id,
     )
+    _refresh_via_tak_interface_runtime(db, interface, actor_user_id=actor.id)
     for peer in interface.peers:
         peer.is_enabled = next_state
         db.add(peer)
@@ -7842,7 +8389,7 @@ def download_peer_config(db: Session, actor: User, peer_id: int) -> dict[str, ob
     response = _run_peer_agent_action(db, "download_peer_config", peer.interface, peer, actor_user_id=actor.id)
     return _extract_download_payload(
         response,
-        default_filename=f"{peer.interface.name}-peer-{peer.slot}.conf",
+        default_filename=f"{peer.interface.name}-{peer.slot}.conf",
         default_content_type="text/plain; charset=utf-8",
     )
 
@@ -7863,7 +8410,7 @@ def download_peer_config_public(db: Session, peer_id: int, token_id: str) -> dic
     response = _run_peer_agent_action(db, "download_peer_config", peer.interface, peer)
     return _extract_download_payload(
         response,
-        default_filename=f"{peer.interface.name}-peer-{peer.slot}.conf",
+        default_filename=f"{peer.interface.name}-{peer.slot}.conf",
         default_content_type="text/plain; charset=utf-8",
     )
 
@@ -8256,6 +8803,17 @@ def assign_interface_to_user(db: Session, actor: User, interface_id: int, user_i
         db.add(peer)
     db.add(interface)
     db.commit()
+    _run_agent_executor_logged(
+        db,
+        _build_tic_executor_payload(
+            "toggle_interface",
+            interface,
+            exclusion_filters_enabled=interface_exclusion_filters_enabled(db, interface),
+            block_filters_enabled=block_filters_enabled(db),
+            extra={"target_state": {"is_enabled": True}},
+        ),
+        actor_user_id=actor.id,
+    )
 
 
 def unassign_interface_from_user(db: Session, actor: User, interface_id: int, user_id: int) -> None:
@@ -8271,6 +8829,17 @@ def unassign_interface_from_user(db: Session, actor: User, interface_id: int, us
         db.add(peer)
     db.add(interface)
     db.commit()
+    _run_agent_executor_logged(
+        db,
+        _build_tic_executor_payload(
+            "toggle_interface",
+            interface,
+            exclusion_filters_enabled=interface_exclusion_filters_enabled(db, interface),
+            block_filters_enabled=block_filters_enabled(db),
+            extra={"target_state": {"is_enabled": False}},
+        ),
+        actor_user_id=actor.id,
+    )
 
 
 def delete_pending_interface(db: Session, actor: User, interface_id: int) -> None:
@@ -8323,6 +8892,19 @@ def create_user_with_interfaces(db: Session, actor: User, payload: AdminUserCrea
         db.add(interface)
 
     db.commit()
+    for interface in interfaces:
+        _run_agent_executor_logged(
+            db,
+            _build_tic_executor_payload(
+                "toggle_interface",
+                interface,
+                exclusion_filters_enabled=interface_exclusion_filters_enabled(db, interface),
+                block_filters_enabled=block_filters_enabled(db),
+                extra={"target_state": {"is_enabled": True}},
+            ),
+            actor_user_id=actor.id,
+        )
+        _refresh_via_tak_interface_runtime(db, interface, actor_user_id=actor.id)
     return user
 
 

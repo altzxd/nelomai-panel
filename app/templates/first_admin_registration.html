@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block body %}
+<main class="login-shell">
+    <section class="login-card registration-card">
+        <div class="brand-lockup">
+            <img class="brand-logo" src="{{ url_for('static', path='/logo.svg') }}" alt="Nelomai">
+            <div>
+                <p class="eyebrow">Initial Setup</p>
+                <h1>Первый администратор</h1>
+            </div>
+        </div>
+        <p class="login-copy">Создайте первый административный аккаунт панели. Для него требуются только логин и пароль.</p>
+        <form method="post" action="/bootstrap-admin/{{ token }}" class="login-form">
+            <label>
+                <span>Логин</span>
+                <input type="text" name="login" value="{{ values.get('login', '') }}" autocomplete="username" required>
+            </label>
+            <p class="input-hint">Имя аккаунта для входа в систему, до 20 символов, только английские буквы и цифры, без учёта регистра.</p>
+            <label>
+                <span>Пароль</span>
+                <input type="password" name="password" autocomplete="new-password" required>
+            </label>
+            <p class="input-hint">Минимум 4 символа, только английские буквы и цифры, чувствителен к регистру.</p>
+            {% if error %}
+            <div class="form-error">{{ error }}</div>
+            {% endif %}
+            <button type="submit" class="primary-button">Создать администратора</button>
+        </form>
+    </section>
+</main>
+{% endblock %}
