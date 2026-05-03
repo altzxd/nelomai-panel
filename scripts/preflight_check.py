@@ -38,6 +38,8 @@ CHECKS = [
     Check("tak tunnel clear backoff", [sys.executable, "scripts/tak_tunnel_clear_backoff_check.py"]),
     Check("tak tunnel clear-backoff route", [sys.executable, "scripts/tak_tunnel_clear_backoff_route_check.py"]),
     Check("tak tunnel focused diagnostics", [sys.executable, "scripts/tak_tunnel_focused_diagnostics_check.py"]),
+    Check("tak tunnel focused action forms", [sys.executable, "scripts/tak_tunnel_focused_actions_form_check.py"]),
+    Check("tak tunnel overview", [sys.executable, "scripts/tak_tunnel_overview_check.py"]),
     Check("tak tunnel logs backlink", [sys.executable, "scripts/tak_tunnel_logs_backlink_check.py"]),
     Check("tak tunnel repair route", [sys.executable, "scripts/tak_tunnel_repair_route_check.py"]),
     Check("tak tunnel rotate route", [sys.executable, "scripts/tak_tunnel_rotate_route_check.py"]),
