@@ -34,6 +34,7 @@ CHECKS = [
     Check("node ssh exec", [sys.executable, "scripts/node_agent_panel_ssh_exec_check.py"]),
     Check("node live validation", [sys.executable, "scripts/node_agent_live_validation_check.py"]),
     Check("amnezia tool adapter", [sys.executable, "scripts/amnezia_official_tool_check.py"]),
+    Check("tak tunnel audit links", [sys.executable, "scripts/tak_tunnel_audit_links_check.py"]),
     Check("panel server inventory", [sys.executable, "scripts/panel_server_inventory_check.py"]),
     Check("panel server release", [sys.executable, "scripts/panel_server_release_check.py"]),
     Check("security access", [sys.executable, "scripts/panel_security_access_check.py"]),
