@@ -193,6 +193,7 @@ function tunnelStatusEnvelope(state, payload) {
 
   return {
     tunnel_id: record ? String(record.tunnel_id || "") || requestedTunnelId : requestedTunnelId,
+    artifact_revision: record ? Number(record.artifact_revision) || null : null,
     protocol: record ? String(record.protocol || "amneziawg-2.0") : "amneziawg-2.0",
     exists,
     is_active: isActive,

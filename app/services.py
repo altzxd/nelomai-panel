@@ -1126,6 +1126,38 @@ def _detach_tak_tunnel_pair(
     )
 
 
+def _latest_tak_tunnel_rotation_event(
+    db: Session,
+    *,
+    tic_server_id: int,
+    tak_server_id: int,
+) -> AuditLog | None:
+    event = (
+        db.execute(
+            select(AuditLog)
+            .where(
+                AuditLog.event_type == "tak_tunnels.artifacts_rotated",
+                AuditLog.server_id == tic_server_id,
+            )
+            .order_by(AuditLog.id.desc())
+        )
+        .scalars()
+        .first()
+    )
+    if event is None:
+        return None
+    try:
+        details = json.loads(event.details or "{}")
+    except json.JSONDecodeError:
+        return None
+    if (
+        int(details.get("tic_server_id") or 0) != tic_server_id
+        or int(details.get("tak_server_id") or 0) != tak_server_id
+    ):
+        return None
+    return event
+
+
 def _reconcile_tak_tunnel_routes(db: Session) -> None:
     if not settings.peer_agent_command:
         return
@@ -2167,6 +2199,7 @@ def run_panel_diagnostics(
         recovered_pairs: list[str] = []
         cooldown_pairs: list[str] = []
         manual_attention_pairs: list[str] = []
+        rotated_pairs: list[str] = []
         repair_state = _load_tak_tunnel_repair_state(db)
         for pair_interfaces in tak_tunnel_pairs.values():
             sample = pair_interfaces[0]
@@ -2200,6 +2233,15 @@ def run_panel_diagnostics(
                 tunnel_status = response.get("tunnel_status") or {}
                 is_active = bool(tunnel_status.get("is_active"))
                 status_value = str(tunnel_status.get("status") or ("active" if is_active else "unknown"))
+                artifact_revision = int(tunnel_status.get("artifact_revision") or 0)
+                if artifact_revision > 0:
+                    rotation_event = _latest_tak_tunnel_rotation_event(
+                        db,
+                        tic_server_id=sample.tic_server_id,
+                        tak_server_id=sample.tak_server_id,
+                    )
+                    rotation_at = rotation_event.created_at.isoformat() if rotation_event is not None else "время неизвестно"
+                    rotated_pairs.append(f"{pair_label} · rev {artifact_revision} · {rotation_at}")
                 if not is_active:
                     tak_tunnel_status = "warning" if tak_tunnel_status == "ok" else tak_tunnel_status
                     interface_names = ", ".join(sorted(interface.name for interface in pair_interfaces))
@@ -2219,6 +2261,8 @@ def run_panel_diagnostics(
             tak_tunnel_details.append(f"Не удалось проверить: {'; '.join(failed_pairs[:5])}")
         if recovered_pairs:
             tak_tunnel_details.append(f"Автовосстановлены: {'; '.join(recovered_pairs[:5])}")
+        if rotated_pairs:
+            tak_tunnel_details.append(f"Последние ротации артефактов: {'; '.join(rotated_pairs[:5])}")
         if cooldown_pairs:
             tak_tunnel_details.append(f"Р’ cooldown: {'; '.join(cooldown_pairs[:5])}")
         if manual_attention_pairs:
@@ -2282,6 +2326,7 @@ def run_panel_diagnostics(
                 focused_status = focused_response.get("tunnel_status") or {}
                 is_active = bool(focused_status.get("is_active"))
                 raw_status = str(focused_status.get("status") or ("active" if is_active else "unknown"))
+                artifact_revision = int(focused_status.get("artifact_revision") or 0)
                 pair_status = "ok" if is_active else "warning"
                 pair_message = (
                     "Туннель выбранной пары активен."
@@ -2289,6 +2334,17 @@ def run_panel_diagnostics(
                     else "Туннель выбранной пары неактивен или требует внимания."
                 )
                 pair_details.append(f"Статус агента: {raw_status}")
+                if artifact_revision > 0:
+                    pair_details.append(f"Ревизия артефактов: {artifact_revision}")
+                    rotation_event = _latest_tak_tunnel_rotation_event(
+                        db,
+                        tic_server_id=focused_pair.tic_server_id,
+                        tak_server_id=focused_pair.tak_server_id,
+                    )
+                    if rotation_event is not None:
+                        pair_details.append(
+                            f"Последняя ротация артефактов: {rotation_event.created_at.isoformat()}"
+                        )
                 failure_count = int(focused_pair_state.get("failure_count") or 0)
                 if bool(focused_pair_state.get("manual_attention_required")):
                     pair_details.append("РђРІС‚РѕРІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёРµ РѕСЃС‚Р°РЅРѕРІР»РµРЅРѕ: С‚СЂРµР±СѓРµС‚СЃСЏ СЂСѓС‡РЅРѕРµ РІРјРµС€Р°С‚РµР»СЊСЃС‚РІРѕ.")
