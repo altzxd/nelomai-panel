@@ -246,6 +246,7 @@ AUDIT_EVENT_TYPE_LABELS = {
     "servers.restart_agent": "Перезагрузка агента",
     "servers.restore": "Восстановление сервера",
     "tak_tunnels.auto_recovered": "Автовосстановление туннеля Tic/Tak",
+    "tak_tunnels.manual_repaired": "Ручное восстановление туннеля Tic/Tak",
     "updates.agent_apply": "Обновление агента",
     "updates.agent_check": "Проверка обновлений агента",
     "updates.panel_check": "Проверка обновлений панели",
@@ -957,12 +958,32 @@ def _provision_and_attach_tak_tunnel(
     tak_server: Server,
     actor_user_id: int | None = None,
 ) -> str:
+    return _repair_tak_tunnel_transport(
+        db,
+        tic_server=tic_server,
+        tak_server=tak_server,
+        actor_user_id=actor_user_id,
+        allow_reprovision=True,
+    )[0]
+
+
+def _request_tak_tunnel_artifacts(
+    db: Session,
+    *,
+    tic_server: Server,
+    tak_server: Server,
+    actor_user_id: int | None = None,
+    reuse_existing_only: bool,
+) -> tuple[str, dict[str, object]]:
     provision_response = _run_agent_executor_logged(
         db,
         _build_server_executor_payload(
             action="provision_tak_tunnel",
             server=tak_server,
-            extra={"tic_server": _server_agent_identity_payload(tic_server)},
+            extra={
+                "tic_server": _server_agent_identity_payload(tic_server),
+                "reuse_existing_only": reuse_existing_only,
+            },
         ),
         actor_user_id=actor_user_id,
     )
@@ -970,6 +991,18 @@ def _provision_and_attach_tak_tunnel(
     tunnel_artifacts = provision_response.get("tunnel_artifacts")
     if not tunnel_id or not isinstance(tunnel_artifacts, dict):
         raise ServerOperationUnavailableError("Tak tunnel provision did not return tunnel_id/tunnel_artifacts")
+    return tunnel_id, tunnel_artifacts
+
+
+def _attach_tak_tunnel_artifacts(
+    db: Session,
+    *,
+    tic_server: Server,
+    tak_server: Server,
+    tunnel_id: str,
+    tunnel_artifacts: dict[str, object],
+    actor_user_id: int | None = None,
+) -> None:
     _run_agent_executor_logged(
         db,
         _build_server_executor_payload(
@@ -983,7 +1016,52 @@ def _provision_and_attach_tak_tunnel(
         ),
         actor_user_id=actor_user_id,
     )
-    return tunnel_id
+
+
+def _repair_tak_tunnel_transport(
+    db: Session,
+    *,
+    tic_server: Server,
+    tak_server: Server,
+    actor_user_id: int | None = None,
+    allow_reprovision: bool,
+) -> tuple[str, str]:
+    try:
+        tunnel_id, tunnel_artifacts = _request_tak_tunnel_artifacts(
+            db,
+            tic_server=tic_server,
+            tak_server=tak_server,
+            actor_user_id=actor_user_id,
+            reuse_existing_only=True,
+        )
+        _attach_tak_tunnel_artifacts(
+            db,
+            tic_server=tic_server,
+            tak_server=tak_server,
+            tunnel_id=tunnel_id,
+            tunnel_artifacts=tunnel_artifacts,
+            actor_user_id=actor_user_id,
+        )
+        return tunnel_id, "partial"
+    except Exception:
+        if not allow_reprovision:
+            raise
+    tunnel_id, tunnel_artifacts = _request_tak_tunnel_artifacts(
+        db,
+        tic_server=tic_server,
+        tak_server=tak_server,
+        actor_user_id=actor_user_id,
+        reuse_existing_only=False,
+    )
+    _attach_tak_tunnel_artifacts(
+        db,
+        tic_server=tic_server,
+        tak_server=tak_server,
+        tunnel_id=tunnel_id,
+        tunnel_artifacts=tunnel_artifacts,
+        actor_user_id=actor_user_id,
+    )
+    return tunnel_id, "full"
 
 
 def _detach_tak_tunnel_pair(
@@ -1062,10 +1140,11 @@ def _reconcile_tak_tunnel_routes(db: Session) -> None:
 
         if not bool(tunnel_status.get("is_active")) and blocked_status is None:
             try:
-                _provision_and_attach_tak_tunnel(
+                _repair_tak_tunnel_transport(
                     db,
                     tic_server=sample.tic_server,
                     tak_server=sample.tak_server,
+                    allow_reprovision=False,
                 )
                 response = _run_tic_executor(
                     _build_server_executor_payload(
@@ -1259,6 +1338,23 @@ def _format_audit_details_ru(log: AuditLog) -> str | None:
             parts.append(f"пара: {tic_server_name} → {tak_server_name}".strip())
         if previous_status:
             parts.append(f"до восстановления: {previous_status}")
+        if isinstance(interface_names, list) and interface_names:
+            parts.append(f"интерфейсы: {', '.join(str(item) for item in interface_names[:6])}")
+        return " | ".join(part for part in parts if part) or log.details
+
+    if log.event_type == "tak_tunnels.manual_repaired" and isinstance(details, dict):
+        tic_server_name = str(details.get("tic_server_name") or "")
+        tak_server_name = str(details.get("tak_server_name") or "")
+        failure_count = int(details.get("failure_count_before_repair") or 0)
+        repair_strategy = str(details.get("repair_strategy") or "")
+        interface_names = details.get("interface_names") or []
+        parts = []
+        if tic_server_name or tak_server_name:
+            parts.append(f"пара: {tic_server_name} → {tak_server_name}".strip())
+        if repair_strategy:
+            parts.append(f"стратегия: {repair_strategy}")
+        if failure_count:
+            parts.append(f"ошибок до ремонта: {failure_count}")
         if isinstance(interface_names, list) and interface_names:
             parts.append(f"интерфейсы: {', '.join(str(item) for item in interface_names[:6])}")
         return " | ".join(part for part in parts if part) or log.details
@@ -2090,6 +2186,12 @@ def run_panel_diagnostics(
                 url="/admin/logs?event_type=tak_tunnels.manual_attention_required",
             )
         )
+        tak_tunnel_action_links.append(
+            DiagnosticsCheckView.ActionLinkView(
+                label="Р›РѕРіРё СЂСѓС‡РЅРѕРіРѕ РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёСЏ",
+                url="/admin/logs?event_type=tak_tunnels.manual_repaired",
+            )
+        )
     if "tak_tunnel_action_links" in locals() and not tak_tunnel_action_links:
         for pair_interfaces in tak_tunnel_pairs.values():
             sample = pair_interfaces[0]
@@ -2146,6 +2248,9 @@ def run_panel_diagnostics(
                 cooldown_until = _tak_tunnel_parse_datetime(focused_pair_state.get("cooldown_until"))
                 if cooldown_until is not None and cooldown_until > utc_now():
                     pair_details.append(f"РџРѕРІС‚РѕСЂРЅР°СЏ РїРѕРїС‹С‚РєР° РЅРµ СЂР°РЅСЊС€Рµ: {cooldown_until.isoformat()}")
+                last_recovered_at = _tak_tunnel_parse_datetime(focused_pair_state.get("last_recovered_at"))
+                if last_recovered_at is not None:
+                    pair_details.append(f"Последнее успешное восстановление: {last_recovered_at.isoformat()}")
                 interface_names = sorted(
                     interface.name
                     for interface in tak_tunnel_pairs.get((focused_tic_server_id, focused_tak_server_id), [])
@@ -2176,6 +2281,7 @@ def run_panel_diagnostics(
                 server_url=f"/admin/servers?bucket=active&selected_server_id={focused_pair.tic_server.id}",
                 auto_recovered_logs_url=f"/admin/logs?event_type=tak_tunnels.auto_recovered&server_id={focused_pair.tic_server.id}",
                 manual_attention_logs_url=f"/admin/logs?event_type=tak_tunnels.manual_attention_required&server_id={focused_pair.tic_server.id}",
+                manual_repair_logs_url=f"/admin/logs?event_type=tak_tunnels.manual_repaired&server_id={focused_pair.tic_server.id}",
             )
     checks.append(
         DiagnosticsCheckView(
@@ -5495,15 +5601,52 @@ def repair_tak_tunnel_pair(db: Session, actor: User, *, tic_server_id: int, tak_
         raise EntityNotFoundError("Tic server not found")
     if tak_server.server_type != ServerType.TAK:
         raise EntityNotFoundError("Tak server not found")
-    _provision_and_attach_tak_tunnel(
+    repair_state = _load_tak_tunnel_repair_state(db)
+    pair_state = dict(repair_state.get(_tak_tunnel_pair_key(tic_server_id, tak_server_id)) or {})
+    failure_count_before_repair = int(pair_state.get("failure_count") or 0)
+    manual_attention_before_repair = bool(pair_state.get("manual_attention_required"))
+    tunnel_id, repair_strategy = _repair_tak_tunnel_transport(
         db,
         tic_server=tic_server,
         tak_server=tak_server,
         actor_user_id=actor.id,
+        allow_reprovision=True,
     )
-    repair_state = _load_tak_tunnel_repair_state(db)
     if _tak_tunnel_register_success(repair_state, tic_server_id=tic_server_id, tak_server_id=tak_server_id, now=utc_now()):
         _save_tak_tunnel_repair_state(db, repair_state)
+    write_audit_log(
+        db,
+        event_type="tak_tunnels.manual_repaired",
+        severity="info",
+        message=f"Tak tunnel manually repaired: tic={tic_server.name}, tak={tak_server.name}",
+        message_ru=f"Туннель Tic/Tak восстановлен вручную: {tic_server.name} → {tak_server.name}",
+        actor_user_id=actor.id,
+        server_id=tic_server.id,
+        details=json.dumps(
+            {
+                "tic_server_id": tic_server.id,
+                "tic_server_name": tic_server.name,
+                "tak_server_id": tak_server.id,
+                "tak_server_name": tak_server.name,
+                "tunnel_id": tunnel_id,
+                "repair_strategy": repair_strategy,
+                "failure_count_before_repair": failure_count_before_repair,
+                "manual_attention_before_repair": manual_attention_before_repair,
+                "interface_names": sorted(
+                    interface.name
+                    for interface in db.execute(
+                        select(Interface).where(
+                            Interface.tic_server_id == tic_server.id,
+                            Interface.tak_server_id == tak_server.id,
+                            Interface.route_mode == RouteMode.VIA_TAK,
+                        )
+                    ).scalars().all()
+                ),
+            },
+            ensure_ascii=False,
+        ),
+        commit=False,
+    )
     _reconcile_tak_tunnel_routes(db)
 
 
@@ -6129,7 +6272,7 @@ def _build_server_runtime_view(response: dict[str, object], server: Server) -> S
     return ServerRuntimeCheckView(
         server_id=server.id,
         ready=bool(response.get("ready", False)),
-        mode=str(response.get("mode") or settings.peer_agent_mode or "unknown"),
+        mode=str(response.get("mode") or "unknown"),
         runtime_root=str(response.get("runtime_root")) if response.get("runtime_root") else None,
         wireguard_root=str(response.get("wireguard_root")) if response.get("wireguard_root") else None,
         peers_root=str(response.get("peers_root")) if response.get("peers_root") else None,
@@ -6364,9 +6507,6 @@ def _load_interface_creation_context(
         ).scalar_one_or_none()
         if tak_server is None:
             raise EntityNotFoundError("Tak server not found")
-        matching_tak = _get_matching_tak_server(db, tic_server)
-        if matching_tak is None or matching_tak.id != tak_server.id:
-            raise PermissionDeniedError("Selected Tic server can be paired only with its matching Tak server")
         route_mode = RouteMode.VIA_TAK
     return tic_server, tak_server, route_mode
 

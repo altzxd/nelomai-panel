@@ -84,6 +84,9 @@
                 {% if diagnostics_page.focused_tak_tunnel.manual_attention_logs_url %}
                 <a class="ghost-button small" href="{{ diagnostics_page.focused_tak_tunnel.manual_attention_logs_url }}">Логи ручного внимания</a>
                 {% endif %}
+                {% if diagnostics_page.focused_tak_tunnel.manual_repair_logs_url %}
+                <a class="ghost-button small" href="{{ diagnostics_page.focused_tak_tunnel.manual_repair_logs_url }}">Логи ручного восстановления</a>
+                {% endif %}
                 <form method="post" action="/admin/diagnostics/tak-tunnels/repair">
                     <input type="hidden" name="focused_tic_server_id" value="{{ request.query_params.get('focused_tic_server_id', '') }}">
                     <input type="hidden" name="focused_tak_server_id" value="{{ request.query_params.get('focused_tak_server_id', '') }}">

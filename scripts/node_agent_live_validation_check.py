@@ -13,6 +13,8 @@ DOC_PATH = ROOT_DIR / "docs" / "node_agent_live_validation.md"
 REQUIRED_TOKENS = [
     "Ubuntu 22.04",
     "safe-init",
+    "Tic ↔ Tak",
+    "manual exit from `manual_attention_required`",
     "SSH transport reaches the host",
     "apt-get update",
     "WireGuard packages are installed",
@@ -26,6 +28,13 @@ REQUIRED_TOKENS = [
     "agent service is active under `systemd`",
     "failing command",
     "stderr/stdout",
+    "via_tak -> standalone -> via_tak",
+    "failure_count",
+    "cooldown",
+    "manual_attention_required",
+    "live_panel_tak_health_workflow_check.py",
+    "live_panel_tak_switch_check.py",
+    "Optional multi-`Tak` scenario",
 ]
 
 

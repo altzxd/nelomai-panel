@@ -18,14 +18,48 @@ from app.models import Server
 PLINK_BIN = Path(r"C:\Program Files\PuTTY\plink.exe")
 
 
+def _same_host_tak2_emulation_enabled() -> bool:
+    return os.environ.get("NELOMAI_ENABLE_TAK2_SAME_HOST_EMULATION", "").strip() == "1"
+
+
 def _host_key_for(host: str) -> str:
     tic_host = os.environ.get("NELOMAI_TIC_HOST", "").strip()
     tak_host = os.environ.get("NELOMAI_TAK_HOST", "").strip()
+    tak2_host = os.environ.get("NELOMAI_TAK2_HOST", "").strip()
     if host == tic_host:
         return os.environ.get("NELOMAI_TIC_SSH_HOST_KEY", "").strip()
+    if host == tak2_host and tak2_host and tak2_host != tak_host:
+        return os.environ.get("NELOMAI_TAK2_SSH_HOST_KEY", "").strip()
     if host == tak_host:
         return os.environ.get("NELOMAI_TAK_SSH_HOST_KEY", "").strip()
+    if host == tak2_host and tak_host == tak2_host and _same_host_tak2_emulation_enabled():
+        return os.environ.get("NELOMAI_TAK2_SSH_HOST_KEY", "").strip()
     return ""
+
+
+def _env_file_for(component: str, server: dict[str, object]) -> str:
+    normalized = component.replace("-agent", "")
+    default_env_file = f"/etc/default/nelomai-{normalized}-agent"
+    if component != "tak-agent":
+        return default_env_file
+
+    tak_host = os.environ.get("NELOMAI_TAK_HOST", "").strip()
+    tak2_host = os.environ.get("NELOMAI_TAK2_HOST", "").strip()
+    host = str(server.get("host") or "").strip()
+    if (
+        not _same_host_tak2_emulation_enabled()
+        or not tak_host
+        or not tak2_host
+        or tak_host != tak2_host
+        or host != tak_host
+    ):
+        return default_env_file
+
+    name = str(server.get("name") or "").strip().lower()
+    token = os.environ.get("NELOMAI_TAK2_NAME_TOKEN", "tak2").strip().lower()
+    if token and token in name:
+        return os.environ.get("NELOMAI_TAK2_ENV_FILE", "/etc/default/nelomai-tak2-agent").strip() or "/etc/default/nelomai-tak2-agent"
+    return default_env_file
 
 
 def fail(message: str, code: int = 1) -> None:
@@ -67,7 +101,7 @@ def main() -> None:
     component = str(payload.get("component") or "tic-agent").strip() or "tic-agent"
     exec_mode = str(payload.get("exec_mode") or "system").strip() or "system"
     payload_b64 = base64.b64encode(json.dumps(payload, ensure_ascii=False).encode("utf-8")).decode("ascii")
-    env_file = f"/etc/default/nelomai-{component.replace('-agent', '')}-agent"
+    env_file = _env_file_for(component, server)
     remote_command = (
         "bash -lc "
         f"\"set -a && test -f '{env_file}' && . '{env_file}'; set +a; "

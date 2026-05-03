@@ -291,6 +291,7 @@ class DiagnosticsFocusedTakTunnelView(BaseModel):
     server_url: str | None = None
     auto_recovered_logs_url: str | None = None
     manual_attention_logs_url: str | None = None
+    manual_repair_logs_url: str | None = None
 
 
 class DiagnosticsPageView(BaseModel):

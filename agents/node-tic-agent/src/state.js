@@ -386,6 +386,7 @@ function provisionTakTunnelRecord(state, payload) {
   if (!Array.isArray(state.tunnels)) {
     state.tunnels = [];
   }
+  const reuseExistingOnly = Boolean(payload && payload.reuse_existing_only);
   const existing = findTunnelRecord(state, payload);
   if (existing) {
     existing.status = "provisioned";
@@ -396,6 +397,9 @@ function provisionTakTunnelRecord(state, payload) {
       tunnel_artifacts: buildTunnelArtifacts(existing),
       amnezia_config: buildAmneziaConfig(existing)
     };
+  }
+  if (reuseExistingOnly) {
+    throw new Error("Tak tunnel is not provisioned on Tak server");
   }
 
   const plan = buildTakTunnelPlan(state, payload);
