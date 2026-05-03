@@ -31,6 +31,7 @@ For the live pass, validate:
 - panel-side tunnel artifact rotation without dropping active `via_tak`;
 - panel-side fallback `via_tak -> standalone -> via_tak`;
 - panel-side retry policy `failure_count -> cooldown -> manual_attention_required`;
+- panel-side `clear-backoff` path that removes degraded state without forcing full manual repair;
 - panel-side manual exit from `manual_attention_required` through the diagnostics repair action;
 - active `via_tak` switch from one `Tak` to another without entering fallback.
 
@@ -54,6 +55,7 @@ Expected tunnel/health outcomes:
 - repeated failed repair attempts increment `failure_count`;
 - cooldown blocks immediate repeated repair attempts;
 - persistent failures move the pair into `manual_attention_required`;
+- `clear-backoff` removes stored degraded state and lets the next normal reconcile start from the first retry again;
 - partial repair reattaches from existing `Tak` tunnel artifacts without reprovision;
 - manual repair clears `manual_attention_required`, resets `failure_count`, and restores `via_tak`;
 - `Tak` switch attaches the new pair before detaching the old one.
@@ -64,12 +66,13 @@ Recommended live workflow order:
 2. `scripts/live_panel_tak_rotation_check.py`
 3. `scripts/live_panel_tak_fallback_check.py`
 4. `scripts/live_panel_tak_backoff_check.py`
-5. `scripts/live_panel_tak_partial_repair_check.py`
-6. `scripts/live_panel_tak_manual_repair_check.py`
+5. `scripts/live_panel_tak_clear_backoff_check.py`
+6. `scripts/live_panel_tak_partial_repair_check.py`
+7. `scripts/live_panel_tak_manual_repair_check.py`
 
 Optional multi-`Tak` scenario:
 
-7. `scripts/live_panel_tak_switch_check.py`
+8. `scripts/live_panel_tak_switch_check.py`
 
 This scenario requires a second Tak host via:
 
@@ -96,6 +99,7 @@ During the live run, confirm in the panel:
 - diagnostics show `Tic ↔ Tak` tunnel health;
 - diagnostics can trigger tunnel artifact rotation for a focused pair;
 - diagnostics show `failure_count`, `cooldown_until`, and `manual_attention_required` when repair is degraded;
+- diagnostics `Снять backoff` action clears degraded pair state and leaves the next retry to the normal reconcile path;
 - diagnostics/audit can distinguish partial and full manual repair strategies;
 - diagnostics repair action can take the pair out of `manual_attention_required`;
 - interface switch to a second `Tak` does not force fallback if the new tunnel is healthy.
@@ -112,9 +116,10 @@ The live validation is successful only if:
 6. tunnel artifact rotation keeps the pair active and increments `artifact_revision`;
 7. the `Tic ↔ Tak` path can enter fallback and recover;
 8. repeated failed repairs enter cooldown and then `manual_attention_required`;
-9. partial repair can restore the pair without changing `tunnel_id`;
-10. manual repair clears degraded state and returns the pair to a healthy route path;
-11. `Tak` switch keeps the interface on a healthy `via_tak` path without transient fallback.
+9. `clear-backoff` clears degraded state and the next normal retry starts from the first failure step again;
+10. partial repair can restore the pair without changing `tunnel_id`;
+11. manual repair clears degraded state and returns the pair to a healthy route path;
+12. `Tak` switch keeps the interface on a healthy `via_tak` path without transient fallback.
 
 ## 6. If It Fails
 
@@ -127,6 +132,7 @@ If the first live validation fails, record at least:
 - whether artifact rotation kept the same `tunnel_id` and increased `artifact_revision`;
 - whether tunnel failure reached cooldown;
 - whether tunnel failure reached `manual_attention_required`;
+- whether `clear-backoff` really removed stored degraded state before the next retry;
 - whether partial repair reused the existing tunnel identity;
 - whether manual repair reset the pair state and restored `via_tak`.
 

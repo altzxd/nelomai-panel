@@ -34,6 +34,8 @@ REQUIRED_TOKENS = [
     "failure_count",
     "cooldown",
     "manual_attention_required",
+    "clear-backoff",
+    "live_panel_tak_clear_backoff_check.py",
     "live_panel_tak_health_workflow_check.py",
     "live_panel_tak_switch_check.py",
     "Optional multi-`Tak` scenario",
