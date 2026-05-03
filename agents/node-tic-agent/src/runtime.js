@@ -204,9 +204,8 @@ function inspectTunnelArtifacts(tunnelRecord) {
   const serverConfigPath = tunnelServerConfigPath(tunnelRecord);
   const clientConfigPath = tunnelClientConfigPath(tunnelRecord);
   const clientPayloadPath = tunnelClientPayloadPath(tunnelRecord);
-  const localRole = String(tunnelRecord.local_role || "").trim().toLowerCase();
-  const systemConfigPath = localRole === "tic" ? systemTunnelConfigPath(tunnelRecord) : null;
-  const systemInterfaceName = localRole === "tic" ? systemTunnelName(tunnelRecord) : null;
+  const systemConfigPath = systemTunnelConfigPath(tunnelRecord);
+  const systemInterfaceName = systemTunnelName(tunnelRecord);
   return {
     runtime_dir: directory,
     meta_path: metaPath,
@@ -559,9 +558,25 @@ function buildAttachTunnelCommands(tunnelRecord) {
   return [
     `install -d -m 700 ${systemTunnelRoot()}`,
     `install -m 600 ${runtimeConfigPath} ${systemConfigPath}`,
-    `if ip link show dev ${tunnelName} >/dev/null 2>&1; then ${quickPrefix}${quickCommand} down ${systemConfigPath} || true; fi`,
-    `if ip link show dev ${tunnelName} >/dev/null 2>&1; then ip link delete dev ${tunnelName} || true; fi`,
-    `${quickPrefix}${quickCommand} up ${systemConfigPath}`
+    `if ip link show dev ${tunnelName} >/dev/null 2>&1; then ${quickPrefix}${quickCommand} down ${systemConfigPath} || true; ${quickPrefix}${quickCommand} up ${systemConfigPath}; else ${quickPrefix}${quickCommand} up ${systemConfigPath}; fi`
+  ];
+}
+
+function buildProvisionTunnelCommands(tunnelRecord) {
+  if (executionMode() !== "system") {
+    return [`# provision tunnel ${String(tunnelRecord.tunnel_id || "")} in filesystem mode`];
+  }
+  const quickCommand = resolveTunnelQuickCommand();
+  if (!quickCommand) {
+    throw new Error("System tunnel execution requires awg-quick, amneziawg-quick, or wg-quick in PATH");
+  }
+  const runtimeConfigPath = tunnelServerConfigPath(tunnelRecord);
+  const systemConfigPath = systemTunnelConfigPath(tunnelRecord);
+  const tunnelName = systemTunnelName(tunnelRecord);
+  return [
+    `install -d -m 700 ${systemTunnelRoot()}`,
+    `install -m 600 ${runtimeConfigPath} ${systemConfigPath}`,
+    `if ip link show dev ${tunnelName} >/dev/null 2>&1; then ${quickCommand} down ${systemConfigPath} || true; ${quickCommand} up ${systemConfigPath}; else ${quickCommand} up ${systemConfigPath}; fi`
   ];
 }
 
@@ -636,6 +651,7 @@ module.exports = {
   buildRefreshInterfaceCommands,
   buildRecreatePeerCommands,
   buildDeletePeerCommands,
+  buildProvisionTunnelCommands,
   buildAttachTunnelCommands,
   buildDetachTunnelCommands,
   maybeRunSystemCommands,

@@ -246,6 +246,7 @@ AUDIT_EVENT_TYPE_LABELS = {
     "servers.restart_agent": "Перезагрузка агента",
     "servers.restore": "Восстановление сервера",
     "tak_tunnels.auto_recovered": "Автовосстановление туннеля Tic/Tak",
+    "tak_tunnels.artifacts_rotated": "Ротация артефактов туннеля Tic/Tak",
     "tak_tunnels.manual_repaired": "Ручное восстановление туннеля Tic/Tak",
     "updates.agent_apply": "Обновление агента",
     "updates.agent_check": "Проверка обновлений агента",
@@ -974,6 +975,7 @@ def _request_tak_tunnel_artifacts(
     tak_server: Server,
     actor_user_id: int | None = None,
     reuse_existing_only: bool,
+    rotate_artifacts: bool = False,
 ) -> tuple[str, dict[str, object]]:
     provision_response = _run_agent_executor_logged(
         db,
@@ -983,6 +985,7 @@ def _request_tak_tunnel_artifacts(
             extra={
                 "tic_server": _server_agent_identity_payload(tic_server),
                 "reuse_existing_only": reuse_existing_only,
+                "rotate_artifacts": rotate_artifacts,
             },
         ),
         actor_user_id=actor_user_id,
@@ -991,6 +994,10 @@ def _request_tak_tunnel_artifacts(
     tunnel_artifacts = provision_response.get("tunnel_artifacts")
     if not tunnel_id or not isinstance(tunnel_artifacts, dict):
         raise ServerOperationUnavailableError("Tak tunnel provision did not return tunnel_id/tunnel_artifacts")
+    artifact_revision = int(provision_response.get("artifact_revision") or 0)
+    if artifact_revision > 0:
+        tunnel_artifacts = dict(tunnel_artifacts)
+        tunnel_artifacts["artifact_revision"] = artifact_revision
     return tunnel_id, tunnel_artifacts
 
 
@@ -1033,6 +1040,7 @@ def _repair_tak_tunnel_transport(
             tak_server=tak_server,
             actor_user_id=actor_user_id,
             reuse_existing_only=True,
+            rotate_artifacts=False,
         )
         _attach_tak_tunnel_artifacts(
             db,
@@ -1052,6 +1060,7 @@ def _repair_tak_tunnel_transport(
         tak_server=tak_server,
         actor_user_id=actor_user_id,
         reuse_existing_only=False,
+        rotate_artifacts=False,
     )
     _attach_tak_tunnel_artifacts(
         db,
@@ -1062,6 +1071,32 @@ def _repair_tak_tunnel_transport(
         actor_user_id=actor_user_id,
     )
     return tunnel_id, "full"
+
+
+def _rotate_tak_tunnel_transport(
+    db: Session,
+    *,
+    tic_server: Server,
+    tak_server: Server,
+    actor_user_id: int | None = None,
+) -> tuple[str, int]:
+    tunnel_id, tunnel_artifacts = _request_tak_tunnel_artifacts(
+        db,
+        tic_server=tic_server,
+        tak_server=tak_server,
+        actor_user_id=actor_user_id,
+        reuse_existing_only=False,
+        rotate_artifacts=True,
+    )
+    _attach_tak_tunnel_artifacts(
+        db,
+        tic_server=tic_server,
+        tak_server=tak_server,
+        tunnel_id=tunnel_id,
+        tunnel_artifacts=tunnel_artifacts,
+        actor_user_id=actor_user_id,
+    )
+    return tunnel_id, int(tunnel_artifacts.get("artifact_revision") or 1)
 
 
 def _detach_tak_tunnel_pair(
@@ -1357,6 +1392,20 @@ def _format_audit_details_ru(log: AuditLog) -> str | None:
             parts.append(f"ошибок до ремонта: {failure_count}")
         if isinstance(interface_names, list) and interface_names:
             parts.append(f"интерфейсы: {', '.join(str(item) for item in interface_names[:6])}")
+        return " | ".join(part for part in parts if part) or log.details
+
+    if log.event_type == "tak_tunnels.artifacts_rotated" and isinstance(details, dict):
+        tic_server_name = str(details.get("tic_server_name") or "")
+        tak_server_name = str(details.get("tak_server_name") or "")
+        tunnel_id = str(details.get("tunnel_id") or "")
+        artifact_revision = int(details.get("artifact_revision") or 0)
+        parts = []
+        if tic_server_name or tak_server_name:
+            parts.append(f"пара: {tic_server_name} → {tak_server_name}".strip())
+        if tunnel_id:
+            parts.append(f"туннель: {tunnel_id}")
+        if artifact_revision:
+            parts.append(f"ревизия артефактов: {artifact_revision}")
         return " | ".join(part for part in parts if part) or log.details
 
     if log.event_type == "tak_tunnels.manual_attention_required" and isinstance(details, dict):
@@ -6616,6 +6665,43 @@ def _persist_interface_record(
     db.commit()
     db.refresh(interface)
     return interface
+
+
+def rotate_tak_tunnel_pair(db: Session, actor: User, *, tic_server_id: int, tak_server_id: int) -> None:
+    require_admin(actor)
+    tic_server = get_server_by_id(db, tic_server_id)
+    tak_server = get_server_by_id(db, tak_server_id)
+    if tic_server.server_type != ServerType.TIC:
+        raise InvalidInputError("Tic server not found")
+    if tak_server.server_type != ServerType.TAK:
+        raise InvalidInputError("Tak server not found")
+    tunnel_id, artifact_revision = _rotate_tak_tunnel_transport(
+        db,
+        tic_server=tic_server,
+        tak_server=tak_server,
+        actor_user_id=actor.id,
+    )
+    write_audit_log(
+        db,
+        event_type="tak_tunnels.artifacts_rotated",
+        severity="info",
+        message=f"Tak tunnel artifacts rotated: tic={tic_server.name}, tak={tak_server.name}",
+        message_ru=f"Артефакты туннеля Tic/Tak ротированы: {tic_server.name} → {tak_server.name}",
+        actor_user_id=actor.id,
+        server_id=tic_server.id,
+        details=json.dumps(
+            {
+                "tic_server_id": tic_server.id,
+                "tic_server_name": tic_server.name,
+                "tak_server_id": tak_server.id,
+                "tak_server_name": tak_server.name,
+                "tunnel_id": tunnel_id,
+                "artifact_revision": artifact_revision,
+            },
+            ensure_ascii=False,
+        ),
+    )
+    db.flush()
 
 
 def create_interface_record(db: Session, actor: User, payload: InterfaceCreate) -> Interface:

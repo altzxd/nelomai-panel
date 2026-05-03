@@ -28,6 +28,8 @@ REQUIRED_TOKENS = [
     "agent service is active under `systemd`",
     "failing command",
     "stderr/stdout",
+    "live_panel_tak_rotation_check.py",
+    "artifact rotation",
     "via_tak -> standalone -> via_tak",
     "failure_count",
     "cooldown",

@@ -206,6 +206,7 @@ function buildTakTunnelClientPayload(tunnelRecord) {
   return {
     protocol: String(tunnelRecord.protocol || "amneziawg-2.0"),
     tunnel_id: String(tunnelRecord.tunnel_id || ""),
+    artifact_revision: Number(tunnelRecord.artifact_revision) || 1,
     version: "2.0",
     endpoint: {
       host: String(tunnelRecord.tak_server_host || ""),

@@ -21,6 +21,7 @@ REQUIRED_TOKENS = [
     "panel E2E bootstrap check passes",
     "SSH prompt and SSH exec checks pass",
     "live `Tic ↔ Tak` tunnel validation passes",
+    "live panel tunnel-artifact rotation validation passes",
     "live panel fallback validation passes",
     "live panel backoff/manual-attention validation passes",
     "live panel partial-repair validation passes",

@@ -10,6 +10,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 
 STEPS = [
     ("tunnel", "scripts/live_tunnel_remote_check.py"),
+    ("rotation", "scripts/live_panel_tak_rotation_check.py"),
     ("fallback", "scripts/live_panel_tak_fallback_check.py"),
     ("backoff", "scripts/live_panel_tak_backoff_check.py"),
     ("partial repair", "scripts/live_panel_tak_partial_repair_check.py"),

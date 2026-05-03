@@ -58,6 +58,7 @@ const {
   buildRefreshInterfaceCommands,
   buildRecreatePeerCommands,
   buildDeletePeerCommands,
+  buildProvisionTunnelCommands,
   buildAttachTunnelCommands,
   buildDetachTunnelCommands,
   inspectRuntimeEnvironment,
@@ -510,9 +511,11 @@ function realServerResponse(payload) {
     try {
       const tunnel = provisionTakTunnelRecord(state, payload);
       syncTunnelArtifacts(tunnel);
+      const execution = maybeRunSystemCommands(buildProvisionTunnelCommands(tunnel));
       return ok({
         status: "provisioned",
         tunnel_id: tunnel.tunnel_id,
+        artifact_revision: Number(tunnel.artifact_revision) || 1,
         protocol: tunnel.protocol,
         listen_port: tunnel.listen_port,
         network_cidr: tunnel.network_cidr,
@@ -520,7 +523,9 @@ function realServerResponse(payload) {
         tic_address_v4: tunnel.tic_address_v4,
         nat_mode: tunnel.nat_mode,
         tunnel_artifacts: tunnel.tunnel_artifacts,
-        amnezia_config: tunnel.amnezia_config
+        amnezia_config: tunnel.amnezia_config,
+        execution_mode: execution.mode,
+        system_commands_applied: execution.applied
       });
     } catch (error) {
       return fail(error instanceof Error ? error.message : String(error));
@@ -535,6 +540,7 @@ function realServerResponse(payload) {
       return ok({
         status: "attached",
         tunnel_id: tunnel.tunnel_id,
+        artifact_revision: Number(tunnel.artifact_revision) || 1,
         protocol: tunnel.protocol,
         listen_port: tunnel.listen_port,
         network_cidr: tunnel.network_cidr,

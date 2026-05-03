@@ -348,6 +348,7 @@ function buildTakTunnelPlan(state, payload) {
     id: nextSequence(tunnels),
     sequence,
     tunnel_id: `tak-tunnel-${takServerId}-${String(sequence).padStart(5, "0")}`,
+    artifact_revision: 1,
     protocol: "amneziawg-2.0",
     tic_server_id: ticServerId,
     tic_server_name: String(ticServerPayload.name || `tic-${ticServerId}`),
@@ -382,13 +383,72 @@ function buildTakTunnelPlan(state, payload) {
   };
 }
 
+function rotateTakTunnelPlan(existing) {
+  const revision = Math.max(1, Number(existing.artifact_revision) || 1) + 1;
+  const rotated = {
+    ...existing,
+    artifact_revision: revision,
+    server_private_key: randomBase64(),
+    server_public_key: randomBase64(),
+    client_private_key: randomBase64(),
+    client_public_key: randomBase64(),
+    ...tunnelAwgParameters((Number(existing.sequence) || 1) + revision),
+    updated_at: new Date().toISOString()
+  };
+  const amneziaConfig = buildCanonicalAmneziaConfig(rotated);
+  const canonicalArtifacts = extractCanonicalTunnelArtifacts(amneziaConfig);
+  const tunnelArtifacts = buildTunnelArtifactsFromConfig(amneziaConfig, rotated);
+  return {
+    ...rotated,
+    tunnel_artifacts: tunnelArtifacts,
+    amnezia_config: amneziaConfig,
+    amnezia_source: canonicalArtifacts.source,
+    server_config_text: canonicalArtifacts.server_config_text,
+    client_config_text: canonicalArtifacts.client_config_text,
+  };
+}
+
 function provisionTakTunnelRecord(state, payload) {
   if (!Array.isArray(state.tunnels)) {
     state.tunnels = [];
   }
   const reuseExistingOnly = Boolean(payload && payload.reuse_existing_only);
+  const rotateArtifacts = Boolean(payload && payload.rotate_artifacts);
   const existing = findTunnelRecord(state, payload);
   if (existing) {
+    if (rotateArtifacts) {
+      const rotated = rotateTakTunnelPlan(existing);
+      Object.assign(existing, {
+        artifact_revision: rotated.artifact_revision,
+        protocol: rotated.protocol,
+        listen_port: rotated.listen_port,
+        network_cidr: rotated.network_cidr,
+        tak_address_v4: rotated.tak_address_v4,
+        tic_address_v4: rotated.tic_address_v4,
+        server_private_key: rotated.server_private_key,
+        server_public_key: rotated.server_public_key,
+        client_private_key: rotated.client_private_key,
+        client_public_key: rotated.client_public_key,
+        awg_headers: rotated.awg_headers,
+        awg_session_noise: rotated.awg_session_noise,
+        awg_init_noise: rotated.awg_init_noise,
+        awg_junk: rotated.awg_junk,
+        nat_mode: rotated.nat_mode,
+        amnezia_source: rotated.amnezia_source,
+        tunnel_artifacts: rotated.tunnel_artifacts,
+        server_config_text: rotated.server_config_text,
+        client_config_text: rotated.client_config_text,
+        amnezia_config: rotated.amnezia_config,
+        status: "provisioned",
+        updated_at: rotated.updated_at
+      });
+      saveState(state);
+      return {
+        ...existing,
+        tunnel_artifacts: buildTunnelArtifacts(existing),
+        amnezia_config: buildAmneziaConfig(existing)
+      };
+    }
     existing.status = "provisioned";
     touch(existing);
     saveState(state);
@@ -407,6 +467,7 @@ function provisionTakTunnelRecord(state, payload) {
     id: plan.id,
     sequence: plan.sequence,
     tunnel_id: plan.tunnel_id,
+    artifact_revision: plan.artifact_revision,
     protocol: plan.protocol,
     tic_server_id: plan.tic_server_id,
     tic_server_name: plan.tic_server_name,
@@ -488,6 +549,7 @@ function attachTakTunnelRecord(state, payload) {
       id: nextSequence(state.tunnels),
       sequence: nextTunnelSequence(state.tunnels),
       tunnel_id: tunnelId,
+      artifact_revision: Number(amneziaConfig.artifact_revision) || 1,
       protocol: String(amneziaConfig.protocol || "amneziawg-2.0"),
       tic_server_id: Number(serverPayload.id) || 0,
       tic_server_name: String(serverPayload.name || ""),
@@ -501,6 +563,7 @@ function attachTakTunnelRecord(state, payload) {
   }
 
   existing.local_role = "tic";
+  existing.artifact_revision = Number(amneziaConfig.artifact_revision) || Number(existing.artifact_revision) || 1;
   existing.protocol = String(amneziaConfig.protocol || existing.protocol || "amneziawg-2.0");
   existing.tic_server_id = Number(serverPayload.id) || existing.tic_server_id || 0;
   existing.tic_server_name = String(serverPayload.name || existing.tic_server_name || "");
