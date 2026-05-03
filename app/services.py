@@ -247,6 +247,7 @@ AUDIT_EVENT_TYPE_LABELS = {
     "servers.restore": "Восстановление сервера",
     "tak_tunnels.auto_recovered": "Автовосстановление туннеля Tic/Tak",
     "tak_tunnels.artifacts_rotated": "Ротация артефактов туннеля Tic/Tak",
+    "tak_tunnels.cooldown": "Автовосстановление туннеля Tic/Tak отложено по backoff",
     "tak_tunnels.manual_repaired": "Ручное восстановление туннеля Tic/Tak",
     "updates.agent_apply": "Обновление агента",
     "updates.agent_check": "Проверка обновлений агента",
@@ -1294,6 +1295,27 @@ def _reconcile_tak_tunnel_routes(db: Session) -> None:
                 details=json.dumps(details, ensure_ascii=False),
                 commit=False,
             )
+        elif status_label == "cooldown" and pair_state_changed:
+            details = {
+                "tic_server_id": sample.tic_server.id,
+                "tic_server_name": sample.tic_server.name,
+                "tak_server_id": sample.tak_server.id,
+                "tak_server_name": sample.tak_server.name,
+                "failure_count": int(pair_state.get("failure_count") or 0),
+                "interface_names": sorted(interface.name for interface in pair_interfaces),
+            }
+            if cooldown_until is not None:
+                details["cooldown_until"] = cooldown_until.isoformat()
+            write_audit_log(
+                db,
+                event_type="tak_tunnels.cooldown",
+                severity="warning",
+                message=f"Tak tunnel auto-repair delayed by cooldown: tic={sample.tic_server.name}, tak={sample.tak_server.name}",
+                message_ru=f"Автовосстановление туннеля Tic/Tak отложено по backoff для пары {sample.tic_server.name} → {sample.tak_server.name}",
+                server_id=sample.tic_server.id,
+                details=json.dumps(details, ensure_ascii=False),
+                commit=False,
+            )
         for interface in pair_interfaces:
             try:
                 if is_active:
@@ -1440,6 +1462,23 @@ def _format_audit_details_ru(log: AuditLog) -> str | None:
             parts.append(f"ревизия артефактов: {artifact_revision}")
         return " | ".join(part for part in parts if part) or log.details
 
+    if log.event_type == "tak_tunnels.cooldown" and isinstance(details, dict):
+        tic_server_name = str(details.get("tic_server_name") or "")
+        tak_server_name = str(details.get("tak_server_name") or "")
+        failure_count = int(details.get("failure_count") or 0)
+        cooldown_until = str(details.get("cooldown_until") or "")
+        interface_names = details.get("interface_names") or []
+        parts = []
+        if tic_server_name or tak_server_name:
+            parts.append(f"пара: {tic_server_name} → {tak_server_name}".strip())
+        if failure_count:
+            parts.append(f"неудачных попыток: {failure_count}")
+        if cooldown_until:
+            parts.append(f"cooldown до: {cooldown_until}")
+        if isinstance(interface_names, list) and interface_names:
+            parts.append(f"интерфейсы: {', '.join(str(item) for item in interface_names[:6])}")
+        return " | ".join(part for part in parts if part) or log.details
+
     if log.event_type == "tak_tunnels.manual_attention_required" and isinstance(details, dict):
         tic_server_name = str(details.get("tic_server_name") or "")
         tak_server_name = str(details.get("tak_server_name") or "")
@@ -1485,7 +1524,13 @@ def serialize_audit_log(log: AuditLog) -> AuditLogView:
         server_url = f"/admin/servers?bucket=active&selected_server_id={log.server_id}"
     pair_label = None
     diagnostics_url = None
-    if log.event_type == "tak_tunnels.auto_recovered" and log.details:
+    if log.event_type in {
+        "tak_tunnels.auto_recovered",
+        "tak_tunnels.cooldown",
+        "tak_tunnels.manual_attention_required",
+        "tak_tunnels.manual_repaired",
+        "tak_tunnels.artifacts_rotated",
+    } and log.details:
         try:
             details = json.loads(log.details)
         except json.JSONDecodeError:
