@@ -22,6 +22,9 @@
             {% if error %}
             <div class="form-error">{{ error }}</div>
             {% endif %}
+            {% if info_message %}
+            <div class="form-success">{{ info_message }}</div>
+            {% endif %}
             <button type="submit" class="primary-button">Войти</button>
         </form>
         <p class="demo-hint">Демо: `admin/admin` и `demo/demo`</p>

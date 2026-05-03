@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block body %}
+<main class="dashboard-shell">
+    <section class="dashboard-topbar">
+        <div>
+            <p class="eyebrow">Admin</p>
+            <h1>Выданные ссылки регистрации</h1>
+            <p class="dashboard-subtitle">Одна ссылка используется только один раз. Неиспользованные и отозванные ссылки разнесены отдельно.</p>
+        </div>
+        <div class="job-actions">
+            <a class="ghost-button small" href="/admin?tab=clients">Назад к клиентам</a>
+        </div>
+    </section>
+
+    {% if registration_links_page.created_link %}
+    <section class="settings-card">
+        <h3>Новая ссылка</h3>
+        <div class="registration-link-copy-row">
+            <p class="registration-link-url">{{ registration_links_page.created_link.url }}</p>
+            <button class="primary-button small" type="button" data-copy="{{ registration_links_page.created_link.url }}">Копировать</button>
+        </div>
+    </section>
+    {% endif %}
+
+    <section class="settings-card">
+        <div class="toolbar-row">
+            <form method="post" action="/admin/registration-links">
+                <button class="primary-button small" type="submit">Выдать ссылку регистрации</button>
+            </form>
+            <form method="post" action="/admin/registration-links/revoke-unused">
+                <button class="ghost-button small danger" type="submit">Отозвать все неиспользованные</button>
+            </form>
+        </div>
+    </section>
+
+    <section class="settings-card">
+        <h3>Неиспользованные ссылки</h3>
+        <p class="muted-note">Ссылок: {{ registration_links_page.unused_count }}</p>
+        <section class="client-list">
+            {% for link in registration_links_page.unused_links %}
+            <article class="client-card">
+                <div class="client-card-header">
+                    <h3>{{ link.status_label }}</h3>
+                    <p>{{ link.url }}</p>
+                </div>
+                <div class="registration-link-copy-row">
+                    <button class="ghost-button small" type="button" data-copy="{{ link.url }}">Скопировать ссылку</button>
+                </div>
+                <dl class="client-metrics">
+                    <div><dt>Создана</dt><dd>{{ link.created_at|datetime_moscow }}</dd></div>
+                    <div><dt>Кем</dt><dd>{{ link.created_by_login or "неизвестно" }}</dd></div>
+                </dl>
+                <form class="registration-link-comment-form" method="post" action="/admin/registration-links/{{ link.id }}/comment">
+                    <label>
+                        <span>Комментарий</span>
+                        <input type="text" name="comment" value="{{ link.comment or '' }}" maxlength="255" placeholder="Необязательно">
+                    </label>
+                    <button class="ghost-button small" type="submit">Сохранить</button>
+                </form>
+            </article>
+            {% else %}
+            <p class="muted-note">Неиспользованных ссылок нет.</p>
+            {% endfor %}
+        </section>
+    </section>
+
+    <section class="settings-card">
+        <h3>Отозванные ссылки</h3>
+        <p class="muted-note">Ссылок: {{ registration_links_page.revoked_count }}</p>
+        <section class="client-list">
+            {% for link in registration_links_page.revoked_links %}
+            <article class="client-card">
+                <div class="client-card-header">
+                    <h3>{{ link.status_label }}</h3>
+                    <p>{{ link.url }}</p>
+                </div>
+                <dl class="client-metrics">
+                    <div><dt>Создана</dt><dd>{{ link.created_at|datetime_moscow }}</dd></div>
+                    <div><dt>Отозвана</dt><dd>{{ link.revoked_at|datetime_moscow if link.revoked_at else "неизвестно" }}</dd></div>
+                    <div><dt>Комментарий</dt><dd>{{ link.comment or "—" }}</dd></div>
+                </dl>
+            </article>
+            {% else %}
+            <p class="muted-note">Отозванных ссылок нет.</p>
+            {% endfor %}
+        </section>
+    </section>
+
+    <section class="settings-card">
+        <h3>Использованные за последние 7 дней</h3>
+        <p class="muted-note">Ссылок: {{ registration_links_page.recent_used_count }}</p>
+        <section class="client-list">
+            {% for link in registration_links_page.recent_used_links %}
+            <article class="client-card">
+                <div class="client-card-header">
+                    <h3>{{ link.used_by_login or "использована" }}</h3>
+                    <p>{{ link.url }}</p>
+                </div>
+                <dl class="client-metrics">
+                    <div><dt>Создана</dt><dd>{{ link.created_at|datetime_moscow }}</dd></div>
+                    <div><dt>Использована</dt><dd>{{ link.used_at|datetime_moscow if link.used_at else "неизвестно" }}</dd></div>
+                    <div><dt>Аккаунт</dt><dd>{{ link.used_by_login or "неизвестно" }}</dd></div>
+                    <div><dt>Комментарий</dt><dd>{{ link.comment or "—" }}</dd></div>
+                </dl>
+            </article>
+            {% else %}
+            <p class="muted-note">За последние 7 дней использованных ссылок нет.</p>
+            {% endfor %}
+        </section>
+    </section>
+</main>
+{% endblock %}

@@ -20,6 +20,7 @@ def run_case(label: str, env_overrides: dict[str, str], should_pass: bool) -> No
         "DEBUG": "false",
         "SECRET_KEY": "prod-secret-key-with-at-least-32-chars-123456",
         "DATABASE_URL": "postgresql+psycopg://nelomai:secret@db.example.local/nelomai",
+        "NELOMAI_GIT_REPO": "https://github.com/altzxd/nelomai-panel.git",
         "PEER_AGENT_COMMAND": "node agents/node-tic-agent/src/index.js",
         **env_overrides,
     }
@@ -49,6 +50,7 @@ def run() -> None:
         should_pass=False,
     )
     run_case("sqlite forbidden", {"DATABASE_URL": "sqlite+pysqlite:///./nelomai-panel.db"}, should_pass=False)
+    run_case("empty nelomai git repo forbidden", {"NELOMAI_GIT_REPO": ""}, should_pass=False)
     run_case("empty peer agent command forbidden", {"PEER_AGENT_COMMAND": ""}, should_pass=False)
     print("OK: production config rules check passed")
 

@@ -185,6 +185,7 @@ def main() -> None:
                 "/api/admin/servers",
                 json={
                     "server_type": "tic",
+                    "tic_region": "europe",
                     "name": server_name,
                     "host": "127.0.0.61",
                     "ssh_port": 22,

@@ -23,6 +23,8 @@ filter_type = sa.Enum("IP", "LINK", name="filtertype")
 filter_scope = sa.Enum("GLOBAL", "USER", name="filterscope")
 filter_kind = sa.Enum("EXCLUSION", "BLOCK", name="filterkind")
 server_type = sa.Enum("TIC", "TAK", "STORAGE", name="servertype")
+tic_region = sa.Enum("EUROPE", "EAST", name="ticregion")
+user_region = sa.Enum("EUROPE", "EAST", "UNKNOWN", name="userregion")
 backup_type = sa.Enum("USERS", "SYSTEM", "FULL", name="backuptype")
 panel_job_status = sa.Enum("QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED", "STUCK", name="paneljobstatus")
 
@@ -34,6 +36,7 @@ def upgrade() -> None:
         sa.Column("login", sa.String(length=64), nullable=False),
         sa.Column("password_hash", sa.String(length=255), nullable=False),
         sa.Column("display_name", sa.String(length=120), nullable=False),
+        sa.Column("region", user_region, nullable=True),
         sa.Column("role", user_role, nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("is_active", sa.Boolean(), nullable=False),
@@ -46,6 +49,8 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("name", sa.String(length=120), nullable=False),
         sa.Column("server_type", server_type, nullable=False),
+        sa.Column("tic_region", tic_region, nullable=True),
+        sa.Column("tak_country", sa.String(length=120), nullable=True),
         sa.Column("host", sa.String(length=255), nullable=False),
         sa.Column("ssh_port", sa.Integer(), nullable=False),
         sa.Column("ssh_login", sa.String(length=120), nullable=True),
@@ -72,6 +77,8 @@ def upgrade() -> None:
         sa.Column("panel_job_id", sa.Integer(), nullable=True),
         sa.Column("server_name", sa.String(length=120), nullable=False),
         sa.Column("server_type", server_type, nullable=False),
+        sa.Column("tic_region", tic_region, nullable=True),
+        sa.Column("tak_country", sa.String(length=120), nullable=True),
         sa.Column("host", sa.String(length=255), nullable=False),
         sa.Column("ssh_port", sa.Integer(), nullable=False),
         sa.Column("ssh_login", sa.String(length=120), nullable=False),
@@ -164,6 +171,21 @@ def upgrade() -> None:
     )
 
     op.create_table(
+        "registration_links",
+        sa.Column("id", sa.Integer(), primary_key=True),
+        sa.Column("token_id", sa.String(length=64), nullable=False),
+        sa.Column("comment", sa.String(length=255), nullable=True),
+        sa.Column("created_by_user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("used_by_user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("used_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.UniqueConstraint("token_id"),
+    )
+    op.create_index(op.f("ix_registration_links_token_id"), "registration_links", ["token_id"], unique=True)
+    op.create_index(op.f("ix_registration_links_created_at"), "registration_links", ["created_at"], unique=False)
+
+    op.create_table(
         "peer_download_links",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("token_id", sa.String(length=64), nullable=False),
@@ -239,6 +261,9 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_audit_logs_event_type"), table_name="audit_logs")
     op.drop_index(op.f("ix_audit_logs_created_at"), table_name="audit_logs")
     op.drop_table("audit_logs")
+    op.drop_index(op.f("ix_registration_links_created_at"), table_name="registration_links")
+    op.drop_index(op.f("ix_registration_links_token_id"), table_name="registration_links")
+    op.drop_table("registration_links")
     op.drop_index(op.f("ix_peer_download_links_token_id"), table_name="peer_download_links")
     op.drop_table("peer_download_links")
     op.drop_table("resource_filters")
@@ -259,6 +284,8 @@ def downgrade() -> None:
         filter_type.drop(bind, checkfirst=True)
         route_mode.drop(bind, checkfirst=True)
         server_type.drop(bind, checkfirst=True)
+        tic_region.drop(bind, checkfirst=True)
+        user_region.drop(bind, checkfirst=True)
         backup_type.drop(bind, checkfirst=True)
         panel_job_status.drop(bind, checkfirst=True)
         user_role.drop(bind, checkfirst=True)

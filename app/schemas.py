@@ -2,12 +2,20 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.models import BackupType, FilterKind, FilterScope, FilterType, PanelJobStatus, RouteMode, UserRole
+from app.models import BackupType, FilterKind, FilterScope, FilterType, PanelJobStatus, RouteMode, UserRegion, UserRole
 
 
 class LoginForm(BaseModel):
     login: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=255)
+
+
+class PublicRegistrationCreate(BaseModel):
+    login: str = Field(min_length=1, max_length=20)
+    password: str = Field(min_length=4, max_length=255)
+    display_name: str = Field(min_length=1, max_length=120)
+    communication_channel: str = Field(min_length=1, max_length=255)
+    region: str = Field(pattern="^(europe|east|unknown)$")
 
 
 class PeerView(BaseModel):
@@ -142,6 +150,8 @@ class ServerOptionView(BaseModel):
 class ServerCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     server_type: str = Field(pattern="^(tic|tak|storage)$")
+    tic_region: str | None = Field(default=None, pattern="^(europe|east)$")
+    tak_country: str | None = Field(default=None, max_length=120)
     host: str = Field(min_length=1, max_length=255)
     ssh_port: int = Field(default=22, ge=1, le=65535)
     ssh_login: str = Field(min_length=1, max_length=120)
@@ -206,6 +216,8 @@ class ServerBootstrapListItemView(BaseModel):
     name: str
     host: str
     server_type: str
+    tic_region: str | None = None
+    tak_country: str | None = None
     ssh_port: int
     status: str
     status_label: str
@@ -384,6 +396,10 @@ class ServerListItemView(BaseModel):
     name: str
     host: str
     server_type: str
+    tic_region: str | None = None
+    tic_region_label: str | None = None
+    tak_country: str | None = None
+    location_label: str | None = None
     available: bool
     status: str
     last_seen_at: datetime | None = None
@@ -405,6 +421,12 @@ class ServerListItemView(BaseModel):
     tak_fallback_interface_names: list[str] = []
     tak_recovered_interface_count: int = 0
     tak_recovered_interface_names: list[str] = []
+    agent_update_status: str | None = None
+    agent_version: str | None = None
+    contract_version: str | None = None
+    current_version: str | None = None
+    latest_version: str | None = None
+    update_available: bool = False
 
 
 class ServerDetailView(BaseModel):
@@ -412,6 +434,10 @@ class ServerDetailView(BaseModel):
     name: str
     host: str
     server_type: str
+    tic_region: str | None = None
+    tic_region_label: str | None = None
+    tak_country: str | None = None
+    location_label: str | None = None
     status: str
     last_seen_at: datetime | None = None
     metrics_note: str = ""
@@ -545,6 +571,13 @@ class ServerAgentUpdateListView(BaseModel):
 
 class ServerAgentUpdateApplyRequest(BaseModel):
     server_id: int | None = None
+
+
+class UpdatesPageView(BaseModel):
+    panel_update_summary: PanelUpdateCheckView
+    agent_update_summaries: list[ServerAgentUpdateView] = []
+    update_available_count: int = 0
+    version_issue_count: int = 0
 
 
 class BackupSettingsUpdate(BaseModel):
@@ -718,9 +751,14 @@ class ClientView(BaseModel):
     id: int
     login: str
     display_name: str
+    region: UserRegion | None = None
+    region_label: str | None = None
     role: UserRole
     interface_count: int
     communication_channel: str | None
+    expires_at: datetime | None = None
+    is_expired: bool = False
+    has_no_expiry: bool = False
     can_delete: bool
 
 
@@ -781,14 +819,80 @@ class InterfaceExclusionFiltersUpdate(BaseModel):
     enabled: bool
 
 
+class BetaReadinessSummaryView(BaseModel):
+    status: str
+    message: str
+    details: list[str] = []
+    runbook_url: str | None = None
+    settings_url: str | None = None
+    backups_url: str | None = None
+    servers_url: str | None = None
+
+
+class AccessUserView(BaseModel):
+    id: int
+    login: str
+    display_name: str
+    region: UserRegion | None = None
+    region_label: str | None = None
+    expires_at: datetime | None = None
+    is_expired: bool = False
+    communication_channel: str | None = None
+
+
+class RegistrationLinkView(BaseModel):
+    id: int
+    url: str
+    comment: str | None = None
+    created_at: datetime
+    created_by_login: str | None = None
+    used_at: datetime | None = None
+    used_by_login: str | None = None
+    revoked_at: datetime | None = None
+    is_used: bool = False
+    is_revoked: bool = False
+    status_label: str
+
+
+class RegistrationLinksPageView(BaseModel):
+    unused_links: list[RegistrationLinkView] = []
+    revoked_links: list[RegistrationLinkView] = []
+    recent_used_links: list[RegistrationLinkView] = []
+    created_link: RegistrationLinkView | None = None
+    unused_count: int = 0
+    revoked_count: int = 0
+    recent_used_count: int = 0
+
+
+class TakTunnelPairStateView(BaseModel):
+    tic_server_id: int
+    tic_server_name: str
+    tak_server_id: int
+    tak_server_name: str
+    pair_label: str
+    status: str
+    status_label: str
+    fallback_interface_count: int = 0
+    recovered_interface_count: int = 0
+    failure_count: int = 0
+    cooldown_until: datetime | None = None
+    manual_attention_required: bool = False
+    diagnostics_url: str | None = None
+
+
 class AdminPageView(BaseModel):
     panel_server: ServerCardView
     tic_server: ServerCardView
     tak_server: ServerCardView
+    beta_readiness: BetaReadinessSummaryView | None = None
+    panel_update_summary: PanelUpdateCheckView | None = None
+    agent_update_summaries: list[ServerAgentUpdateView] = []
     interfaces: list[InterfaceSummaryView]
     settings: BasicSettingsView
     filters: list[FilterView]
     clients: list[ClientView]
+    access_users: list[AccessUserView] = []
+    access_users_without_expiry: list[AccessUserView] = []
     client_interface_options: list[ClientInterfaceOptionView]
     available_tic_servers: list[ServerOptionView]
     available_tak_servers: list[ServerOptionView]
@@ -798,8 +902,13 @@ class ServersPageView(BaseModel):
     servers: list[ServerListItemView]
     excluded_servers: list[ServerListItemView] = []
     pending_bootstrap_tasks: list[ServerBootstrapListItemView] = []
+    tak_tunnel_pairs: list[TakTunnelPairStateView] = []
+    beta_readiness: BetaReadinessSummaryView | None = None
+    selected_server_agent_update: ServerAgentUpdateView | None = None
+    selected_view: str = "servers"
     selected_bucket: str = "active"
     selected_type: str
+    selected_location: str = ""
     selected_sort: str
     selected_server: ServerDetailView | None = None
     selected_bootstrap_task_id: int | None = None

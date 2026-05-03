@@ -1,6 +1,10 @@
-from app.models import AppSetting, FilterKind, FilterScope, Interface, ResourceFilter, RouteMode, Server, User, UserResource, UserRole
+from datetime import UTC, datetime
+
+from app.models import AppSetting, FilterKind, FilterScope, Interface, ResourceFilter, RouteMode, Server, User, UserRegion, UserResource, UserRole
 from app.schemas import (
+    AccessUserView,
     AdminPageView,
+    BetaReadinessSummaryView,
     BasicSettingsView,
     ClientInterfaceOptionView,
     ClientView,
@@ -15,9 +19,18 @@ from app.schemas import (
     ServerListItemView,
     ServerOptionView,
     ServersPageView,
+    TakTunnelPairStateView,
     UserDashboardView,
 )
 from app.version import get_panel_version
+
+
+def _normalize_datetime(value):
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def _tak_tunnel_status_label(status: str | None) -> str | None:
@@ -36,6 +49,16 @@ def _tak_tunnel_status_label(status: str | None) -> str | None:
     labels["cooldown"] = "ожидает повторную попытку"
     labels["manual_attention_required"] = "требует ручного вмешательства"
     return labels.get(normalized, normalized)
+
+
+def _user_region_label(value: UserRegion | None) -> str | None:
+    if value == UserRegion.EUROPE:
+        return "Европа"
+    if value == UserRegion.EAST:
+        return "Восток"
+    if value == UserRegion.UNKNOWN:
+        return "Не знаю/затрудняюсь ответить"
+    return None
 
 
 def serialize_interface(interface: Interface, expires_at) -> InterfaceView:
@@ -181,14 +204,34 @@ def serialize_interface_summary(interface: Interface) -> InterfaceSummaryView:
 
 
 def serialize_client(user: User) -> ClientView:
+    expires_at = _normalize_datetime(user.expires_at)
     return ClientView(
         id=user.id,
         login=user.login,
         display_name=user.display_name,
+        region=user.region,
+        region_label=_user_region_label(user.region),
         role=user.role,
         interface_count=len(user.interfaces),
         communication_channel=user.contact_link_record.value if user.contact_link_record else None,
+        expires_at=expires_at,
+        is_expired=expires_at is not None and expires_at <= datetime.now(UTC),
+        has_no_expiry=expires_at is None,
         can_delete=user.role != UserRole.ADMIN,
+    )
+
+
+def serialize_access_user(user: User) -> AccessUserView:
+    expires_at = _normalize_datetime(user.expires_at)
+    return AccessUserView(
+        id=user.id,
+        login=user.login,
+        display_name=user.display_name,
+        region=user.region,
+        region_label=_user_region_label(user.region),
+        expires_at=expires_at,
+        is_expired=expires_at is not None and expires_at <= datetime.now(UTC),
+        communication_channel=user.contact_link_record.value if user.contact_link_record else None,
     )
 
 
@@ -204,6 +247,9 @@ def serialize_admin_page(
     panel_server: ServerCardView,
     tic_server: ServerCardView,
     tak_server: ServerCardView,
+    beta_readiness: BetaReadinessSummaryView | None,
+    panel_update_summary,
+    agent_update_summaries,
     interfaces: list[Interface],
     available_interfaces: list[Interface],
     available_tic_servers: list[Server],
@@ -211,16 +257,23 @@ def serialize_admin_page(
     settings: dict[str, str],
     filters: list[FilterView],
     clients: list[User],
+    access_users: list[User],
+    access_users_without_expiry: list[User],
 ) -> AdminPageView:
     interface_options = [serialize_client_interface_option(interface) for interface in available_interfaces]
     return AdminPageView(
         panel_server=panel_server,
         tic_server=tic_server,
         tak_server=tak_server,
+        beta_readiness=beta_readiness,
+        panel_update_summary=panel_update_summary,
+        agent_update_summaries=agent_update_summaries,
         interfaces=[serialize_interface_summary(interface) for interface in interfaces],
         settings=serialize_basic_settings(settings),
         filters=filters,
         clients=[serialize_client(user) for user in clients],
+        access_users=[serialize_access_user(user) for user in access_users],
+        access_users_without_expiry=[serialize_access_user(user) for user in access_users_without_expiry],
         client_interface_options=interface_options,
         available_tic_servers=serialize_server_options(available_tic_servers),
         available_tak_servers=serialize_server_options(available_tak_servers),
@@ -251,8 +304,13 @@ def serialize_servers_page(
     servers: list[ServerListItemView],
     excluded_servers: list[ServerListItemView],
     pending_bootstrap_tasks: list[ServerBootstrapListItemView],
+    tak_tunnel_pairs: list[TakTunnelPairStateView],
+    beta_readiness: BetaReadinessSummaryView | None,
+    selected_server_agent_update,
+    selected_view: str,
     selected_bucket: str,
     selected_type: str,
+    selected_location: str,
     selected_sort: str,
     selected_server: ServerDetailView | None = None,
     selected_bootstrap_task_id: int | None = None,
@@ -261,8 +319,13 @@ def serialize_servers_page(
         servers=servers,
         excluded_servers=excluded_servers,
         pending_bootstrap_tasks=pending_bootstrap_tasks,
+        tak_tunnel_pairs=tak_tunnel_pairs,
+        beta_readiness=beta_readiness,
+        selected_server_agent_update=selected_server_agent_update,
+        selected_view=selected_view,
         selected_bucket=selected_bucket,
         selected_type=selected_type,
+        selected_location=selected_location,
         selected_sort=selected_sort,
         selected_server=selected_server,
         selected_bootstrap_task_id=selected_bootstrap_task_id,

@@ -136,7 +136,33 @@ textarea[disabled] {
     pointer-events: none;
 }
 .form-error { color: #ffd6e0; background: rgba(255,122,158,0.12); padding: 12px 14px; border-radius: 14px; }
+.form-success { color: #c6f4df; background: rgba(97, 213, 172, 0.14); padding: 12px 14px; border-radius: 14px; }
+.form-hint { color: var(--muted); font-size: 0.86rem; line-height: 1.45; margin-top: -2px; }
 .demo-hint { margin-top: 18px; color: var(--muted); font-size: 0.9rem; }
+.registration-link-copy-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 12px;
+}
+.registration-link-url {
+    margin: 0;
+    color: var(--muted);
+    word-break: break-all;
+}
+.registration-link-comment-form {
+    display: grid;
+    gap: 10px;
+    margin-top: 14px;
+}
+.registration-link-comment-form label {
+    display: grid;
+    gap: 8px;
+}
+.registration-link-comment-form span {
+    color: var(--muted);
+}
 
 .app-shell {
     display: grid;
@@ -214,6 +240,20 @@ textarea[disabled] {
     color: var(--text);
     background: var(--accent-soft);
     border-color: rgba(91, 182, 255, 0.24);
+}
+
+.nav-icon-pill.is-warning-state {
+    color: #ffe0a3;
+    background: rgba(255, 199, 92, 0.18);
+    border-color: rgba(255, 199, 92, 0.34);
+    box-shadow: 0 0 0 1px rgba(255, 199, 92, 0.08), 0 12px 28px rgba(255, 199, 92, 0.1);
+}
+
+.nav-icon-pill.is-warning-state:hover,
+.nav-icon-pill.is-warning-state.active {
+    color: #fff0c2;
+    background: rgba(255, 199, 92, 0.26);
+    border-color: rgba(255, 199, 92, 0.46);
 }
 
 .nav-icon-pill.is-problem {

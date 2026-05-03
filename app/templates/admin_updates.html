@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block body %}
+<main class="app-shell admin-shell">
+    <aside class="sidebar icon-sidebar">
+        <div class="sidebar-logo-shell" aria-label="Nelomai">
+            <img class="sidebar-brand-logo" src="{{ url_for('static', path='/logo.svg') }}" alt="Nelomai">
+        </div>
+        <nav class="sidebar-nav sidebar-nav-icons">
+            <a class="nav-icon-pill active {% if has_available_updates %}is-warning-state{% endif %}" href="/admin/updates" title="Обновления" aria-label="Обновления">
+                <span class="nav-icon">↑</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin?tab=overview" title="Панель" aria-label="Панель">
+                <span class="nav-icon">⌂</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin?tab=settings&settings_view=basic" title="Настройки" aria-label="Настройки">
+                <span class="nav-icon">⚙</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin?tab=clients" title="Клиенты" aria-label="Клиенты">
+                <span class="nav-icon">◫</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/servers" title="Серверы" aria-label="Серверы">
+                <span class="nav-icon">▣</span>
+            </a>
+            <a class="nav-icon-pill {% if has_problem_jobs %}is-problem{% endif %}" href="/admin/jobs" title="Задачи" aria-label="Задачи">
+                <span class="nav-icon">⏱</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/logs" title="Логи" aria-label="Логи">
+                <span class="nav-icon">≡</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/diagnostics" title="Диагностика" aria-label="Диагностика">
+                <span class="nav-icon">+</span>
+            </a>
+            <a class="nav-icon-pill" href="/admin/agent-contract" title="Контракт агента" aria-label="Контракт агента">
+                <span class="nav-icon">⇄</span>
+            </a>
+        </nav>
+    </aside>
+
+    <section class="main-shell">
+        <header class="topbar">
+            <div>
+                <div class="brand-inline">
+                    <span class="brand-inline-title">Nelomai</span>
+                </div>
+                <p class="eyebrow">Обновления</p>
+                <h2>Версии панели и серверных агентов</h2>
+            </div>
+            <div class="topbar-actions">
+                <form method="post" action="/logout">
+                    <button type="submit" class="ghost-button">Выйти</button>
+                </form>
+            </div>
+        </header>
+
+        <section class="settings-card">
+            <h3>Сводка</h3>
+            <p class="muted-note">Доступно обновлений: {{ updates_page.update_available_count }} · Требуют внимания: {{ updates_page.version_issue_count }}</p>
+        </section>
+
+        <section class="settings-card">
+            <div class="toolbar-row">
+                <button class="ghost-button small" type="button" data-panel-update-check>Проверить панель</button>
+                <span class="status-text" data-update-settings-status></span>
+            </div>
+            <div class="update-check-result {% if updates_page.panel_update_summary.update_available %}is-warning{% endif %}" data-panel-update-result>
+                {% if updates_page.panel_update_summary.update_available %}
+                Доступна новая версия: {{ updates_page.panel_update_summary.latest_version or "неизвестно" }}. Текущая версия: {{ updates_page.panel_update_summary.current_version }}.
+                {% else %}
+                Обновлений нет. Текущая версия: {{ updates_page.panel_update_summary.current_version }}. Последняя версия: {{ updates_page.panel_update_summary.latest_version or "не найдена" }}.
+                {% endif %}
+            </div>
+        </section>
+
+        <section class="settings-card">
+            <div class="toolbar-row">
+                <button class="ghost-button small" type="button" data-agent-updates-check>Проверить все серверы</button>
+                <button class="primary-button small" type="button" data-agent-updates-apply-all>Обновить все</button>
+                <span class="status-text" data-agent-updates-status></span>
+            </div>
+            <div class="agent-update-list" data-agent-updates-result>
+                {% for item in updates_page.agent_update_summaries %}
+                <div class="agent-update-row {% if item.status == 'error' %}is-error{% endif %}">
+                    <div>
+                        <strong>{{ item.name }} · {{ item.server_type|upper }}</strong>
+                        <p>{{ item.message }}. Текущая: {{ item.current_version or "неизвестно" }}. Последняя: {{ item.latest_version or "неизвестно" }}. contract: {{ item.contract_version or "неизвестно" }}.</p>
+                    </div>
+                    <span class="availability {% if item.status == 'error' or item.update_available %}is-invalid{% elif item.status in ['legacy', 'repo_missing', 'excluded'] %}is-unknown{% else %}is-online{% endif %}">
+                        {% if item.update_available %}доступно{% else %}{{ item.status }}{% endif %}
+                    </span>
+                    <button class="ghost-button small" type="button" data-agent-update-server="{{ item.server_id }}" {% if item.status in ['repo_missing', 'excluded'] %}disabled{% endif %}>Обновить</button>
+                </div>
+                {% else %}
+                <p class="muted-note">Серверов для проверки пока нет.</p>
+                {% endfor %}
+            </div>
+        </section>
+    </section>
+</main>
+{% endblock %}

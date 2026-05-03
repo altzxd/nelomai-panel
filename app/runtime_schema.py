@@ -12,6 +12,14 @@ def apply_legacy_runtime_schema_updates(engine: Engine) -> list[str]:
     """
     applied: list[str] = []
     inspector = inspect(engine)
+    datetime_type = "DATETIME" if engine.dialect.name == "sqlite" else "TIMESTAMP WITH TIME ZONE"
+    primary_key = "INTEGER PRIMARY KEY" if engine.dialect.name == "sqlite" else "SERIAL PRIMARY KEY"
+
+    user_columns = {column["name"] for column in inspector.get_columns("users")}
+    if "region" not in user_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE users ADD COLUMN region VARCHAR(16)"))
+        applied.append("users.region")
 
     peer_columns = {column["name"] for column in inspector.get_columns("peers")}
     if "expires_at" not in peer_columns:
@@ -58,6 +66,12 @@ def apply_legacy_runtime_schema_updates(engine: Engine) -> list[str]:
 
     server_columns = {column["name"] for column in inspect(engine).get_columns("servers")}
     with engine.begin() as connection:
+        if "tic_region" not in server_columns:
+            connection.execute(text("ALTER TABLE servers ADD COLUMN tic_region VARCHAR(16)"))
+            applied.append("servers.tic_region")
+        if "tak_country" not in server_columns:
+            connection.execute(text("ALTER TABLE servers ADD COLUMN tak_country VARCHAR(120)"))
+            applied.append("servers.tak_country")
         if "ssh_port" not in server_columns:
             connection.execute(text("ALTER TABLE servers ADD COLUMN ssh_port INTEGER DEFAULT 22"))
             applied.append("servers.ssh_port")
@@ -80,6 +94,14 @@ def apply_legacy_runtime_schema_updates(engine: Engine) -> list[str]:
     bootstrap_tables = set(inspect(engine).get_table_names())
     if "server_bootstrap_tasks" in bootstrap_tables:
         bootstrap_columns = {column["name"] for column in inspect(engine).get_columns("server_bootstrap_tasks")}
+        if "tic_region" not in bootstrap_columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE server_bootstrap_tasks ADD COLUMN tic_region VARCHAR(16)"))
+            applied.append("server_bootstrap_tasks.tic_region")
+        if "tak_country" not in bootstrap_columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE server_bootstrap_tasks ADD COLUMN tak_country VARCHAR(120)"))
+            applied.append("server_bootstrap_tasks.tak_country")
         if "agent_task_id" not in bootstrap_columns:
             with engine.begin() as connection:
                 connection.execute(text("ALTER TABLE server_bootstrap_tasks ADD COLUMN agent_task_id INTEGER"))
@@ -129,9 +151,33 @@ def apply_legacy_runtime_schema_updates(engine: Engine) -> list[str]:
             connection.execute(text("UPDATE resource_filters SET kind = 'BLOCK' WHERE kind = 'block'"))
 
     table_names = set(inspect(engine).get_table_names())
+    if "registration_links" not in table_names:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "CREATE TABLE registration_links ("
+                    f"id {primary_key}, "
+                    "token_id VARCHAR(64) NOT NULL UNIQUE, "
+                    "comment VARCHAR(255), "
+                    "created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL, "
+                    "used_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL, "
+                    f"revoked_at {datetime_type}, "
+                    f"used_at {datetime_type}, "
+                    f"created_at {datetime_type} NOT NULL"
+                    ")"
+                )
+            )
+            connection.execute(text("CREATE UNIQUE INDEX ix_registration_links_token_id ON registration_links (token_id)"))
+            connection.execute(text("CREATE INDEX ix_registration_links_created_at ON registration_links (created_at)"))
+        applied.append("registration_links")
+    else:
+        registration_link_columns = {column["name"] for column in inspect(engine).get_columns("registration_links")}
+        if "comment" not in registration_link_columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE registration_links ADD COLUMN comment VARCHAR(255)"))
+            applied.append("registration_links.comment")
+
     if "peer_download_links" not in table_names:
-        datetime_type = "DATETIME" if engine.dialect.name == "sqlite" else "TIMESTAMP WITH TIME ZONE"
-        primary_key = "INTEGER PRIMARY KEY" if engine.dialect.name == "sqlite" else "SERIAL PRIMARY KEY"
         with engine.begin() as connection:
             connection.execute(
                 text(
@@ -150,8 +196,6 @@ def apply_legacy_runtime_schema_updates(engine: Engine) -> list[str]:
         applied.append("peer_download_links")
 
     if "backup_records" not in table_names:
-        datetime_type = "DATETIME" if engine.dialect.name == "sqlite" else "TIMESTAMP WITH TIME ZONE"
-        primary_key = "INTEGER PRIMARY KEY" if engine.dialect.name == "sqlite" else "SERIAL PRIMARY KEY"
         with engine.begin() as connection:
             connection.execute(
                 text(
@@ -175,8 +219,6 @@ def apply_legacy_runtime_schema_updates(engine: Engine) -> list[str]:
 
     table_names = set(inspect(engine).get_table_names())
     if "panel_jobs" not in table_names:
-        datetime_type = "DATETIME" if engine.dialect.name == "sqlite" else "TIMESTAMP WITH TIME ZONE"
-        primary_key = "INTEGER PRIMARY KEY" if engine.dialect.name == "sqlite" else "SERIAL PRIMARY KEY"
         with engine.begin() as connection:
             connection.execute(
                 text(

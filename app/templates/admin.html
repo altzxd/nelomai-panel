@@ -6,6 +6,9 @@
             <img class="sidebar-brand-logo" src="{{ url_for('static', path='/logo.svg') }}" alt="Nelomai">
         </div>
         <nav class="sidebar-nav sidebar-nav-icons">
+            <a class="nav-icon-pill {% if active_tab == 'updates' %}active{% elif has_available_updates %}is-warning-state{% endif %}" href="/admin/updates" title="Обновления" aria-label="Обновления">
+                <span class="nav-icon">↑</span>
+            </a>
             <a class="nav-icon-pill {% if active_tab == 'overview' %}active{% endif %}" href="/admin?tab=overview" title="Панель" aria-label="Панель">
                 <span class="nav-icon">⌂</span>
             </a>
@@ -14,6 +17,9 @@
             </a>
             <a class="nav-icon-pill {% if active_tab == 'clients' %}active{% endif %}" href="/admin?tab=clients" title="Клиенты" aria-label="Клиенты">
                 <span class="nav-icon">◫</span>
+            </a>
+            <a class="nav-icon-pill {% if active_tab == 'access' %}active{% endif %}" href="/admin?tab=access" title="Доступы" aria-label="Доступы">
+                <span class="nav-icon">⏳</span>
             </a>
             <a class="nav-icon-pill" href="/admin/servers" title="Сервера" aria-label="Сервера">
                 <span class="nav-icon">▣</span>
@@ -156,6 +162,7 @@
                 <a class="tab-button tab-link {% if active_tab == 'overview' %}active{% endif %}" href="/admin?tab=overview">Главная</a>
                 <a class="tab-button tab-link {% if active_tab == 'settings' %}active{% endif %}" href="/admin?tab=settings&settings_view={{ settings_view }}&filter_scope={{ filter_scope }}">Настройки</a>
                 <a class="tab-button tab-link {% if active_tab == 'clients' %}active{% endif %}" href="/admin?tab=clients">Клиенты</a>
+                <a class="tab-button tab-link {% if active_tab == 'access' %}active{% endif %}" href="/admin?tab=access">Доступы</a>
             </div>
 
             {% if active_tab == 'overview' %}
@@ -178,6 +185,65 @@
                     </form>
                     <p>Плитки ниже показывают все интерфейсы, их суммарный трафик и текущий статус включения.</p>
                 </section>
+                {% if admin_page.beta_readiness %}
+                <section class="settings-card diagnostics-summary {% if admin_page.beta_readiness.status == 'error' %}is-error{% elif admin_page.beta_readiness.status == 'warning' %}is-warning{% endif %}">
+                    <h3>Готовность к beta rollout</h3>
+                    <p>{{ admin_page.beta_readiness.message }}</p>
+                    {% if admin_page.beta_readiness.details %}
+                    <ul class="diagnostics-details">
+                        {% for item in admin_page.beta_readiness.details %}
+                        <li>{{ item }}</li>
+                        {% endfor %}
+                    </ul>
+                    {% endif %}
+                    <div class="job-actions">
+                        <a class="ghost-button small" href="/admin/diagnostics">Открыть диагностику</a>
+                        {% if admin_page.beta_readiness.settings_url %}
+                        <a class="ghost-button small" href="{{ admin_page.beta_readiness.settings_url }}">Настройки панели</a>
+                        {% endif %}
+                        {% if admin_page.beta_readiness.backups_url %}
+                        <a class="ghost-button small" href="{{ admin_page.beta_readiness.backups_url }}">Backup-настройки</a>
+                        {% endif %}
+                    </div>
+                </section>
+                {% endif %}
+                {% if admin_page.panel_update_summary or admin_page.agent_update_summaries %}
+                <section class="settings-card">
+                    {% set panel_update_issue_count = 1 if admin_page.panel_update_summary and admin_page.panel_update_summary.update_available else 0 %}
+                    {% set agent_update_issue_count = admin_page.agent_update_summaries | selectattr("update_available") | list | length %}
+                    {% set agent_contract_issue_count = admin_page.agent_update_summaries | selectattr("status", "in", ["legacy", "repo_missing", "excluded", "error"]) | list | length %}
+                    {% set total_version_issue_count = panel_update_issue_count + agent_update_issue_count + agent_contract_issue_count %}
+                    <h3>Версии панели и агентов</h3>
+                    <p class="muted-note">Итог: {{ total_version_issue_count }} требуют внимания · {{ 1 + (admin_page.agent_update_summaries|length) - total_version_issue_count }} актуальны</p>
+                    {% if admin_page.panel_update_summary %}
+                    <div class="server-runtime-item">
+                        <div>
+                            <strong>Панель</strong>
+                            <p>Текущая: {{ admin_page.panel_update_summary.current_version }}{% if admin_page.panel_update_summary.latest_version %} · Последняя: {{ admin_page.panel_update_summary.latest_version }}{% endif %}</p>
+                            <p>{% if admin_page.panel_update_summary.update_available %}Рассинхрон версий: панель отстаёт от последней версии.{% else %}Рассинхрона версий нет.{% endif %}</p>
+                        </div>
+                        <span class="availability {% if admin_page.panel_update_summary.update_available %}is-invalid{% else %}is-online{% endif %}">
+                            {% if admin_page.panel_update_summary.update_available %}нужно обновление{% else %}актуально{% endif %}
+                        </span>
+                    </div>
+                    {% endif %}
+                    <div class="server-runtime-list">
+                        {% for item in admin_page.agent_update_summaries %}
+                        <div class="server-runtime-item">
+                            <div>
+                                <strong>{{ item.name }}</strong>
+                                <p>{{ item.server_type|upper }} · agent: {{ item.agent_version or "неизвестно" }} · contract: {{ item.contract_version or "неизвестно" }}</p>
+                                <p>Текущая: {{ item.current_version or "неизвестно" }}{% if item.latest_version %} · Последняя: {{ item.latest_version }}{% endif %}</p>
+                                <p>{% if item.update_available %}Рассинхрон версий: агент требует обновления.{% elif item.status == 'legacy' %}Рассинхрон версий: legacy-агент вне актуального контракта.{% elif item.status == 'repo_missing' %}Рассинхрон версий: не задан Git-репозиторий агента.{% elif item.status == 'excluded' %}Рассинхрон версий: сервер исключён из среды панели.{% else %}Рассинхрона версий нет.{% endif %}</p>
+                            </div>
+                            <span class="availability {% if item.status == 'error' or item.update_available %}is-invalid{% elif item.status == 'legacy' or item.status == 'repo_missing' or item.status == 'excluded' %}is-unknown{% else %}is-online{% endif %}">
+                                {% if item.update_available %}нужно обновление{% else %}{{ item.status }}{% endif %}
+                            </span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </section>
+                {% endif %}
                 <section class="admin-interface-grid">
                     {% set visible_interfaces = admin_page.interfaces | selectattr("tic_server_id", "equalto", interface_tic_server_id) | list if interface_tic_server_id else admin_page.interfaces %}
                     {% for interface in visible_interfaces %}
@@ -234,6 +300,28 @@
 
             {% if active_tab == 'settings' %}
             <div class="tab-panel active">
+                {% if admin_page.beta_readiness %}
+                <section class="settings-card diagnostics-summary {% if admin_page.beta_readiness.status == 'error' %}is-error{% elif admin_page.beta_readiness.status == 'warning' %}is-warning{% endif %}">
+                    <h3>Готовность к beta rollout</h3>
+                    <p>{{ admin_page.beta_readiness.message }}</p>
+                    {% if admin_page.beta_readiness.details %}
+                    <ul class="diagnostics-details">
+                        {% for item in admin_page.beta_readiness.details %}
+                        <li>{{ item }}</li>
+                        {% endfor %}
+                    </ul>
+                    {% endif %}
+                    <div class="job-actions">
+                        <a class="ghost-button small" href="/admin/diagnostics">Открыть диагностику</a>
+                        {% if admin_page.beta_readiness.backups_url %}
+                        <a class="ghost-button small" href="{{ admin_page.beta_readiness.backups_url }}">Backup-настройки</a>
+                        {% endif %}
+                        {% if admin_page.beta_readiness.servers_url %}
+                        <a class="ghost-button small" href="{{ admin_page.beta_readiness.servers_url }}">Серверы</a>
+                        {% endif %}
+                    </div>
+                </section>
+                {% endif %}
                 <section class="settings-layout">
                     <div class="subtabs">
                         <div class="tab-list settings-subtab-list settings-subtab-list-wide">
@@ -246,8 +334,91 @@
                             <a class="tab-button tab-link block-subtab {% if settings_view == 'block_filters' %}active{% endif %} {% if not block_filters_enabled %}is-disabled-state{% endif %}" href="/admin?tab=settings&settings_view=block_filters&filter_scope={{ filter_scope }}">Фильтры блока</a>
                         </div>
 
-                        {% if settings_view == 'basic' %}
-                        <div class="tab-panel active">
+                          {% if settings_view == 'basic' %}
+                          <div class="tab-panel active">
+                              {% if admin_page.panel_update_summary or admin_page.agent_update_summaries %}
+                              <section class="settings-card">
+                                  {% set panel_update_issue_count = 1 if admin_page.panel_update_summary and admin_page.panel_update_summary.update_available else 0 %}
+                                  {% set agent_update_issue_count = admin_page.agent_update_summaries | selectattr("update_available") | list | length %}
+                                  {% set agent_contract_issue_count = admin_page.agent_update_summaries | selectattr("status", "in", ["legacy", "repo_missing", "excluded", "error"]) | list | length %}
+                                  {% set total_version_issue_count = panel_update_issue_count + agent_update_issue_count + agent_contract_issue_count %}
+                                  <h3>Версии панели и агентов</h3>
+                                  <p class="muted-note">Итог: {{ total_version_issue_count }} требуют внимания · {{ 1 + (admin_page.agent_update_summaries|length) - total_version_issue_count }} актуальны</p>
+                                  {% if admin_page.panel_update_summary %}
+                                  <div class="server-runtime-item">
+                                      <div>
+                                          <strong>Панель</strong>
+                                          <p>Текущая: {{ admin_page.panel_update_summary.current_version }}{% if admin_page.panel_update_summary.latest_version %} · Последняя: {{ admin_page.panel_update_summary.latest_version }}{% endif %}</p>
+                                          <p>{% if admin_page.panel_update_summary.update_available %}Рассинхрон версий: панель отстаёт от последней версии.{% else %}Рассинхрона версий нет.{% endif %}</p>
+                                          <p>{{ admin_page.panel_update_summary.message }}</p>
+                                      </div>
+                                      <span class="availability {% if admin_page.panel_update_summary.update_available %}is-invalid{% else %}is-online{% endif %}">
+                                          {% if admin_page.panel_update_summary.update_available %}нужно обновление{% else %}актуально{% endif %}
+                                      </span>
+                                  </div>
+                                  {% endif %}
+                                  <div class="server-runtime-list">
+                                      {% for item in admin_page.agent_update_summaries %}
+                                      <div class="server-runtime-item">
+                                          <div>
+                                              <strong>{{ item.name }}</strong>
+                                              <p>{{ item.server_type|upper }} · agent: {{ item.agent_version or "неизвестно" }} · contract: {{ item.contract_version or "неизвестно" }}</p>
+                                              <p>Текущая: {{ item.current_version or "неизвестно" }}{% if item.latest_version %} · Последняя: {{ item.latest_version }}{% endif %}</p>
+                                              <p>{% if item.update_available %}Рассинхрон версий: агент требует обновления.{% elif item.status == 'legacy' %}Рассинхрон версий: legacy-агент вне актуального контракта.{% elif item.status == 'repo_missing' %}Рассинхрон версий: не задан Git-репозиторий агента.{% elif item.status == 'excluded' %}Рассинхрон версий: сервер исключён из среды панели.{% else %}Рассинхрона версий нет.{% endif %}</p>
+                                              <p>{{ item.message }}</p>
+                                          </div>
+                                          <span class="availability {% if item.status == 'error' or item.update_available %}is-invalid{% elif item.status == 'legacy' or item.status == 'repo_missing' or item.status == 'excluded' %}is-unknown{% else %}is-online{% endif %}">
+                                              {% if item.update_available %}нужно обновление{% else %}{{ item.status }}{% endif %}
+                                          </span>
+                                      </div>
+                                      {% endfor %}
+                                  </div>
+                              </section>
+                              {% endif %}
+                              {% if admin_page.beta_readiness and admin_page.beta_readiness.status != 'ok' %}
+                              <section class="settings-card">
+                                <h3>Порядок исправления production-blocker'ов</h3>
+                                <ol class="diagnostics-details">
+                                    <li><strong>SECRET_KEY</strong>: задать production-секрет в env панели и перезапустить сервис.</li>
+                                    <li><strong>DATABASE_URL</strong>: перевести панель с SQLite на PostgreSQL и прогнать миграции.</li>
+                                    <li><strong>NELOMAI_GIT_REPO</strong>: задать GitHub-репозиторий, из которого серверы будут делать bootstrap и update.</li>
+                                    <li><strong>PEER_AGENT_COMMAND</strong>: прописать команду вызова server-side агента для panel→agent действий.</li>
+                                    <li><strong>DEBUG</strong>: выключить debug-режим перед запуском тестовой группы.</li>
+                                </ol>
+                            </section>
+                            <section class="settings-card">
+                                <h3>Production env checklist</h3>
+                                <ul class="diagnostics-details">
+                                    <li><strong>SECRET_KEY</strong>: задать в env panel server, затем перезапустить systemd unit панели.</li>
+                                    <li><strong>DATABASE_URL</strong>: указать production PostgreSQL DSN и прогнать Alembic migrations.</li>
+                                    <li><strong>NELOMAI_GIT_REPO</strong>: указать canonical GitHub repo для bootstrap, update-check и server-side deploy path.</li>
+                                    <li><strong>PEER_AGENT_COMMAND</strong>: прописать команду вызова agent bridge для panel→agent действий.</li>
+                                    <li><strong>DEBUG=false</strong>: выключить debug до запуска beta-группы.</li>
+                                    <li><strong>Reverse proxy + TLS</strong>: проверить HTTPS, upstream до панели и заголовки proxy.</li>
+                                </ul>
+                            </section>
+                            <section class="settings-card">
+                                <h3>Panel-server deploy checklist</h3>
+                                <ol class="diagnostics-details">
+                                    <li><strong>PostgreSQL</strong>: установить и подготовить production-базу для панели.</li>
+                                    <li><strong>env</strong>: задать `SECRET_KEY`, `DATABASE_URL`, `NELOMAI_GIT_REPO`, `PEER_AGENT_COMMAND`, `DEBUG=false`.</li>
+                                    <li><strong>Migrations</strong>: прогнать Alembic migrations на production-базе.</li>
+                                    <li><strong>systemd</strong>: настроить unit панели и проверить restart/status.</li>
+                                    <li><strong>Reverse proxy</strong>: настроить upstream до панели и proxy headers.</li>
+                                    <li><strong>TLS</strong>: включить HTTPS и проверить внешний доступ к панели.</li>
+                                </ol>
+                            </section>
+                            <section class="settings-card">
+                                <h3>Beta launch checklist</h3>
+                                <ol class="diagnostics-details">
+                                    <li><strong>Panel up</strong>: панель отвечает по HTTPS и admin login работает.</li>
+                                    <li><strong>Tic/Tak up</strong>: оба сервера активны, runtime-check зелёный, shared tunnel поднят.</li>
+                                    <li><strong>Backup ok</strong>: backup storage доступно для записи и есть свежий full backup.</li>
+                                    <li><strong>Diagnostics ok</strong>: самодиагностика без release-blocking ошибок.</li>
+                                    <li><strong>First test users</strong>: подготовлены первые клиенты, интерфейсы и peer configs для пилотной группы.</li>
+                                </ol>
+                            </section>
+                            {% endif %}
                             <form class="settings-card" data-basic-settings-form>
                                 <h3>Общие параметры новых пиров</h3>
                                 <div class="settings-grid">
@@ -684,6 +855,17 @@
             {% if active_tab == 'clients' %}
             <div class="tab-panel active">
                 <section class="clients-layout">
+                    <section class="settings-card">
+                        <h3>Ссылки регистрации</h3>
+                        <p class="muted-note">Одну ссылку можно использовать только один раз. Неиспользованные ссылки можно отозвать на отдельной странице.</p>
+                        <div class="toolbar-row">
+                            <form method="post" action="/admin/registration-links">
+                                <button class="primary-button small" type="submit">Выдать ссылку регистрации</button>
+                            </form>
+                            <a class="ghost-button small" href="/admin/registration-links">Выданные ссылки</a>
+                        </div>
+                    </section>
+
                     <form class="settings-card" data-client-create-form>
                         <h3>Создать пользователя</h3>
                         <div class="settings-grid client-grid">
@@ -719,6 +901,16 @@
                     </form>
 
                     <div class="client-search-row">
+                        <form class="overview-filter-form" method="get" action="/admin">
+                            <input type="hidden" name="tab" value="clients">
+                            <label>
+                                <span>Показывать</span>
+                                <select name="client_scope" onchange="this.form.submit()">
+                                    <option value="all" {% if client_scope == 'all' %}selected{% endif %}>всех</option>
+                                    <option value="without_interfaces" {% if client_scope == 'without_interfaces' %}selected{% endif %}>без интерфейсов</option>
+                                </select>
+                            </label>
+                        </form>
                         <label class="client-search-field">
                             <span>Поиск по имени</span>
                             <input type="search" placeholder="Начните вводить имя" data-client-search>
@@ -735,6 +927,7 @@
                             <dl class="client-metrics">
                                 <div><dt>Интерфейсы</dt><dd>{{ client.interface_count }}</dd></div>
                                 <div><dt>Имя</dt><dd>{{ client.display_name or "-" }}</dd></div>
+                                <div><dt>Регион</dt><dd>{{ client.region_label or "Не задан" }}</dd></div>
                                 <div><dt>Канал связи</dt><dd>{{ client.communication_channel or "Не задан" }}</dd></div>
                             </dl>
                             <div class="channel-editor">
@@ -755,6 +948,104 @@
                         </article>
                         {% endfor %}
                     </section>
+                </section>
+            </div>
+            {% endif %}
+
+            {% if active_tab == 'access' %}
+            <div class="tab-panel active">
+                <section class="settings-layout">
+                    <div class="subtabs">
+                        <div class="tab-list settings-subtab-list">
+                            <a class="tab-button tab-link {% if access_view == 'dated' %}active{% endif %}" href="/admin?tab=access&access_view=dated">Со сроком</a>
+                            <a class="tab-button tab-link {% if access_view == 'no_expiry' %}active{% endif %}" href="/admin?tab=access&access_view=no_expiry">Без даты</a>
+                        </div>
+                        <div class="tab-panel active">
+                            <section class="client-list">
+                                {% if access_view == 'dated' %}
+                                    {% set expired_access_users = admin_page.access_users | selectattr("is_expired") | list %}
+                                    {% set active_access_users = admin_page.access_users | rejectattr("is_expired") | list %}
+
+                                    <section class="settings-card">
+                                        <h3>Истекшие доступы</h3>
+                                        <p class="muted-note">Пользователей: {{ expired_access_users|length }}</p>
+                                        {% for user in expired_access_users %}
+                                        <article class="client-card is-problem-card">
+                                            <a class="client-card-header" href="/dashboard?target_user_id={{ user.id }}">
+                                                <h3>{{ user.login }}</h3>
+                                                <p>{{ user.display_name or "-" }}</p>
+                                            </a>
+                                            <dl class="client-metrics">
+                                                <div><dt>Срок доступа</dt><dd>{{ user.expires_at|datetime_moscow if user.expires_at else "Не задан" }}</dd></div>
+                                                <div><dt>Статус</dt><dd>истекло</dd></div>
+                                                <div><dt>Канал связи</dt><dd>{{ user.communication_channel or "Не задан" }}</dd></div>
+                                            </dl>
+                                            <div class="client-actions">
+                                                {% if user.communication_channel %}
+                                                <a class="ghost-button small" href="{{ user.communication_channel }}" target="_blank" rel="noopener noreferrer">Связаться</a>
+                                                {% endif %}
+                                                <a class="ghost-button small" href="/dashboard?target_user_id={{ user.id }}">Открыть</a>
+                                            </div>
+                                        </article>
+                                        {% else %}
+                                        <p class="muted-note">Истекших доступов нет.</p>
+                                        {% endfor %}
+                                    </section>
+
+                                    <section class="settings-card">
+                                        <h3>Активные доступы</h3>
+                                        <p class="muted-note">Пользователей: {{ active_access_users|length }}</p>
+                                        {% for user in active_access_users %}
+                                        <article class="client-card">
+                                            <a class="client-card-header" href="/dashboard?target_user_id={{ user.id }}">
+                                                <h3>{{ user.login }}</h3>
+                                                <p>{{ user.display_name or "-" }}</p>
+                                            </a>
+                                            <dl class="client-metrics">
+                                                <div><dt>Срок доступа</dt><dd>{{ user.expires_at|datetime_moscow if user.expires_at else "Не задан" }}</dd></div>
+                                                <div><dt>Статус</dt><dd>активен</dd></div>
+                                                <div><dt>Канал связи</dt><dd>{{ user.communication_channel or "Не задан" }}</dd></div>
+                                            </dl>
+                                            <div class="client-actions">
+                                                {% if user.communication_channel %}
+                                                <a class="ghost-button small" href="{{ user.communication_channel }}" target="_blank" rel="noopener noreferrer">Связаться</a>
+                                                {% endif %}
+                                                <a class="ghost-button small" href="/dashboard?target_user_id={{ user.id }}">Открыть</a>
+                                            </div>
+                                        </article>
+                                        {% else %}
+                                        <p class="muted-note">Активных доступов со сроком нет.</p>
+                                        {% endfor %}
+                                    </section>
+                                {% else %}
+                                    <section class="settings-card">
+                                        <h3>Пользователи без даты окончания</h3>
+                                        <p class="muted-note">Пользователей: {{ admin_page.access_users_without_expiry|length }}</p>
+                                    </section>
+                                    {% for user in admin_page.access_users_without_expiry %}
+                                    <article class="client-card">
+                                        <a class="client-card-header" href="/dashboard?target_user_id={{ user.id }}">
+                                            <h3>{{ user.login }}</h3>
+                                            <p>{{ user.display_name or "-" }}</p>
+                                        </a>
+                                        <dl class="client-metrics">
+                                            <div><dt>Срок доступа</dt><dd>Не задан</dd></div>
+                                            <div><dt>Канал связи</dt><dd>{{ user.communication_channel or "Не задан" }}</dd></div>
+                                        </dl>
+                                        <div class="client-actions">
+                                            {% if user.communication_channel %}
+                                            <a class="ghost-button small" href="{{ user.communication_channel }}" target="_blank" rel="noopener noreferrer">Связаться</a>
+                                            {% endif %}
+                                            <a class="ghost-button small" href="/dashboard?target_user_id={{ user.id }}">Открыть</a>
+                                        </div>
+                                    </article>
+                                    {% else %}
+                                    <p class="muted-note">Пользователей без даты окончания нет.</p>
+                                    {% endfor %}
+                                {% endif %}
+                            </section>
+                        </div>
+                    </div>
                 </section>
             </div>
             {% endif %}

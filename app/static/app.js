@@ -1940,6 +1940,11 @@ document.addEventListener("DOMContentLoaded", () => {
   if (adminServersPage) {
     const serverModal = document.querySelector("[data-server-modal]");
     const serverCreateForm = document.querySelector("[data-server-create-form]");
+    const serverTypeSelect = serverCreateForm?.querySelector("[data-server-type-select]") || null;
+    const serverTicRegionField = serverCreateForm?.querySelector("[data-server-tic-region-field]") || null;
+    const serverTakCountryField = serverCreateForm?.querySelector("[data-server-tak-country-field]") || null;
+    const serverTicRegionInput = serverCreateForm?.querySelector('select[name="tic_region"]') || null;
+    const serverTakCountryInput = serverCreateForm?.querySelector('input[name="tak_country"]') || null;
     const bootstrapConsole = document.querySelector("[data-bootstrap-console]");
     const bootstrapInputWrap = null;
     const bootstrapInputPrompt = null;
@@ -1958,6 +1963,28 @@ document.addEventListener("DOMContentLoaded", () => {
     let currentBootstrapTaskId = null;
     let bootstrapPollTimer = null;
     let serverAutoRefreshTimer = null;
+
+    const syncServerLocationFields = () => {
+      const serverType = String(serverTypeSelect?.value || "tic");
+      if (serverTicRegionField) {
+        serverTicRegionField.hidden = serverType !== "tic";
+      }
+      if (serverTakCountryField) {
+        serverTakCountryField.hidden = serverType !== "tak";
+      }
+      if (serverTicRegionInput) {
+        serverTicRegionInput.required = serverType === "tic";
+        if (serverType !== "tic") {
+          serverTicRegionInput.value = "";
+        }
+      }
+      if (serverTakCountryInput) {
+        serverTakCountryInput.required = serverType === "tak";
+        if (serverType !== "tak") {
+          serverTakCountryInput.value = "";
+        }
+      }
+    };
 
     const ensureBootstrapInputWrap = (container) => {
       if (!container) {
@@ -2539,6 +2566,9 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
 
+    serverTypeSelect?.addEventListener("change", syncServerLocationFields);
+    syncServerLocationFields();
+
     serverCreateForm?.addEventListener("submit", async (event) => {
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -2546,6 +2576,8 @@ document.addEventListener("DOMContentLoaded", () => {
       const formData = new FormData(serverCreateForm);
       const payload = {
         server_type: String(formData.get("server_type") || ""),
+        tic_region: String(formData.get("tic_region") || "").trim() || null,
+        tak_country: String(formData.get("tak_country") || "").trim() || null,
         name: String(formData.get("name") || "").trim(),
         host: String(formData.get("host") || "").trim(),
         ssh_port: Number(formData.get("ssh_port") || 22),

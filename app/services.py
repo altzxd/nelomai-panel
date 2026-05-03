@@ -33,13 +33,16 @@ from app.models import (
     PeerDownloadLink,
     PanelJob,
     PanelJobStatus,
+    RegistrationLink,
     ResourceFilter,
     RouteMode,
     Server,
     ServerBootstrapTask,
     ServerType,
+    TicRegion,
     User,
     UserContactLink,
+    UserRegion,
     UserResource,
     UserRole,
 )
@@ -68,6 +71,7 @@ from app.schemas import (
     BackupSettingsUpdate,
     BackupSettingsView,
     BackupsPageView,
+    BetaReadinessSummaryView,
     BasicSettingsUpdate,
     DiagnosticsCheckView,
     DiagnosticsFocusedTakTunnelView,
@@ -98,13 +102,19 @@ from app.schemas import (
     ServerDetailView,
     ServerListItemView,
     ServersPageView,
+    TakTunnelPairStateView,
     PeerBlockFiltersUpdate,
     PeerCommentUpdate,
     PeerExpiryUpdate,
+    PanelUpdateCheckView,
     PanelJobView,
     PanelJobsPageView,
+    PublicRegistrationCreate,
+    RegistrationLinkView,
+    RegistrationLinksPageView,
     SharedPeerLinkView,
     SharedPeerLinksPageView,
+    UpdatesPageView,
     UserExpiresUpdate,
     UserContactLinkUpdate,
     UserDisplayNameUpdate,
@@ -146,8 +156,24 @@ class ServerOperationUnavailableError(ServiceError):
     pass
 
 
+def _tic_region_label(value: TicRegion | str | None) -> str | None:
+    if value in {TicRegion.EUROPE, "europe"}:
+        return "Европа"
+    if value in {TicRegion.EAST, "east"}:
+        return "Восток"
+    return None
+
+
+def _server_location_label(server: Server) -> str | None:
+    if server.server_type == ServerType.TIC:
+        return _tic_region_label(server.tic_region)
+    if server.server_type == ServerType.TAK:
+        return server.tak_country.strip() if server.tak_country else None
+    return None
+
+
 DEFAULT_BASIC_SETTINGS = {
-    "nelomai_git_repo": "",
+    "nelomai_git_repo": settings.nelomai_git_repo.strip(),
     "dns_server": "8.8.8.8",
     "mtu": "1280",
     "keepalive": "21",
@@ -420,6 +446,18 @@ PANEL_JOB_PROBLEM_STATUSES = {PanelJobStatus.FAILED, PanelJobStatus.STUCK}
 PANEL_JOB_ACTIVE_STATUSES = {PanelJobStatus.QUEUED, PanelJobStatus.RUNNING, PanelJobStatus.STUCK}
 TAK_TUNNEL_REPAIR_STATE_KEY = "tak_tunnel_repair_state_json"
 TAK_TUNNEL_AUTO_REPAIR_FAILURE_LIMIT = 5
+
+
+def _tak_tunnel_status_label_ui(status: str) -> str:
+    mapping = {
+        "active": "работает штатно",
+        "recovered": "автовосстановлен",
+        "fallback": "есть проблемы",
+        "cooldown": "ожидает повторную попытку",
+        "manual_attention_required": "требует ручного вмешательства",
+        "error": "ошибка",
+    }
+    return mapping.get(status, status)
 TAK_TUNNEL_AUTO_REPAIR_BACKOFF_SECONDS = (60, 300, 900, 3600, 10800)
 PANEL_JOB_TYPE_LABELS = {
     "server_bootstrap": "Добавление сервера",
@@ -1948,6 +1986,17 @@ def _build_diagnostics_recommendations(checks: list[DiagnosticsCheckView]) -> li
             action_url="/admin/servers",
         )
 
+    beta_check = by_key.get("beta_readiness")
+    if beta_check and beta_check.status != "ok":
+        add(
+            "beta_readiness",
+            "Довести панель до beta-ready состояния",
+            "Для ограниченного beta rollout ещё остались пробелы в production-like конфигурации, backup readiness или server/Tic/Tak контуре. Сначала закройте их по diagnostics и beta runbook.",
+            severity="warning" if beta_check.status == "warning" else "error",
+            action_label="Открыть серверы",
+            action_url="/admin/servers",
+        )
+
     access_check = by_key.get("access_routes")
     if access_check and access_check.status != "ok":
         add(
@@ -1968,6 +2017,58 @@ def _build_diagnostics_recommendations(checks: list[DiagnosticsCheckView]) -> li
         )
 
     return recommendations
+
+
+def _build_beta_readiness_summary(
+    *,
+    backup_status: str,
+    latest_backup_status: str,
+    runtime_status: str,
+    tak_tunnel_status: str,
+) -> BetaReadinessSummaryView:
+    status = "ok"
+    details: list[str] = ["Runbook: docs/panel_beta_runbook.md"]
+    if settings.secret_key == "dev-only-change-me-with-a-long-random-value":
+        status = "warning"
+        details.append("Не задан production SECRET_KEY.")
+    if settings.debug:
+        status = "warning"
+        details.append("DEBUG включён.")
+    if settings.database_url.startswith("sqlite"):
+        status = "warning"
+        details.append("Панель всё ещё использует SQLite вместо PostgreSQL.")
+    if not settings.nelomai_git_repo.strip():
+        status = "warning"
+        details.append("Не задан NELOMAI_GIT_REPO для deploy/bootstrap/update path.")
+    if not settings.peer_agent_command:
+        status = "error"
+        details.append("Не задан PEER_AGENT_COMMAND.")
+    if backup_status != "ok":
+        status = "error" if backup_status == "error" else status
+        details.append("Backup storage не готов для beta.")
+    if latest_backup_status != "ok":
+        status = "warning" if status == "ok" else status
+        details.append("Нет подтверждённого свежего full backup.")
+    if runtime_status != "ok":
+        status = "warning" if status == "ok" else status
+        details.append("Не все server-agent runtime checks зелёные.")
+    if tak_tunnel_status != "ok":
+        status = "warning" if status == "ok" else status
+        details.append("Есть проблемы с live Tic ↔ Tak контуром или его состоянием.")
+    message = (
+        "Панель выглядит готовой к ограниченному beta rollout."
+        if status == "ok"
+        else "Перед запуском малой тестовой группы стоит закрыть отмеченные beta-gap’ы."
+    )
+    return BetaReadinessSummaryView(
+        status=status,
+        message=message,
+        details=details,
+        runbook_url="/admin/diagnostics",
+        settings_url="/admin?tab=settings&settings_view=basic",
+        backups_url="/admin?tab=settings&settings_view=backups",
+        servers_url="/admin/servers",
+    )
 
 
 def run_panel_diagnostics(
@@ -2474,6 +2575,40 @@ def run_panel_diagnostics(
     if tak_tunnel_status != "ok":
         problem_nodes.append("Межсерверные туннели Tic ↔ Tak")
 
+    beta_readiness = _build_beta_readiness_summary(
+        backup_status=backup_status,
+        latest_backup_status=latest_backup_status,
+        runtime_status=runtime_status,
+        tak_tunnel_status=tak_tunnel_status,
+    )
+    checks.append(
+        DiagnosticsCheckView(
+            key="beta_readiness",
+            title="Готовность к beta rollout",
+            status=beta_readiness.status,
+            message=beta_readiness.message,
+            details=beta_readiness.details,
+            source_label="Открыть серверы",
+            source_url="/admin/servers",
+            action_links=[
+                DiagnosticsCheckView.ActionLinkView(
+                    label="Настройки панели",
+                    url="/admin?tab=settings&settings_view=basic",
+                ),
+                DiagnosticsCheckView.ActionLinkView(
+                    label="Backup-настройки",
+                    url="/admin?tab=settings&settings_view=backups",
+                ),
+                DiagnosticsCheckView.ActionLinkView(
+                    label="Серверы",
+                    url="/admin/servers",
+                ),
+            ],
+        )
+    )
+    if beta_readiness.status != "ok":
+        problem_nodes.append("Готовность к beta rollout")
+
     access_status, access_message, access_details = _run_access_routes_diagnostics()
     checks.append(
         DiagnosticsCheckView(
@@ -2735,6 +2870,48 @@ def normalize_login(login: str) -> str:
     return login.strip().lower()
 
 
+REGISTRATION_LOGIN_RE = re.compile(r"^[A-Za-z0-9]{1,20}$")
+REGISTRATION_PASSWORD_RE = re.compile(r"^[A-Za-z0-9]{4,255}$")
+REGISTRATION_DISPLAY_NAME_RE = re.compile(r"^[A-Za-zА-Яа-яЁё0-9 ]{1,120}$")
+REGISTRATION_CONTACT_RE = re.compile(r"^[A-Za-zА-Яа-яЁё0-9 @?_\\-\\.,]{1,255}$")
+REGISTRATION_USED_LINK_RETENTION_DAYS = 7
+
+
+def _user_region_label(value: UserRegion | str | None) -> str | None:
+    if value in {UserRegion.EUROPE, "europe"}:
+        return "Европа"
+    if value in {UserRegion.EAST, "east"}:
+        return "Восток"
+    if value in {UserRegion.UNKNOWN, "unknown"}:
+        return "Не знаю/затрудняюсь ответить"
+    return None
+
+
+def _registration_link_url(token_id: str, base_url: str) -> str:
+    return f"{base_url.rstrip('/')}/registration/{quote(token_id)}"
+
+
+def _validate_public_registration_payload(db: Session, payload: PublicRegistrationCreate) -> tuple[str, str, str, str, UserRegion]:
+    login = normalize_login(payload.login)
+    password = str(payload.password or "").strip()
+    display_name = str(payload.display_name or "").strip()
+    communication_channel = str(payload.communication_channel or "").strip()
+    region = UserRegion(payload.region)
+
+    if not REGISTRATION_LOGIN_RE.fullmatch(login):
+        raise PermissionDeniedError("Login must be 1-20 chars and contain only English letters and digits")
+    if db.execute(select(User).where(User.login == login)).scalar_one_or_none() is not None:
+        raise PermissionDeniedError("Login already exists")
+    if not REGISTRATION_PASSWORD_RE.fullmatch(password):
+        raise PermissionDeniedError("Password must be at least 4 chars and contain only English letters and digits")
+    if not REGISTRATION_DISPLAY_NAME_RE.fullmatch(display_name):
+        raise PermissionDeniedError("Display name may contain only Cyrillic, Latin letters, digits and spaces")
+    if not REGISTRATION_CONTACT_RE.fullmatch(communication_channel):
+        raise PermissionDeniedError("Contact may contain only letters, digits, spaces and @ ? _ - . ,")
+
+    return login, password, display_name, communication_channel, region
+
+
 def authenticate_user(db: Session, login: str, password: str) -> User | None:
     stmt: Select[tuple[User]] = select(User).where(User.login == normalize_login(login))
     user = db.execute(stmt).scalar_one_or_none()
@@ -2769,8 +2946,13 @@ def ensure_default_settings(db: Session) -> None:
     missing = [key for key in DEFAULT_BASIC_SETTINGS if key not in existing_keys]
     for key in missing:
         db.add(AppSetting(key=key, value=DEFAULT_BASIC_SETTINGS[key]))
+    repo_default = settings.nelomai_git_repo.strip()
+    repo_row = db.get(AppSetting, "nelomai_git_repo")
+    if repo_default and repo_row is not None and not repo_row.value.strip():
+        repo_row.value = repo_default
+        db.add(repo_row)
     purge_old_audit_logs(db)
-    if missing or deprecated_rows:
+    if missing or deprecated_rows or (repo_default and repo_row is not None and repo_row.value == repo_default):
         db.flush()
 
 
@@ -3774,6 +3956,71 @@ def check_panel_updates(db: Session, actor: User) -> dict[str, object]:
     return result
 
 
+def _check_panel_updates_summary(db: Session) -> dict[str, object]:
+    basic_settings = get_basic_settings(db)
+    current_version = get_panel_version()
+    repo_url = basic_settings.get("nelomai_git_repo", "").strip()
+    repo = _parse_github_repo_url(repo_url)
+    if repo is None:
+        return {
+            "current_version": current_version,
+            "latest_version": None,
+            "update_available": False,
+            "repo_url": repo_url,
+            "release_url": None,
+            "message": "GitHub repository is not configured",
+        }
+
+    owner, name = repo
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "nelomai-panel-version-summary"}
+    latest_version: str | None = None
+    release_url: str | None = None
+    try:
+        with httpx.Client(timeout=5.0, follow_redirects=True, headers=headers) as client:
+            release_response = client.get(f"https://api.github.com/repos/{owner}/{name}/releases/latest")
+            if release_response.status_code == 200:
+                data = release_response.json()
+                latest_version = str(data.get("tag_name") or "").strip() or None
+                release_url = str(data.get("html_url") or "").strip() or None
+            elif release_response.status_code == 404:
+                tags_response = client.get(f"https://api.github.com/repos/{owner}/{name}/tags?per_page=1")
+                tags_response.raise_for_status()
+                tags = tags_response.json()
+                if tags:
+                    latest_version = str(tags[0].get("name") or "").strip() or None
+                    release_url = f"https://github.com/{owner}/{name}/releases/tag/{latest_version}" if latest_version else None
+            else:
+                release_response.raise_for_status()
+    except httpx.HTTPError as exc:
+        return {
+            "current_version": current_version,
+            "latest_version": None,
+            "update_available": False,
+            "repo_url": repo_url,
+            "release_url": None,
+            "message": f"Could not check panel updates: {exc}",
+        }
+
+    if not latest_version:
+        return {
+            "current_version": current_version,
+            "latest_version": None,
+            "update_available": False,
+            "repo_url": repo_url,
+            "release_url": None,
+            "message": "No releases or tags found",
+        }
+
+    return {
+        "current_version": current_version,
+        "latest_version": latest_version,
+        "update_available": _version_parts(latest_version) > _version_parts(current_version),
+        "repo_url": repo_url,
+        "release_url": release_url,
+        "message": "Update is available" if _version_parts(latest_version) > _version_parts(current_version) else "Panel is up to date",
+    }
+
+
 def _server_agent_repository(settings_values: dict[str, str], server: Server) -> str:
     return settings_values.get("nelomai_git_repo", "").strip()
 
@@ -3876,6 +4123,101 @@ def _run_server_agent_update_action(db: Session, actor: User, server: Server, ac
         update_available=update_available,
         release_url=str(response.get("release_url")) if response.get("release_url") else None,
         message=str(response.get("message") or ("Agent update completed" if action == "update_server_agent" else "Agent update check completed")),
+    )
+
+
+def _server_agent_update_summary(db: Session, server: Server) -> ServerAgentUpdateView:
+    settings_values = get_basic_settings(db)
+    repository_url = _server_agent_repository(settings_values, server)
+    if not repository_url:
+        return _server_agent_update_view(
+            server=server,
+            repository_url=repository_url,
+            status="repo_missing",
+            message="Git repository is not configured",
+        )
+    if server.is_excluded:
+        return _server_agent_update_view(
+            server=server,
+            repository_url=repository_url,
+            status="excluded",
+            message="Server is excluded from the panel environment",
+        )
+    try:
+        response = _run_tic_executor(
+            _build_server_executor_payload(
+                action="check_server_agent_update",
+                server=server,
+                extra={"repository_url": repository_url},
+            )
+        )
+    except ServerOperationUnavailableError as exc:
+        return _server_agent_update_view(
+            server=server,
+            repository_url=repository_url,
+            status="error",
+            message=str(exc),
+        )
+
+    is_legacy = response.get("contract_version") is None and response.get("supported_contracts") is None
+    status_value = str(response.get("status") or "checked")
+    if is_legacy:
+        status_value = "legacy"
+    return _server_agent_update_view(
+        server=server,
+        repository_url=repository_url,
+        status=status_value,
+        agent_version=str(response.get("agent_version")) if response.get("agent_version") is not None else None,
+        contract_version=str(response.get("contract_version")) if response.get("contract_version") is not None else None,
+        capabilities=[str(item) for item in response.get("capabilities", [])] if isinstance(response.get("capabilities"), list) else [],
+        is_legacy=is_legacy,
+        current_version=str(response.get("current_version")) if response.get("current_version") is not None else None,
+        latest_version=str(response.get("latest_version")) if response.get("latest_version") is not None else None,
+        update_available=bool(response.get("update_available", False)),
+        release_url=str(response.get("release_url")) if response.get("release_url") else None,
+        message=str(response.get("message") or "Agent update check completed"),
+    )
+
+
+def has_available_updates(db: Session) -> bool:
+    panel_update_summary = _check_panel_updates_summary(db)
+    if bool(panel_update_summary.get("update_available")):
+        return True
+    servers = db.execute(
+        select(Server)
+        .where(Server.server_type.in_([ServerType.TIC, ServerType.TAK, ServerType.STORAGE]))
+        .order_by(Server.id.asc())
+    ).scalars().all()
+    for server in servers:
+        if _server_agent_update_summary(db, server).update_available:
+            return True
+    return False
+
+
+def get_updates_page_data(db: Session, actor: User) -> UpdatesPageView:
+    require_admin(actor)
+    panel_update_summary = PanelUpdateCheckView(**_check_panel_updates_summary(db))
+    servers = db.execute(
+        select(Server)
+        .where(Server.server_type.in_([ServerType.TIC, ServerType.TAK, ServerType.STORAGE]))
+        .order_by(Server.server_type.asc(), Server.name.asc(), Server.id.asc())
+    ).scalars().all()
+    agent_update_summaries = [_server_agent_update_summary(db, server) for server in servers]
+    update_available_count = (1 if panel_update_summary.update_available else 0) + len(
+        [item for item in agent_update_summaries if item.update_available]
+    )
+    version_issue_count = (1 if panel_update_summary.update_available else 0) + len(
+        [
+            item
+            for item in agent_update_summaries
+            if item.update_available or item.status in {"legacy", "repo_missing", "excluded", "error"}
+        ]
+    )
+    return UpdatesPageView(
+        panel_update_summary=panel_update_summary,
+        agent_update_summaries=agent_update_summaries,
+        update_available_count=update_available_count,
+        version_issue_count=version_issue_count,
     )
 
 
@@ -4013,7 +4355,7 @@ def _backup_panel_users_payload(db: Session) -> dict[str, object]:
     filters = db.execute(select(ResourceFilter).order_by(ResourceFilter.id.asc())).scalars().all()
     return {
         "users": [
-            _row_dict(user, ["id", "login", "password_hash", "display_name", "role", "expires_at", "is_active", "created_at"])
+            _row_dict(user, ["id", "login", "password_hash", "display_name", "region", "role", "expires_at", "is_active", "created_at"])
             for user in users
         ],
         "interfaces": [
@@ -5063,6 +5405,7 @@ def restore_backup_users(
                 login=login,
                 password_hash=str(backup_user.get("password_hash") or ""),
                 display_name=str(backup_user.get("display_name") or "-") or "-",
+                region=_backup_enum(UserRegion, backup_user.get("region"), None),
                 role=_backup_enum(UserRole, backup_user.get("role"), UserRole.USER),
                 expires_at=_backup_datetime(backup_user.get("expires_at")),
                 is_active=_backup_bool(backup_user.get("is_active"), True),
@@ -5517,6 +5860,7 @@ def get_admin_page_data(
     actor: User,
     tic_server_id: int | None = None,
     tak_server_id: int | None = None,
+    client_scope: str = "all",
     filter_scope: str = "all",
     filter_kind: FilterKind = FilterKind.EXCLUSION,
 ) -> AdminPageView:
@@ -5534,6 +5878,12 @@ def get_admin_page_data(
     ).scalars().all()
     selected_tic = _select_server(tic_servers, tic_server_id)
     selected_tak = _select_server(tak_servers, tak_server_id)
+    panel_update_summary = PanelUpdateCheckView(**_check_panel_updates_summary(db))
+    agent_update_summaries = [
+        _server_agent_update_summary(db, server)
+        for server in [selected_tic, selected_tak]
+        if server is not None
+    ]
 
     interfaces = db.execute(
         select(Interface)
@@ -5545,8 +5895,22 @@ def get_admin_page_data(
         .options(joinedload(User.interfaces), joinedload(User.resources), joinedload(User.contact_link_record))
         .order_by(User.role.asc(), User.created_at.asc(), User.id.asc())
     ).unique().scalars().all()
+    if client_scope == "without_interfaces":
+        clients = [user for user in clients if user.role == UserRole.ADMIN or len(user.interfaces) == 0]
     available_interfaces = [interface for interface in interfaces if interface.is_pending_owner]
     filters = get_admin_filters_view(db, scope_filter=filter_scope, kind=filter_kind)
+    access_users = [
+        user
+        for user in clients
+        if user.role != UserRole.ADMIN and normalize_utc_datetime(user.expires_at) is not None
+    ]
+    access_users.sort(key=lambda user: normalize_utc_datetime(user.expires_at) or datetime.max.replace(tzinfo=UTC))
+    access_users_without_expiry = [
+        user
+        for user in clients
+        if user.role != UserRole.ADMIN and normalize_utc_datetime(user.expires_at) is None
+    ]
+    access_users_without_expiry.sort(key=lambda user: (user.display_name or user.login).lower())
 
     panel_server = _build_server_card(
         key="panel",
@@ -5582,11 +5946,39 @@ def get_admin_page_data(
     tak_card.status = _server_status(selected_tak)
     tak_card.last_seen_at = selected_tak.last_seen_at if selected_tak else None
     tak_card.metrics_note = _server_metrics_note(selected_tak, tak_card.status)
+    backup_status = "ok"
+    try:
+        path = backup_storage_path(db)
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".nelomai-admin-beta-check"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+    except Exception:
+        backup_status = "error"
+    latest_backup_status = "ok" if _latest_completed_full_backup(db) is not None else "warning"
+    runtime_status = "error" if not settings.peer_agent_command else "ok"
+    tak_tunnel_status = "ok"
+    for server in [*tic_servers, *tak_servers]:
+        if not server.is_active and runtime_status == "ok":
+            runtime_status = "warning"
+    for interface in interfaces:
+        if interface.route_mode == RouteMode.VIA_TAK and interface.tak_tunnel_fallback_active:
+            tak_tunnel_status = "warning"
+            break
+    beta_readiness = _build_beta_readiness_summary(
+        backup_status=backup_status,
+        latest_backup_status=latest_backup_status,
+        runtime_status=runtime_status,
+        tak_tunnel_status=tak_tunnel_status,
+    )
 
     return serialize_admin_page(
         panel_server=panel_server,
         tic_server=tic_card,
         tak_server=tak_card,
+        beta_readiness=beta_readiness,
+        panel_update_summary=panel_update_summary,
+        agent_update_summaries=agent_update_summaries,
         interfaces=interfaces,
         available_interfaces=available_interfaces,
         available_tic_servers=tic_servers,
@@ -5594,14 +5986,18 @@ def get_admin_page_data(
         settings=get_basic_settings(db),
         filters=filters,
         clients=clients,
+        access_users=access_users,
+        access_users_without_expiry=access_users_without_expiry,
     )
 
 
 def get_servers_page_data(
     db: Session,
     actor: User,
+    view: str = "servers",
     bucket: str = "active",
     server_type: str = "all",
+    location: str = "",
     sort: str = "load_desc",
     selected_server_id: int | None = None,
     selected_bootstrap_task_id: int | None = None,
@@ -5609,8 +6005,10 @@ def get_servers_page_data(
     purge_expired_peers(db)
     require_admin(actor)
     _reconcile_tak_tunnel_routes(db)
+    view = view if view in {"servers", "tunnels"} else "servers"
     bucket = bucket if bucket in {"active", "excluded"} else "active"
     server_type = server_type if server_type in {"all", "tic", "tak", "storage"} else "all"
+    location = location.strip()
     sort = sort if sort in {"load_desc", "load_asc"} else "load_desc"
     servers = db.execute(
         select(Server)
@@ -5626,6 +6024,19 @@ def get_servers_page_data(
     active_servers: list[ServerListItemView] = []
     excluded_servers: list[ServerListItemView] = []
     pending_bootstrap_tasks: list[ServerBootstrapListItemView] = []
+    tak_tunnel_pairs: list[TakTunnelPairStateView] = []
+    backup_status = "ok"
+    try:
+        path = backup_storage_path(db)
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".nelomai-servers-beta-check"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+    except Exception:
+        backup_status = "error"
+    latest_backup_status = "ok" if _latest_completed_full_backup(db) is not None else "warning"
+    runtime_status = "error" if not settings.peer_agent_command else "ok"
+    tak_tunnel_status = "ok"
     bootstrap_status_labels = {
         "bootstrapping": "Настраивается",
         "confirmation_required": "Ожидает подтверждение",
@@ -5634,6 +6045,15 @@ def get_servers_page_data(
     for task in bootstrap_tasks:
         if server_type != "all" and task.server_type.value != server_type:
             continue
+        if location:
+            if task.server_type == ServerType.TIC:
+                if (_tic_region_label(task.tic_region) or "").lower() != location.lower():
+                    continue
+            elif task.server_type == ServerType.TAK:
+                if location.lower() not in (task.tak_country or "").lower():
+                    continue
+            else:
+                continue
         panel_job = db.get(PanelJob, task.panel_job_id) if task.panel_job_id else None
         status_value = "confirmation_required" if task.status == "input_required" else ("bootstrapping" if task.status == "running" else task.status)
         pending_bootstrap_tasks.append(
@@ -5642,6 +6062,8 @@ def get_servers_page_data(
                 name=task.server_name,
                 host=task.host,
                 server_type=task.server_type.value,
+                tic_region=task.tic_region.value if task.tic_region is not None else None,
+                tak_country=task.tak_country,
                 ssh_port=task.ssh_port,
                 status=status_value,
                 status_label=bootstrap_status_labels.get(status_value, status_value),
@@ -5665,6 +6087,17 @@ def get_servers_page_data(
         server_kind = server.server_type.value
         if server_type != "all" and server_kind != server_type:
             continue
+        location_label = _server_location_label(server)
+        if location:
+            if server.server_type == ServerType.TIC:
+                if (location_label or "").lower() != location.lower():
+                    continue
+            elif server.server_type == ServerType.TAK:
+                if location.lower() not in (location_label or "").lower():
+                    continue
+            else:
+                continue
+        agent_update_summary = _server_agent_update_summary(db, server) if server.server_type in {ServerType.TIC, ServerType.TAK, ServerType.STORAGE} else None
         interface_count = len(server.tic_interfaces)
         tak_fallback_interfaces = sorted(
             (interface.name for interface in server.tic_interfaces if interface.tak_tunnel_fallback_active),
@@ -5688,6 +6121,10 @@ def get_servers_page_data(
             name=server.name,
             host=server.host,
             server_type=server_kind,
+            tic_region=server.tic_region.value if server.tic_region is not None else None,
+            tic_region_label=_tic_region_label(server.tic_region),
+            tak_country=server.tak_country,
+            location_label=location_label,
             available=available,
             status=status,
             last_seen_at=server.last_seen_at,
@@ -5709,25 +6146,89 @@ def get_servers_page_data(
             tak_fallback_interface_names=tak_fallback_interfaces,
             tak_recovered_interface_count=len(tak_recovered_interfaces),
             tak_recovered_interface_names=tak_recovered_interfaces,
+            agent_update_status=agent_update_summary.status if agent_update_summary is not None else None,
+            agent_version=agent_update_summary.agent_version if agent_update_summary is not None else None,
+            contract_version=agent_update_summary.contract_version if agent_update_summary is not None else None,
+            current_version=agent_update_summary.current_version if agent_update_summary is not None else None,
+            latest_version=agent_update_summary.latest_version if agent_update_summary is not None else None,
+            update_available=agent_update_summary.update_available if agent_update_summary is not None else False,
         )
         if server.is_excluded:
             excluded_servers.append(item)
         else:
             active_servers.append(item)
+        if server.server_type in {ServerType.TIC, ServerType.TAK} and not server.is_active:
+            runtime_status = "warning" if runtime_status == "ok" else runtime_status
+        if item.tak_fallback_interface_count > 0:
+            tak_tunnel_status = "warning"
+
+    pair_interfaces: dict[tuple[int, int], list[Interface]] = {}
+    for server in servers:
+        for interface in server.tic_interfaces:
+            if interface.route_mode == RouteMode.VIA_TAK and interface.tak_server_id is not None:
+                pair_interfaces.setdefault((interface.tic_server_id, interface.tak_server_id), []).append(interface)
+    repair_state = _load_tak_tunnel_repair_state(db)
+    now = utc_now()
+    for (tic_id, tak_id), items in sorted(
+        pair_interfaces.items(),
+        key=lambda item: (item[1][0].tic_server.name.lower(), item[1][0].tak_server.name.lower()),
+    ):
+        sample = items[0]
+        state = dict(repair_state.get(_tak_tunnel_pair_key(tic_id, tak_id)) or {})
+        failure_count = int(state.get("failure_count") or 0)
+        cooldown_until = _tak_tunnel_parse_datetime(state.get("cooldown_until"))
+        manual_attention_required = bool(state.get("manual_attention_required"))
+        fallback_count = sum(1 for interface in items if interface.tak_tunnel_fallback_active)
+        recovered_count = sum(
+            1 for interface in items if interface.tak_tunnel_last_status == "recovered" and not interface.tak_tunnel_fallback_active
+        )
+        if manual_attention_required:
+            status = "manual_attention_required"
+        elif cooldown_until is not None and cooldown_until > now:
+            status = "cooldown"
+        elif fallback_count > 0:
+            status = "fallback"
+        elif recovered_count > 0:
+            status = "recovered"
+        else:
+            status = "active"
+        tak_tunnel_pairs.append(
+            TakTunnelPairStateView(
+                tic_server_id=tic_id,
+                tic_server_name=sample.tic_server.name,
+                tak_server_id=tak_id,
+                tak_server_name=sample.tak_server.name if sample.tak_server is not None else f"Tak {tak_id}",
+                pair_label=f"{sample.tic_server.name} → {sample.tak_server.name if sample.tak_server is not None else tak_id}",
+                status=status,
+                status_label=_tak_tunnel_status_label_ui(status),
+                fallback_interface_count=fallback_count,
+                recovered_interface_count=recovered_count,
+                failure_count=failure_count,
+                cooldown_until=cooldown_until,
+                manual_attention_required=manual_attention_required,
+                diagnostics_url=f"/admin/diagnostics?focused_tic_server_id={tic_id}&focused_tak_server_id={tak_id}#check-tak_tunnels",
+            )
+        )
 
     reverse = sort != "load_asc"
     active_servers.sort(key=lambda item: (item.interface_count, item.endpoint_count, item.peer_count, item.id), reverse=reverse)
     excluded_servers.sort(key=lambda item: (item.interface_count, item.endpoint_count, item.peer_count, item.id), reverse=reverse)
     visible_servers = excluded_servers if bucket == "excluded" else active_servers
     selected_server = next((item for item in visible_servers if item.id == selected_server_id), None)
+    selected_server_agent_update: ServerAgentUpdateView | None = None
     detail = None
     if selected_server is not None:
         source = next(server for server in servers if server.id == selected_server.id)
+        selected_server_agent_update = _server_agent_update_summary(db, source)
         detail = ServerDetailView(
             id=selected_server.id,
             name=selected_server.name,
             host=selected_server.host,
             server_type=selected_server.server_type,
+            tic_region=source.tic_region.value if source.tic_region is not None else None,
+            tic_region_label=_tic_region_label(source.tic_region),
+            tak_country=source.tak_country,
+            location_label=_server_location_label(source),
             status=selected_server.status,
             last_seen_at=source.last_seen_at,
             metrics_note=selected_server.metrics_note,
@@ -5750,12 +6251,23 @@ def get_servers_page_data(
             tak_recovered_interface_count=selected_server.tak_recovered_interface_count,
             tak_recovered_interface_names=selected_server.tak_recovered_interface_names,
         )
+    beta_readiness = _build_beta_readiness_summary(
+        backup_status=backup_status,
+        latest_backup_status=latest_backup_status,
+        runtime_status=runtime_status,
+        tak_tunnel_status=tak_tunnel_status,
+    )
     return serialize_servers_page(
         active_servers,
         excluded_servers,
         pending_bootstrap_tasks,
+        tak_tunnel_pairs,
+        beta_readiness,
+        selected_server_agent_update,
+        view,
         bucket,
         selected_type=server_type,
+        selected_location=location,
         selected_sort=sort,
         selected_server=detail,
         selected_bootstrap_task_id=selected_bootstrap_task_id,
@@ -6178,6 +6690,8 @@ def _finalize_server_bootstrap_success(db: Session, task: ServerBootstrapTask) -
         server = Server(
             name=task.server_name,
             server_type=task.server_type,
+            tic_region=task.tic_region,
+            tak_country=task.tak_country,
             host=task.host,
             ssh_port=task.ssh_port,
             ssh_login=task.ssh_login,
@@ -6190,6 +6704,8 @@ def _finalize_server_bootstrap_success(db: Session, task: ServerBootstrapTask) -
         db.flush()
     else:
         server = existing
+        server.tic_region = task.tic_region
+        server.tak_country = task.tak_country
     task.server_id = server.id
     task.status = "completed"
     task.input_prompt = None
@@ -6242,13 +6758,26 @@ def _apply_server_bootstrap_response(db: Session, task: ServerBootstrapTask, res
     db.refresh(task)
 
 
-def _validate_server_create_payload(db: Session, payload: ServerCreate) -> tuple[str, str, str, str, str | None]:
+def _validate_server_create_payload(
+    db: Session,
+    payload: ServerCreate,
+) -> tuple[str, str, str, str, str | None, TicRegion | None, str | None]:
     name = payload.name.strip()
     host = payload.host.strip()
     ssh_login = payload.ssh_login.strip()
     ssh_password = payload.ssh_password.strip()
     if not name or not host or not ssh_login or not ssh_password:
         raise PermissionDeniedError("Server connection fields must be filled in")
+    tic_region: TicRegion | None = None
+    tak_country: str | None = None
+    if payload.server_type == ServerType.TIC.value:
+        if not payload.tic_region:
+            raise PermissionDeniedError("Tic region is required")
+        tic_region = TicRegion(payload.tic_region)
+    elif payload.server_type == ServerType.TAK.value:
+        tak_country = (payload.tak_country or "").strip()
+        if not tak_country:
+            raise PermissionDeniedError("Tak country is required")
     existing = db.execute(select(Server).where(Server.name == name)).scalar_one_or_none()
     if existing is not None:
         raise PermissionDeniedError("Server name already exists")
@@ -6256,7 +6785,7 @@ def _validate_server_create_payload(db: Session, payload: ServerCreate) -> tuple
     repo_url = settings_values["nelomai_git_repo"]
     if not repo_url.strip():
         raise PermissionDeniedError("Git repository URL is required for the selected server type")
-    return name, host, ssh_login, ssh_password, repo_url.strip()
+    return name, host, ssh_login, ssh_password, repo_url.strip(), tic_region, tak_country
 
 
 def _build_server_bootstrap_context(task: ServerBootstrapTask) -> dict[str, object]:
@@ -6265,6 +6794,8 @@ def _build_server_bootstrap_context(task: ServerBootstrapTask) -> dict[str, obje
         "server": {
             "name": task.server_name,
             "server_type": task.server_type.value,
+            "tic_region": task.tic_region.value if task.tic_region is not None else None,
+            "tak_country": task.tak_country,
             "host": task.host,
             "ssh_port": task.ssh_port,
             "ssh_login": task.ssh_login,
@@ -6278,7 +6809,7 @@ def _build_server_bootstrap_context(task: ServerBootstrapTask) -> dict[str, obje
 
 def create_server_bootstrap_task(db: Session, actor: User, payload: ServerCreate) -> ServerBootstrapTaskView:
     require_admin(actor)
-    name, host, ssh_login, ssh_password, repo_url = _validate_server_create_payload(db, payload)
+    name, host, ssh_login, ssh_password, repo_url, tic_region, tak_country = _validate_server_create_payload(db, payload)
     job = create_panel_job(db, actor, "server_bootstrap")
     job.status = PanelJobStatus.RUNNING
     job.started_at = utc_now()
@@ -6288,6 +6819,8 @@ def create_server_bootstrap_task(db: Session, actor: User, payload: ServerCreate
         panel_job_id=job.id,
         server_name=name,
         server_type=ServerType(payload.server_type),
+        tic_region=tic_region,
+        tak_country=tak_country,
         host=host,
         ssh_port=payload.ssh_port,
         ssh_login=ssh_login,
@@ -6386,7 +6919,7 @@ def submit_server_bootstrap_input(
 
 def create_server_record(db: Session, actor: User, payload: ServerCreate) -> Server:
     require_admin(actor)
-    name, host, ssh_login, ssh_password, repo_url = _validate_server_create_payload(db, payload)
+    name, host, ssh_login, ssh_password, repo_url, tic_region, tak_country = _validate_server_create_payload(db, payload)
     # Panel-side bootstrap contract for a blank Ubuntu 22.04 host.
     # The future Node-agent can request extra confirmation/input through this step
     # without moving bootstrap logic into the panel itself.
@@ -6398,6 +6931,8 @@ def create_server_record(db: Session, actor: User, payload: ServerCreate) -> Ser
                 "server": {
                     "name": name,
                     "server_type": payload.server_type,
+                    "tic_region": tic_region.value if tic_region is not None else None,
+                    "tak_country": tak_country,
                     "host": host,
                     "ssh_port": payload.ssh_port,
                     "ssh_login": ssh_login,
@@ -6414,6 +6949,8 @@ def create_server_record(db: Session, actor: User, payload: ServerCreate) -> Ser
     server = Server(
         name=name,
         server_type=ServerType(payload.server_type),
+        tic_region=tic_region,
+        tak_country=tak_country,
         host=host,
         ssh_port=payload.ssh_port,
         ssh_login=ssh_login,
@@ -7488,6 +8025,173 @@ def get_shared_peer_links_page(db: Session, actor: User) -> SharedPeerLinksPageV
         active_count=sum(1 for item in items if not item.is_revoked and not item.is_expired),
         lifetime_count=sum(1 for item in items if not item.is_revoked and not item.is_expired and item.is_lifetime),
     )
+
+
+def serialize_registration_link(link: RegistrationLink, base_url: str) -> RegistrationLinkView:
+    is_used = link.used_at is not None
+    is_revoked = link.revoked_at is not None
+    status_label = "использована" if is_used else ("отозвана" if is_revoked else "не использована")
+    return RegistrationLinkView(
+        id=link.id,
+        url=_registration_link_url(link.token_id, base_url),
+        comment=link.comment,
+        created_at=link.created_at,
+        created_by_login=link.created_by_user.login if link.created_by_user else None,
+        used_at=link.used_at,
+        used_by_login=link.used_by_user.login if link.used_by_user else None,
+        revoked_at=link.revoked_at,
+        is_used=is_used,
+        is_revoked=is_revoked,
+        status_label=status_label,
+    )
+
+
+def generate_registration_link(db: Session, actor: User, base_url: str) -> RegistrationLinkView:
+    require_admin(actor)
+    link = RegistrationLink(
+        token_id=secrets.token_urlsafe(24),
+        comment=None,
+        created_by_user_id=actor.id,
+        revoked_at=None,
+        used_at=None,
+    )
+    db.add(link)
+    db.commit()
+    db.refresh(link)
+    write_audit_log(
+        db,
+        event_type="registration_links.create",
+        severity="info",
+        message=f"Registration link created by {actor.login}.",
+        message_ru=f"Создана ссылка регистрации администратором {actor.login}.",
+        actor_user_id=actor.id,
+    )
+    return serialize_registration_link(link, base_url)
+
+
+def get_registration_links_page(
+    db: Session,
+    actor: User,
+    *,
+    base_url: str,
+    created_link_id: int | None = None,
+) -> RegistrationLinksPageView:
+    require_admin(actor)
+    recent_used_after = utc_now() - timedelta(days=REGISTRATION_USED_LINK_RETENTION_DAYS)
+    links = db.execute(
+        select(RegistrationLink)
+        .options(
+            joinedload(RegistrationLink.created_by_user),
+            joinedload(RegistrationLink.used_by_user),
+        )
+        .where(
+            or_(
+                RegistrationLink.used_at.is_(None),
+                RegistrationLink.used_at >= recent_used_after,
+            )
+        )
+        .order_by(RegistrationLink.created_at.desc(), RegistrationLink.id.desc())
+    ).unique().scalars().all()
+    unused_links = [serialize_registration_link(link, base_url) for link in links if link.used_at is None and link.revoked_at is None]
+    revoked_links = [serialize_registration_link(link, base_url) for link in links if link.used_at is None and link.revoked_at is not None]
+    recent_used_links = [serialize_registration_link(link, base_url) for link in links if link.used_at is not None]
+    created_link = None
+    if created_link_id is not None:
+        record = db.get(RegistrationLink, created_link_id)
+        if record is not None:
+            created_link = serialize_registration_link(record, base_url)
+    return RegistrationLinksPageView(
+        unused_links=unused_links,
+        revoked_links=revoked_links,
+        recent_used_links=recent_used_links,
+        created_link=created_link,
+        unused_count=len(unused_links),
+        revoked_count=len(revoked_links),
+        recent_used_count=len(recent_used_links),
+    )
+
+
+def revoke_unused_registration_links(db: Session, actor: User) -> int:
+    require_admin(actor)
+    links = db.execute(
+        select(RegistrationLink)
+        .where(RegistrationLink.used_at.is_(None), RegistrationLink.revoked_at.is_(None))
+        .order_by(RegistrationLink.id.asc())
+    ).scalars().all()
+    if not links:
+        return 0
+    now = utc_now()
+    for link in links:
+        link.revoked_at = now
+        db.add(link)
+    db.commit()
+    write_audit_log(
+        db,
+        event_type="registration_links.revoke_unused",
+        severity="warning",
+        message=f"Unused registration links revoked by {actor.login}.",
+        message_ru=f"Администратор {actor.login} отозвал все неиспользованные ссылки регистрации.",
+        actor_user_id=actor.id,
+        details=f"revoked_count={len(links)}",
+    )
+    return len(links)
+
+
+def update_registration_link_comment(db: Session, actor: User, link_id: int, comment: str | None) -> None:
+    require_admin(actor)
+    link = db.get(RegistrationLink, link_id)
+    if link is None:
+        raise EntityNotFoundError("Registration link not found")
+    normalized_comment = str(comment or "").strip()
+    if len(normalized_comment) > 255:
+        raise InvalidInputError("Registration link comment is too long")
+    link.comment = normalized_comment or None
+    db.add(link)
+    db.commit()
+
+
+def get_public_registration_link(db: Session, token_id: str) -> RegistrationLink:
+    link = db.execute(
+        select(RegistrationLink)
+        .options(joinedload(RegistrationLink.created_by_user), joinedload(RegistrationLink.used_by_user))
+        .where(RegistrationLink.token_id == token_id)
+    ).scalar_one_or_none()
+    if link is None or link.revoked_at is not None or link.used_at is not None:
+        raise EntityNotFoundError("Registration link is invalid or already used")
+    return link
+
+
+def register_user_via_link(db: Session, token_id: str, payload: PublicRegistrationCreate) -> User:
+    link = get_public_registration_link(db, token_id)
+    login, password, display_name, communication_channel, region = _validate_public_registration_payload(db, payload)
+    user = User(
+        login=login,
+        password_hash=get_password_hash(password),
+        display_name=display_name,
+        region=region,
+        role=UserRole.USER,
+        expires_at=None,
+        is_active=True,
+    )
+    db.add(user)
+    db.flush()
+    db.add(UserResource(user_id=user.id))
+    db.add(UserContactLink(user_id=user.id, value=communication_channel))
+    link.used_by_user_id = user.id
+    link.used_at = utc_now()
+    db.add(link)
+    db.commit()
+    db.refresh(user)
+    write_audit_log(
+        db,
+        event_type="registration_links.used",
+        severity="info",
+        message=f"Registration link used for {user.login}.",
+        message_ru=f"По ссылке регистрации создан аккаунт {user.login}.",
+        target_user_id=user.id,
+        details=f"registration_link_id={link.id}",
+    )
+    return user
 
 
 def revoke_peer_download_link(db: Session, actor: User, link_id: int) -> None:

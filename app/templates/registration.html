@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block body %}
+<main class="login-shell">
+    <section class="login-card registration-card">
+        <div class="brand-lockup">
+            <img class="brand-logo" src="{{ url_for('static', path='/logo.svg') }}" alt="Nelomai">
+            <div>
+                <p class="eyebrow">Registration Link</p>
+                <h1>Регистрация аккаунта</h1>
+            </div>
+        </div>
+        <p class="login-copy">Заполните все поля. Ссылка регистрации одноразовая и после успешного создания аккаунта повторно не работает.</p>
+        <form method="post" action="/registration/{{ token }}" class="login-form">
+            <label>
+                <span>Логин</span>
+                <input type="text" name="login" value="{{ values.get('login', '') }}" maxlength="20" required>
+                <small class="form-hint">Имя вашего аккаунта, используется для входа в систему, лимит 20 символов, разрешается использовать английские буквы и цифры, не чувствителен к регистру.</small>
+            </label>
+            <label>
+                <span>Пароль</span>
+                <input type="password" name="password" required>
+                <small class="form-hint">Минимум 4 знака, только английские буквы и цифры, чувствителен к регистру.</small>
+            </label>
+            <label>
+                <span>Имя</span>
+                <input type="text" name="display_name" value="{{ values.get('display_name', '') }}" maxlength="120" required>
+                <small class="form-hint">Ваше имя или ник. Может включать в себя кириллицу, латиницу и цифры, без спецсимволов.</small>
+            </label>
+            <label>
+                <span>Контакт</span>
+                <input type="text" name="communication_channel" value="{{ values.get('communication_channel', '') }}" maxlength="255" required>
+                <small class="form-hint">Ссылка на канал связи с вами (Телеграм, ВК или имя контактного лица). Может включать символы @ ? _ - . ,</small>
+            </label>
+            <label>
+                <span>Регион</span>
+                <select name="region" required>
+                    <option value="" {% if not values.get('region') %}selected{% endif %}>Выберите регион</option>
+                    <option value="europe" {% if values.get('region') == 'europe' %}selected{% endif %}>Европа</option>
+                    <option value="east" {% if values.get('region') == 'east' %}selected{% endif %}>Восток</option>
+                    <option value="unknown" {% if values.get('region') == 'unknown' %}selected{% endif %}>Не знаю/затрудняюсь ответить</option>
+                </select>
+                <small class="form-hint">Где территориально находитесь. На данном этапе не имеет значения.</small>
+            </label>
+            {% if error %}
+            <div class="form-error">{{ error }}</div>
+            {% endif %}
+            <button type="submit" class="primary-button">Создать аккаунт</button>
+        </form>
+    </section>
+</main>
+{% endblock %}

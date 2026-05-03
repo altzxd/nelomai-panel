@@ -364,6 +364,7 @@ def run() -> None:
                 "/api/admin/servers",
                 json={
                     "server_type": "tic",
+                    "tic_region": "europe",
                     "name": "contract-check-bootstrap",
                     "host": "127.0.0.52",
                     "ssh_port": 22,

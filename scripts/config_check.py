@@ -19,6 +19,7 @@ REQUIRED_ENV_EXAMPLE_KEYS = {
     "SECRET_KEY",
     "ACCESS_TOKEN_EXPIRE_MINUTES",
     "DATABASE_URL",
+    "NELOMAI_GIT_REPO",
     "PEER_AGENT_COMMAND",
     "PEER_AGENT_TIMEOUT_SECONDS",
 }
@@ -115,6 +116,8 @@ def check_runtime_settings(issues: list[str], warnings: list[str], production: b
             add_issue(issues, "DATABASE_URL must not use SQLite in production")
         if not settings.database_url.startswith(("postgresql+psycopg://", "postgresql://")):
             add_issue(issues, "DATABASE_URL should use PostgreSQL in production")
+        if not settings.nelomai_git_repo.strip():
+            add_issue(issues, "NELOMAI_GIT_REPO must be configured in production")
         if not settings.peer_agent_command:
             add_issue(issues, "PEER_AGENT_COMMAND must be configured in production")
     else:
@@ -124,6 +127,8 @@ def check_runtime_settings(issues: list[str], warnings: list[str], production: b
             add_warning(warnings, "SECRET_KEY is a development placeholder")
         if settings.database_url.startswith("sqlite"):
             add_warning(warnings, "DATABASE_URL uses SQLite; OK for local dev, not for server install")
+        if not settings.nelomai_git_repo.strip():
+            add_warning(warnings, "NELOMAI_GIT_REPO is empty; deploy/update paths will require manual repo configuration")
         if not settings.peer_agent_command:
             add_warning(warnings, "PEER_AGENT_COMMAND is empty; agent-backed actions will return 503")
 

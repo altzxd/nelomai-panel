@@ -6,6 +6,9 @@
             <img class="sidebar-brand-logo" src="{{ url_for('static', path='/logo.svg') }}" alt="Nelomai">
         </div>
         <nav class="sidebar-nav sidebar-nav-icons">
+            <a class="nav-icon-pill {% if has_available_updates %}is-warning-state{% endif %}" href="/admin/updates" title="Обновления" aria-label="Обновления">
+                <span class="nav-icon">↑</span>
+            </a>
             <a class="nav-icon-pill" href="/admin?tab=overview" title="Панель" aria-label="Панель">
                 <span class="nav-icon">⌂</span>
             </a>

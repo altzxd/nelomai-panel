@@ -44,6 +44,17 @@ class ServerType(StrEnum):
     STORAGE = "storage"
 
 
+class TicRegion(StrEnum):
+    EUROPE = "europe"
+    EAST = "east"
+
+
+class UserRegion(StrEnum):
+    EUROPE = "europe"
+    EAST = "east"
+    UNKNOWN = "unknown"
+
+
 class BackupType(StrEnum):
     USERS = "users"
     SYSTEM = "system"
@@ -66,6 +77,7 @@ class User(Base):
     login: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     display_name: Mapped[str] = mapped_column(String(120))
+    region: Mapped[UserRegion | None] = mapped_column(Enum(UserRegion), nullable=True)
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.USER)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -78,6 +90,14 @@ class User(Base):
         back_populates="user",
         uselist=False,
         cascade="all, delete-orphan",
+    )
+    created_registration_links: Mapped[list["RegistrationLink"]] = relationship(
+        back_populates="created_by_user",
+        foreign_keys="RegistrationLink.created_by_user_id",
+    )
+    used_registration_links: Mapped[list["RegistrationLink"]] = relationship(
+        back_populates="used_by_user",
+        foreign_keys="RegistrationLink.used_by_user_id",
     )
     audit_logs: Mapped[list["AuditLog"]] = relationship(
         back_populates="actor_user",
@@ -92,6 +112,8 @@ class Server(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(120), unique=True)
     server_type: Mapped[ServerType] = mapped_column(Enum(ServerType))
+    tic_region: Mapped[TicRegion | None] = mapped_column(Enum(TicRegion), nullable=True)
+    tak_country: Mapped[str | None] = mapped_column(String(120), nullable=True)
     host: Mapped[str] = mapped_column(String(255))
     ssh_port: Mapped[int] = mapped_column(Integer, default=22)
     ssh_login: Mapped[str | None] = mapped_column(String(120), nullable=True)
@@ -122,6 +144,8 @@ class ServerBootstrapTask(Base):
     panel_job_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     server_name: Mapped[str] = mapped_column(String(120))
     server_type: Mapped[ServerType] = mapped_column(Enum(ServerType))
+    tic_region: Mapped[TicRegion | None] = mapped_column(Enum(TicRegion), nullable=True)
+    tak_country: Mapped[str | None] = mapped_column(String(120), nullable=True)
     host: Mapped[str] = mapped_column(String(255))
     ssh_port: Mapped[int] = mapped_column(Integer, default=22)
     ssh_login: Mapped[str] = mapped_column(String(120))
@@ -208,6 +232,28 @@ class PeerDownloadLink(Base):
 
     peer: Mapped["Peer"] = relationship(back_populates="download_links")
     created_by_user: Mapped["User | None"] = relationship(foreign_keys=[created_by_user_id])
+
+
+class RegistrationLink(Base):
+    __tablename__ = "registration_links"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    comment: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    used_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+    created_by_user: Mapped["User | None"] = relationship(
+        back_populates="created_registration_links",
+        foreign_keys=[created_by_user_id],
+    )
+    used_by_user: Mapped["User | None"] = relationship(
+        back_populates="used_registration_links",
+        foreign_keys=[used_by_user_id],
+    )
 
 
 class UserResource(Base):

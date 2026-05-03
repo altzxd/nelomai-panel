@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     secret_key: str = "dev-only-change-me-with-a-long-random-value"
     access_token_expire_minutes: int = 720
     database_url: str = "sqlite+pysqlite:///./nelomai-panel.db"
+    nelomai_git_repo: str = ""
     peer_agent_command: str | None = None
     peer_agent_timeout_seconds: int = 20
     peer_agent_bootstrap_timeout_seconds: int = 1800

@@ -6,6 +6,9 @@
             <img class="sidebar-brand-logo" src="{{ url_for('static', path='/logo.svg') }}" alt="Nelomai">
         </div>
         <nav class="sidebar-nav sidebar-nav-icons">
+            <a class="nav-icon-pill {% if has_available_updates %}is-warning-state{% endif %}" href="/admin/updates" title="Обновления" aria-label="Обновления">
+                <span class="nav-icon">↑</span>
+            </a>
             <a class="nav-icon-pill" href="/admin?tab=overview" title="Панель" aria-label="Панель">
                 <span class="nav-icon">⌂</span>
             </a>
@@ -53,13 +56,15 @@
 
         <section class="tabs">
             <div class="tab-list tab-list-stretch">
-                <a class="tab-button tab-link {% if servers_page.selected_bucket == 'active' %}active{% endif %}" href="/admin/servers?bucket=active&server_type={{ servers_page.selected_type }}&sort={{ servers_page.selected_sort }}">Активные</a>
-                <a class="tab-button tab-link {% if servers_page.selected_bucket == 'excluded' %}active{% endif %}" href="/admin/servers?bucket=excluded&server_type={{ servers_page.selected_type }}&sort={{ servers_page.selected_sort }}">Исключённые</a>
+                <a class="tab-button tab-link {% if servers_page.selected_view == 'servers' and servers_page.selected_bucket == 'active' %}active{% endif %}" href="/admin/servers?view=servers&bucket=active&server_type={{ servers_page.selected_type }}&location={{ servers_page.selected_location|urlencode }}&sort={{ servers_page.selected_sort }}">Активные</a>
+                <a class="tab-button tab-link {% if servers_page.selected_view == 'servers' and servers_page.selected_bucket == 'excluded' %}active{% endif %}" href="/admin/servers?view=servers&bucket=excluded&server_type={{ servers_page.selected_type }}&location={{ servers_page.selected_location|urlencode }}&sort={{ servers_page.selected_sort }}">Исключённые</a>
+                <a class="tab-button tab-link {% if servers_page.selected_view == 'tunnels' %}active{% endif %}" href="/admin/servers?view=tunnels">Туннели</a>
             </div>
         </section>
 
         <section class="admin-hero-actions">
             <form class="server-toolbar" method="get" action="/admin/servers">
+                <input type="hidden" name="view" value="{{ servers_page.selected_view }}">
                 <input type="hidden" name="bucket" value="{{ servers_page.selected_bucket }}">
                 {% if servers_page.selected_server %}
                 <input type="hidden" name="selected_server_id" value="{{ servers_page.selected_server.id }}">
@@ -74,23 +79,51 @@
                     </select>
                 </label>
                 <label>
+                    <span>Регион / страна</span>
+                    <input type="text" name="location" value="{{ servers_page.selected_location }}" placeholder="Европа, Восток или страна" />
+                </label>
+                <label>
                     <span>Сортировка</span>
                     <select name="sort" onchange="this.form.submit()">
                         <option value="load_desc" {% if servers_page.selected_sort == 'load_desc' %}selected{% endif %}>Загрузка: больше → меньше</option>
                         <option value="load_asc" {% if servers_page.selected_sort == 'load_asc' %}selected{% endif %}>Загрузка: меньше → больше</option>
                     </select>
                 </label>
+                <button type="submit" class="ghost-button small">Применить</button>
             </form>
             <p>Новый сервер сначала проходит bootstrap как пустая Ubuntu 22.04. До подтверждения агента он отображается как unknown, а не online.</p>
         </section>
 
-        {% if servers_page.selected_server %}
+        {% if servers_page.beta_readiness %}
+        <section class="settings-card diagnostics-summary {% if servers_page.beta_readiness.status == 'error' %}is-error{% elif servers_page.beta_readiness.status == 'warning' %}is-warning{% endif %}">
+            <h3>Готовность к beta rollout</h3>
+            <p>{{ servers_page.beta_readiness.message }}</p>
+            {% if servers_page.beta_readiness.details %}
+            <ul class="diagnostics-details">
+                {% for item in servers_page.beta_readiness.details %}
+                <li>{{ item }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+            <div class="job-actions">
+                <a class="ghost-button small" href="/admin/diagnostics">Открыть диагностику</a>
+                {% if servers_page.beta_readiness.settings_url %}
+                <a class="ghost-button small" href="{{ servers_page.beta_readiness.settings_url }}">Настройки панели</a>
+                {% endif %}
+                {% if servers_page.beta_readiness.backups_url %}
+                <a class="ghost-button small" href="{{ servers_page.beta_readiness.backups_url }}">Backup-настройки</a>
+                {% endif %}
+            </div>
+        </section>
+        {% endif %}
+
+        {% if servers_page.selected_view == 'servers' and servers_page.selected_server %}
         <section class="settings-card server-detail-card">
             <div class="server-list-head">
                 <div>
                     <p class="eyebrow">{{ servers_page.selected_server.server_type|upper }} сервер</p>
                     <h3>{{ servers_page.selected_server.name }}</h3>
-                    <p>{{ servers_page.selected_server.host }} · SSH {{ servers_page.selected_server.ssh_login or "не задан" }}:{{ servers_page.selected_server.ssh_port }}</p>
+                    <p>{{ servers_page.selected_server.host }}{% if servers_page.selected_server.location_label %} · {{ servers_page.selected_server.location_label }}{% endif %} · SSH {{ servers_page.selected_server.ssh_login or "не задан" }}:{{ servers_page.selected_server.ssh_port }}</p>
                 </div>
                 <span class="availability {% if servers_page.selected_server.status == 'online' %}is-online{% elif servers_page.selected_server.status == 'offline' %}is-offline{% elif servers_page.selected_server.status == 'excluded' %}is-invalid{% else %}is-unknown{% endif %}">
                     {{ servers_page.selected_server.status }}
@@ -198,6 +231,29 @@
                 <button class="ghost-button small danger" type="button" data-server-delete="{{ servers_page.selected_server.id }}">Удалить</button>
                 {% endif %}
             </div>
+            {% if servers_page.selected_server_agent_update %}
+            <section class="server-runtime-card">
+                <div class="server-runtime-head">
+                    <div>
+                        <p class="eyebrow">Версия агента</p>
+                        <h4>{{ servers_page.selected_server_agent_update.name }}</h4>
+                    </div>
+                    <span class="availability {% if servers_page.selected_server_agent_update.status == 'error' or servers_page.selected_server_agent_update.update_available %}is-invalid{% elif servers_page.selected_server_agent_update.status == 'legacy' or servers_page.selected_server_agent_update.status == 'repo_missing' or servers_page.selected_server_agent_update.status == 'excluded' %}is-unknown{% else %}is-online{% endif %}">
+                        {% if servers_page.selected_server_agent_update.update_available %}нужно обновление{% else %}{{ servers_page.selected_server_agent_update.status }}{% endif %}
+                    </span>
+                </div>
+                <dl class="server-runtime-paths">
+                    <div><dt>Agent</dt><dd>{{ servers_page.selected_server_agent_update.agent_version or "неизвестно" }}</dd></div>
+                    <div><dt>Contract</dt><dd>{{ servers_page.selected_server_agent_update.contract_version or "неизвестно" }}</dd></div>
+                    <div><dt>Текущая</dt><dd>{{ servers_page.selected_server_agent_update.current_version or "неизвестно" }}</dd></div>
+                    <div><dt>Последняя</dt><dd>{{ servers_page.selected_server_agent_update.latest_version or "неизвестно" }}</dd></div>
+                </dl>
+                <p class="server-inline-warning">
+                    {% if servers_page.selected_server_agent_update.update_available %}Рассинхрон версий: агент требует обновления.{% elif servers_page.selected_server_agent_update.status == 'legacy' %}Рассинхрон версий: legacy-агент вне актуального контракта.{% elif servers_page.selected_server_agent_update.status == 'repo_missing' %}Рассинхрон версий: не задан Git-репозиторий агента.{% elif servers_page.selected_server_agent_update.status == 'excluded' %}Рассинхрон версий: сервер исключён из среды панели.{% else %}Рассинхрона версий нет.{% endif %}
+                </p>
+                <p class="server-metrics-note">{{ servers_page.selected_server_agent_update.message }}</p>
+            </section>
+            {% endif %}
             <section class="server-runtime-card" data-server-runtime-result hidden>
                 <div class="server-runtime-head">
                     <div>
@@ -220,7 +276,54 @@
         </section>
         {% endif %}
 
+        {% if servers_page.selected_view == 'tunnels' %}
+        <section class="server-list-grid">
+            {% for pair in servers_page.tak_tunnel_pairs %}
+            <article class="server-list-card">
+                <div class="server-list-head">
+                    <div>
+                        <p class="eyebrow">Tic ↔ Tak</p>
+                        <h3>{{ pair.pair_label }}</h3>
+                    </div>
+                    <span class="availability {% if pair.status == 'active' or pair.status == 'recovered' %}is-online{% elif pair.status == 'cooldown' %}is-unknown{% else %}is-offline{% endif %}">
+                        {{ pair.status_label }}
+                    </span>
+                </div>
+                <dl class="server-facts">
+                    <div><dt>Fallback интерфейсов</dt><dd>{{ pair.fallback_interface_count }}</dd></div>
+                    <div><dt>Автовосстановлены</dt><dd>{{ pair.recovered_interface_count }}</dd></div>
+                    <div><dt>Неудачных попыток</dt><dd>{{ pair.failure_count }}</dd></div>
+                    <div><dt>Manual attention</dt><dd>{{ "да" if pair.manual_attention_required else "нет" }}</dd></div>
+                </dl>
+                {% if pair.cooldown_until %}
+                <p class="server-inline-warning">Повторная попытка не раньше: {{ pair.cooldown_until|datetime_moscow }}</p>
+                {% endif %}
+                <div class="job-actions">
+                    {% if pair.diagnostics_url %}
+                    <a class="ghost-button small" href="{{ pair.diagnostics_url }}">Открыть диагностику пары</a>
+                    {% endif %}
+                </div>
+            </article>
+            {% else %}
+            <section class="settings-card">
+                <p>Активных пар Tic ↔ Tak с route_mode=via_tak пока нет.</p>
+            </section>
+            {% endfor %}
+        </section>
+        {% endif %}
+
+        {% if servers_page.selected_view == 'servers' %}
         {% set server_cards = servers_page.excluded_servers if servers_page.selected_bucket == 'excluded' else servers_page.servers %}
+        {% set version_issue_servers = server_cards | selectattr("update_available") | list | length %}
+        {% set version_contract_issue_servers = server_cards | selectattr("agent_update_status", "in", ["legacy", "repo_missing", "excluded", "error"]) | list | length %}
+        {% set total_version_issue_servers = version_issue_servers + version_contract_issue_servers %}
+        {% set version_checked_servers = server_cards | selectattr("agent_update_status") | list | length %}
+        {% if version_checked_servers %}
+        <section class="settings-card">
+            <h3>Итог по версиям серверов</h3>
+            <p class="muted-note">{{ total_version_issue_servers }} требуют внимания · {{ version_checked_servers - total_version_issue_servers }} актуальны</p>
+        </section>
+        {% endif %}
         {% if servers_page.selected_bucket == 'active' and servers_page.pending_bootstrap_tasks %}
         <section class="pending-server-section">
             <div class="section-header">
@@ -358,11 +461,11 @@
         {% endif %}
         <section class="server-list-grid">
             {% for server in server_cards %}
-            <a class="server-list-card server-list-link {% if servers_page.selected_server and servers_page.selected_server.id == server.id %}is-selected{% endif %}" href="/admin/servers?bucket={{ servers_page.selected_bucket }}&server_type={{ servers_page.selected_type }}&sort={{ servers_page.selected_sort }}&selected_server_id={{ server.id }}">
+            <a class="server-list-card server-list-link {% if servers_page.selected_server and servers_page.selected_server.id == server.id %}is-selected{% endif %}" href="/admin/servers?view=servers&bucket={{ servers_page.selected_bucket }}&server_type={{ servers_page.selected_type }}&location={{ servers_page.selected_location|urlencode }}&sort={{ servers_page.selected_sort }}&selected_server_id={{ server.id }}">
                 <div class="server-list-head">
                     <div>
                         <h3>{{ server.name }}</h3>
-                        <p>{{ server.host }} · {{ server.server_type }} · SSH {{ server.ssh_port }}</p>
+                        <p>{{ server.host }} · {{ server.server_type }}{% if server.location_label %} · {{ server.location_label }}{% endif %} · SSH {{ server.ssh_port }}</p>
                     </div>
                     <span class="availability {% if server.status == 'online' %}is-online{% elif server.status == 'offline' %}is-offline{% elif server.status == 'excluded' %}is-invalid{% else %}is-unknown{% endif %}">
                         {{ server.status }}
@@ -410,12 +513,23 @@
                     <div><dt>Пиров на Tic</dt><dd>{{ server.peer_count }}</dd></div>
                     <div><dt>Fallback via_tak</dt><dd>{{ server.tak_fallback_interface_count }}</dd></div>
                     <div><dt>Автовосстановлены</dt><dd>{{ server.tak_recovered_interface_count }}</dd></div>
+                    {% if server.location_label %}
+                    <div><dt>{% if server.server_type == 'tic' %}Регион{% elif server.server_type == 'tak' %}Страна{% else %}Локация{% endif %}</dt><dd>{{ server.location_label }}</dd></div>
+                    {% endif %}
                 </dl>
                 {% if server.tak_fallback_interface_count %}
                 <p class="server-inline-warning">via_tak fallback: {{ server.tak_fallback_interface_count }} · {{ server.tak_fallback_interface_names | join(", ") }}</p>
                 {% endif %}
                 {% if server.tak_recovered_interface_count %}
                 <p class="server-inline-note">Tic ↔ Tak автовосстановлен: {{ server.tak_recovered_interface_count }} · {{ server.tak_recovered_interface_names | join(", ") }}</p>
+                {% endif %}
+                {% if server.agent_update_status %}
+                <p class="server-inline-note">
+                    Версия агента: {{ server.agent_version or "неизвестно" }} · contract {{ server.contract_version or "неизвестно" }} · текущая {{ server.current_version or "неизвестно" }}{% if server.latest_version %} · последняя {{ server.latest_version }}{% endif %}{% if server.update_available %} · нужно обновление{% else %} · {{ server.agent_update_status }}{% endif %}
+                </p>
+                <p class="{% if server.update_available or server.agent_update_status in ['legacy', 'repo_missing', 'excluded'] %}server-inline-warning{% else %}server-inline-note{% endif %}">
+                    {% if server.update_available %}Рассинхрон версий: агент требует обновления.{% elif server.agent_update_status == 'legacy' %}Рассинхрон версий: legacy-агент вне актуального контракта.{% elif server.agent_update_status == 'repo_missing' %}Рассинхрон версий: не задан Git-репозиторий агента.{% elif server.agent_update_status == 'excluded' %}Рассинхрон версий: сервер исключён из среды панели.{% else %}Рассинхрона версий нет.{% endif %}
+                </p>
                 {% endif %}
                 <div class="server-card-actions">
                     <button class="ghost-button small" type="button" data-server-verify="{{ server.id }}">Перепроверить</button>
@@ -431,6 +545,7 @@
             </a>
             {% endfor %}
         </section>
+        {% endif %}
     </section>
 </main>
 
@@ -448,11 +563,23 @@
             <div class="settings-grid">
                 <label>
                     <span>Тип сервера</span>
-                    <select name="server_type">
+                    <select name="server_type" data-server-type-select>
                         <option value="tic">Tic</option>
                         <option value="tak">Tak</option>
                         <option value="storage">Storage</option>
                     </select>
+                </label>
+                <label data-server-tic-region-field>
+                    <span>Регион</span>
+                    <select name="tic_region">
+                        <option value="">Выберите регион</option>
+                        <option value="europe">Европа</option>
+                        <option value="east">Восток</option>
+                    </select>
+                </label>
+                <label data-server-tak-country-field hidden>
+                    <span>Страна</span>
+                    <input type="text" name="tak_country" maxlength="120" placeholder="Например, Finland">
                 </label>
                 <label>
                     <span>Название в панели</span>

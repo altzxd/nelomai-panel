@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Res
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
@@ -43,6 +44,8 @@ from app.schemas import (
     PeerBlockFiltersUpdate,
     PeerExpiryUpdate,
     PanelUpdateCheckView,
+    PublicRegistrationCreate,
+    RegistrationLinksPageView,
     ResourceItemView,
     ServerAgentUpdateApplyRequest,
     ServerAgentUpdateListView,
@@ -51,6 +54,7 @@ from app.schemas import (
     ServerCreate,
     ServerRuntimeCheckView,
     UpdateSettingsUpdate,
+    UpdatesPageView,
     UserContactLinkUpdate,
     UserDisplayNameUpdate,
     UserExpiresUpdate,
@@ -95,6 +99,7 @@ from app.services import (
     download_peer_config,
     download_peer_config_public,
     generate_peer_download_link,
+    generate_registration_link,
     delete_user_account,
     delete_user_resources,
     ensure_can_edit_filter,
@@ -104,11 +109,14 @@ from app.services import (
     get_audit_logs_page,
     get_admin_page_data,
     get_dashboard_data,
+    get_public_registration_link,
+    get_registration_links_page,
     get_filter_by_id,
     get_filters_view,
     get_agent_contract_page,
     get_panel_jobs_page,
     get_panel_diagnostics_page,
+    get_updates_page_data,
     clear_tak_tunnel_backoff,
     repair_tak_tunnel_pair,
     rotate_tak_tunnel_pair,
@@ -118,11 +126,15 @@ from app.services import (
     get_user_resources_view,
     exclude_server_record,
     recreate_peer,
+    register_user_via_link,
     restore_server_record,
     revoke_peer_download_link,
     revoke_peer_download_links,
+    revoke_unused_registration_links,
+    update_registration_link_comment,
     run_expired_peers_cleanup_job,
     cancel_panel_job,
+    has_available_updates,
     has_problem_panel_jobs,
     delete_server_record,
     reboot_server_host,
@@ -230,6 +242,13 @@ def is_preview_mode(request: Request, current_user: User) -> bool:
     return current_user.role == UserRole.ADMIN and preview_flag in {"1", "true", "yes", "on"}
 
 
+def admin_chrome_context(db: Session) -> dict[str, bool]:
+    return {
+        "has_problem_jobs": has_problem_panel_jobs(db),
+        "has_available_updates": has_available_updates(db),
+    }
+
+
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     token = request.cookies.get("access_token")
     if not token:
@@ -292,6 +311,15 @@ def normalize_service_error_detail(detail: str) -> str:
         "Peer server executor did not return file content": "Tic-сервер не вернул содержимое файла.",
         "Peer server executor returned invalid file payload": "Tic-сервер вернул некорректный файл.",
     }
+    exact_map.update(
+        {
+            "Login must be 1-20 chars and contain only English letters and digits": "Логин должен содержать только английские буквы и цифры и быть длиной до 20 символов.",
+            "Password must be at least 4 chars and contain only English letters and digits": "Пароль должен содержать минимум 4 символа и включать только английские буквы и цифры.",
+            "Display name may contain only Cyrillic, Latin letters, digits and spaces": "Имя может содержать только кириллицу, латиницу, цифры и пробелы.",
+            "Contact may contain only letters, digits, spaces and @ ? _ - . ,": "Контакт может содержать только буквы, цифры, пробелы и символы @ ? _ - . ,",
+            "Registration link is invalid or already used": "Ссылка регистрации недействительна, уже использована или отозвана.",
+        }
+    )
     if detail in exact_map:
         return exact_map[detail]
     if detail.startswith("Peer server executor failed to start:"):
@@ -361,7 +389,80 @@ def normalize_service_error_detail(detail: str) -> str:
 @router.get("/", response_class=HTMLResponse)
 def login_page(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     ensure_seed_data(db)
-    return templates.TemplateResponse(request, "login.html", {"error": None})
+    info_message = "Аккаунт создан, вы можете войти." if request.query_params.get("registered") == "1" else None
+    return templates.TemplateResponse(request, "login.html", {"error": None, "info_message": info_message})
+
+
+@router.get("/registration/{token}", response_class=HTMLResponse)
+def registration_page(token: str, request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    try:
+        get_public_registration_link(db, token)
+    except EntityNotFoundError:
+        return Response(
+            content="Registration link is invalid or already used.",
+            status_code=status.HTTP_404_NOT_FOUND,
+            media_type="text/plain; charset=utf-8",
+        )
+    return templates.TemplateResponse(
+        request,
+        "registration.html",
+        {
+            "token": token,
+            "error": None,
+            "values": {},
+        },
+    )
+
+
+@router.post("/registration/{token}")
+async def register_public_user(
+    token: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Response:
+    form_data = await request.form()
+    values = {
+        "login": str(form_data.get("login", "")),
+        "display_name": str(form_data.get("display_name", "")),
+        "communication_channel": str(form_data.get("communication_channel", "")),
+        "region": str(form_data.get("region", "")),
+    }
+    try:
+        payload = PublicRegistrationCreate(
+            login=values["login"],
+            password=str(form_data.get("password", "")),
+            display_name=values["display_name"],
+            communication_channel=values["communication_channel"],
+            region=values["region"],
+        )
+        register_user_via_link(db, token, payload)
+    except ValidationError:
+        return templates.TemplateResponse(
+            request,
+            "registration.html",
+            {
+                "token": token,
+                "error": "Заполните все поля корректно.",
+                "values": values,
+            },
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
+    except (EntityNotFoundError, PermissionDeniedError, InvalidInputError) as exc:
+        detail = normalize_service_error_detail(str(exc))
+        status_code_value = status.HTTP_404_NOT_FOUND if isinstance(exc, EntityNotFoundError) else status.HTTP_400_BAD_REQUEST
+        if isinstance(exc, PermissionDeniedError):
+            status_code_value = status.HTTP_403_FORBIDDEN
+        return templates.TemplateResponse(
+            request,
+            "registration.html",
+            {
+                "token": token,
+                "error": detail,
+                "values": values,
+            },
+            status_code=status_code_value,
+        )
+    return RedirectResponse(url="/?registered=1", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/login")
@@ -500,7 +601,7 @@ def dashboard(
             },
             "moscow_now": "MSK",
             "pending_interfaces": pending_interfaces,
-            "has_problem_jobs": has_problem_panel_jobs(db) if current_user.role == UserRole.ADMIN and not preview_mode else False,
+            **(admin_chrome_context(db) if current_user.role == UserRole.ADMIN and not preview_mode else {"has_problem_jobs": False, "has_available_updates": False}),
         },
     )
 
@@ -511,6 +612,8 @@ def admin_home(
     tic_server_id: int | None = Query(default=None),
     tak_server_id: int | None = Query(default=None),
     interface_tic_server_id: int | None = Query(default=None),
+    client_scope: str = Query(default="all"),
+    access_view: str = Query(default="dated"),
     filter_scope: str = Query(default="all"),
     settings_view: str = Query(default="basic"),
     tab: str = Query(default="overview"),
@@ -524,6 +627,7 @@ def admin_home(
             current_user,
             tic_server_id=tic_server_id,
             tak_server_id=tak_server_id,
+            client_scope=client_scope,
             filter_scope=filter_scope,
             filter_kind=FilterKind.BLOCK if settings_view == "block_filters" else FilterKind.EXCLUSION,
         )
@@ -536,7 +640,9 @@ def admin_home(
         {
             "admin_page": admin_page,
             "current_user": current_user,
-            "active_tab": tab if tab in {"overview", "settings", "clients"} else "overview",
+            "active_tab": tab if tab in {"overview", "settings", "clients", "access"} else "overview",
+            "client_scope": client_scope if client_scope in {"all", "without_interfaces"} else "all",
+            "access_view": access_view if access_view in {"dated", "no_expiry"} else "dated",
             "filter_scope": filter_scope if filter_scope in {"all", "global", "user"} else "all",
             "settings_view": settings_view if settings_view in {"basic", "logs", "updates", "backups", "shared_peers", "filters", "block_filters"} else "basic",
             "exclusion_filters_enabled": admin_page.settings.exclusion_filters_enabled,
@@ -545,16 +651,110 @@ def admin_home(
             "interface_tic_server_id": interface_tic_server_id,
             "backups_page": get_backups_page(db, current_user) if settings_view == "backups" else None,
             "shared_peers_page": get_shared_peer_links_page(db, current_user) if settings_view == "shared_peers" else None,
-            "has_problem_jobs": has_problem_panel_jobs(db),
+            **admin_chrome_context(db),
         },
     )
+
+
+@router.get("/admin/registration-links", response_class=HTMLResponse)
+def admin_registration_links(
+    request: Request,
+    created_link_id: int | None = Query(default=None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    try:
+        require_admin(current_user)
+        page = get_registration_links_page(
+            db,
+            current_user,
+            base_url=str(request.base_url),
+            created_link_id=created_link_id,
+        )
+    except (EntityNotFoundError, InvalidInputError, PermissionDeniedError) as exc:
+        raise_service_http_error(exc)
+    return templates.TemplateResponse(
+        request,
+        "admin_registration_links.html",
+        {
+            "registration_links_page": page,
+            "current_user": current_user,
+            **admin_chrome_context(db),
+        },
+    )
+
+
+@router.get("/admin/updates", response_class=HTMLResponse)
+def admin_updates(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    try:
+        updates_page = get_updates_page_data(db, current_user)
+    except (EntityNotFoundError, InvalidInputError, PermissionDeniedError) as exc:
+        raise_service_http_error(exc)
+    return templates.TemplateResponse(
+        request,
+        "admin_updates.html",
+        {
+            "updates_page": updates_page,
+            "current_user": current_user,
+            **admin_chrome_context(db),
+        },
+    )
+
+
+@router.post("/admin/registration-links")
+def create_admin_registration_link(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    try:
+        link = generate_registration_link(db, current_user, str(request.base_url))
+    except (EntityNotFoundError, InvalidInputError, PermissionDeniedError) as exc:
+        raise_service_http_error(exc)
+    return RedirectResponse(
+        url=f"/admin/registration-links?created_link_id={link.id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/admin/registration-links/revoke-unused")
+def revoke_unused_admin_registration_links(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    try:
+        revoke_unused_registration_links(db, current_user)
+    except (EntityNotFoundError, InvalidInputError, PermissionDeniedError) as exc:
+        raise_service_http_error(exc)
+    return RedirectResponse(url="/admin/registration-links", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.post("/admin/registration-links/{link_id}/comment")
+async def update_admin_registration_link_comment(
+    link_id: int,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    form_data = await request.form()
+    try:
+        update_registration_link_comment(db, current_user, link_id, str(form_data.get("comment", "")))
+    except (EntityNotFoundError, InvalidInputError, PermissionDeniedError) as exc:
+        raise_service_http_error(exc)
+    return RedirectResponse(url="/admin/registration-links", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.get("/admin/servers", response_class=HTMLResponse)
 def admin_servers(
     request: Request,
+    view: str = Query(default="servers"),
     bucket: str = Query(default="active"),
     server_type: str = Query(default="all"),
+    location: str = Query(default=""),
     sort: str = Query(default="load_desc"),
     selected_server_id: int | None = Query(default=None),
     selected_bootstrap_task_id: int | None = Query(default=None),
@@ -566,8 +766,10 @@ def admin_servers(
         servers_page = get_servers_page_data(
             db,
             current_user,
+            view=view,
             bucket=bucket,
             server_type=server_type,
+            location=location,
             sort=sort,
             selected_server_id=selected_server_id,
             selected_bootstrap_task_id=selected_bootstrap_task_id,
@@ -581,7 +783,7 @@ def admin_servers(
         {
             "servers_page": servers_page,
             "current_user": current_user,
-            "has_problem_jobs": has_problem_panel_jobs(db),
+            **admin_chrome_context(db),
         },
     )
 
@@ -619,7 +821,7 @@ def admin_logs(
         {
             "logs_page": logs_page,
             "current_user": current_user,
-            "has_problem_jobs": has_problem_panel_jobs(db),
+            **admin_chrome_context(db),
         },
     )
 
@@ -647,7 +849,7 @@ def admin_diagnostics(
         {
             "diagnostics_page": diagnostics_page,
             "current_user": current_user,
-            "has_problem_jobs": has_problem_panel_jobs(db),
+            **admin_chrome_context(db),
         },
     )
 
@@ -668,7 +870,7 @@ def run_admin_diagnostics(
         {
             "diagnostics_page": diagnostics_page,
             "current_user": current_user,
-            "has_problem_jobs": has_problem_panel_jobs(db),
+            **admin_chrome_context(db),
         },
     )
 
@@ -708,7 +910,7 @@ def repair_admin_tak_tunnel_pair(
         {
             "diagnostics_page": diagnostics_page,
             "current_user": current_user,
-            "has_problem_jobs": has_problem_panel_jobs(db),
+            **admin_chrome_context(db),
         },
     )
 
@@ -744,7 +946,7 @@ def clear_admin_tak_tunnel_backoff(
         {
             "diagnostics_page": diagnostics_page,
             "current_user": current_user,
-            "has_problem_jobs": has_problem_panel_jobs(db),
+            **admin_chrome_context(db),
         },
     )
 
@@ -780,7 +982,7 @@ def rotate_admin_tak_tunnel_pair(
         {
             "diagnostics_page": diagnostics_page,
             "current_user": current_user,
-            "has_problem_jobs": has_problem_panel_jobs(db),
+            **admin_chrome_context(db),
         },
     )
 
@@ -789,6 +991,7 @@ def rotate_admin_tak_tunnel_pair(
 def admin_agent_contract(
     request: Request,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ) -> HTMLResponse:
     try:
         contract_page = get_agent_contract_page(current_user)
@@ -800,7 +1003,7 @@ def admin_agent_contract(
         {
             "contract_page": contract_page,
             "current_user": current_user,
-            "has_problem_jobs": False,
+            **admin_chrome_context(db),
         },
     )
 
@@ -841,6 +1044,7 @@ def admin_jobs(
             "jobs_page": jobs_page,
             "current_user": current_user,
             "has_problem_jobs": jobs_page.has_problem_jobs,
+            "has_available_updates": has_available_updates(db),
         },
     )
 
