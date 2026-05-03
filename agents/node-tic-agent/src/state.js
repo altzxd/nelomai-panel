@@ -2,6 +2,7 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
+const childProcess = require("node:child_process");
 const { buildBootstrapPlan, bootstrapExecutionMode, executeBootstrapPlan } = require("./bootstrap");
 const {
   buildCanonicalAmneziaConfig,
@@ -10,6 +11,38 @@ const {
   buildLegacyAmneziaConfig
 } = require("./amnezia_adapter");
 const { randomBase64, buildTakTunnelClientPayload } = require("./render");
+
+function generateTunnelKeyPair() {
+  const candidates = ["awg", "wg"];
+  for (const command of candidates) {
+    const privateCompleted = childProcess.spawnSync(command, ["genkey"], {
+      encoding: "utf8"
+    });
+    if (privateCompleted.status !== 0) {
+      continue;
+    }
+    const privateKey = String(privateCompleted.stdout || "").trim();
+    if (!privateKey) {
+      continue;
+    }
+    const publicCompleted = childProcess.spawnSync(command, ["pubkey"], {
+      input: `${privateKey}\n`,
+      encoding: "utf8"
+    });
+    if (publicCompleted.status !== 0) {
+      continue;
+    }
+    const publicKey = String(publicCompleted.stdout || "").trim();
+    if (!publicKey) {
+      continue;
+    }
+    return {
+      private_key: privateKey,
+      public_key: publicKey,
+    };
+  }
+  throw new Error("Unable to generate tunnel key pair with awg or wg");
+}
 
 function deployedStateRoot() {
   const nodeAgentRoot = path.resolve(__dirname, "..");
@@ -344,6 +377,8 @@ function buildTakTunnelPlan(state, payload) {
   const sequence = nextTunnelSequence(tunnels);
   const subnetOctet = Math.min(10 + sequence, 254);
   const listenPort = 42000 + sequence;
+  const serverKeyPair = generateTunnelKeyPair();
+  const clientKeyPair = generateTunnelKeyPair();
   const record = {
     id: nextSequence(tunnels),
     sequence,
@@ -360,10 +395,10 @@ function buildTakTunnelPlan(state, payload) {
     network_cidr: `172.27.${subnetOctet}.0/30`,
     tak_address_v4: `172.27.${subnetOctet}.1/30`,
     tic_address_v4: `172.27.${subnetOctet}.2/30`,
-    server_private_key: randomBase64(),
-    server_public_key: randomBase64(),
-    client_private_key: randomBase64(),
-    client_public_key: randomBase64(),
+    server_private_key: serverKeyPair.private_key,
+    server_public_key: serverKeyPair.public_key,
+    client_private_key: clientKeyPair.private_key,
+    client_public_key: clientKeyPair.public_key,
     ...tunnelAwgParameters(sequence),
     nat_mode: "masquerade",
     status: "planned",
@@ -385,13 +420,15 @@ function buildTakTunnelPlan(state, payload) {
 
 function rotateTakTunnelPlan(existing) {
   const revision = Math.max(1, Number(existing.artifact_revision) || 1) + 1;
+  const serverKeyPair = generateTunnelKeyPair();
+  const clientKeyPair = generateTunnelKeyPair();
   const rotated = {
     ...existing,
     artifact_revision: revision,
-    server_private_key: randomBase64(),
-    server_public_key: randomBase64(),
-    client_private_key: randomBase64(),
-    client_public_key: randomBase64(),
+    server_private_key: serverKeyPair.private_key,
+    server_public_key: serverKeyPair.public_key,
+    client_private_key: clientKeyPair.private_key,
+    client_public_key: clientKeyPair.public_key,
     ...tunnelAwgParameters((Number(existing.sequence) || 1) + revision),
     updated_at: new Date().toISOString()
   };
@@ -419,6 +456,7 @@ function provisionTakTunnelRecord(state, payload) {
     if (rotateArtifacts) {
       const rotated = rotateTakTunnelPlan(existing);
       Object.assign(existing, {
+        local_role: "tak",
         artifact_revision: rotated.artifact_revision,
         protocol: rotated.protocol,
         listen_port: rotated.listen_port,
@@ -449,6 +487,7 @@ function provisionTakTunnelRecord(state, payload) {
         amnezia_config: buildAmneziaConfig(existing)
       };
     }
+    existing.local_role = "tak";
     existing.status = "provisioned";
     touch(existing);
     saveState(state);
@@ -467,6 +506,7 @@ function provisionTakTunnelRecord(state, payload) {
     id: plan.id,
     sequence: plan.sequence,
     tunnel_id: plan.tunnel_id,
+    local_role: "tak",
     artifact_revision: plan.artifact_revision,
     protocol: plan.protocol,
     tic_server_id: plan.tic_server_id,
@@ -950,6 +990,20 @@ function ensureInterfaceRecord(state, payload) {
   if (!Array.isArray(record.peers)) {
     record.peers = [];
   }
+  const interfacePeers = Array.isArray(interfacePayload.peers) ? interfacePayload.peers : [];
+  for (const peerPayload of interfacePeers) {
+    if (!peerPayload || typeof peerPayload !== "object") {
+      continue;
+    }
+    const peerRecord = ensurePeerRecord(record, peerPayload);
+    if (typeof peerPayload.is_enabled === "boolean") {
+      peerRecord.is_enabled = peerPayload.is_enabled;
+    }
+    if (typeof peerPayload.block_filters_enabled === "boolean") {
+      peerRecord.block_filters_enabled = peerPayload.block_filters_enabled;
+    }
+    touch(peerRecord);
+  }
   return record;
 }
 
@@ -1083,6 +1137,13 @@ function toggleInterfaceRecord(state, payload) {
   }
   const record = ensureInterfaceRecord(state, payload);
   record.is_enabled = targetState.is_enabled;
+  const peers = Array.isArray(record.peers) ? record.peers : [];
+  for (const peerRecord of peers) {
+    if (!peerRecord || typeof peerRecord !== "object") {
+      continue;
+    }
+    peerRecord.is_enabled = targetState.is_enabled;
+  }
   touch(record);
   saveState(state);
   return record;

@@ -86,6 +86,14 @@ function systemTunnelRoot() {
   return process.env.NELOMAI_AGENT_SYSTEM_TUNNEL_ROOT || "/etc/wireguard";
 }
 
+function systemTunnelQuickConfigRoot() {
+  const explicit = String(process.env.NELOMAI_AGENT_SYSTEM_TUNNEL_QUICK_ROOT || "").trim();
+  if (explicit) {
+    return explicit;
+  }
+  return "/etc/amnezia/amneziawg";
+}
+
 function systemTunnelName(tunnelRecord) {
   const sequence = String(Number(tunnelRecord.sequence) || 0).padStart(5, "0");
   const ticTail = String(Number(tunnelRecord.tic_server_id) || 0).slice(-3).padStart(3, "0");
@@ -95,6 +103,181 @@ function systemTunnelName(tunnelRecord) {
 
 function systemTunnelConfigPath(tunnelRecord) {
   return path.join(systemTunnelRoot(), `${systemTunnelName(tunnelRecord)}.conf`);
+}
+
+function systemTunnelQuickConfigPath(tunnelRecord) {
+  return path.join(systemTunnelQuickConfigRoot(), `${systemTunnelName(tunnelRecord)}.conf`);
+}
+
+function stripCidr(address) {
+  const raw = String(address || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const [host] = raw.split("/", 1);
+  return host || "";
+}
+
+function ipv4NetworkCidr(address) {
+  const raw = String(address || "").trim();
+  if (!raw.includes("/")) {
+    return "";
+  }
+  const [host, prefixText] = raw.split("/", 2);
+  const octets = host.split(".").map((value) => Number(value));
+  const prefix = Number(prefixText);
+  if (octets.length !== 4 || octets.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) {
+    return "";
+  }
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) {
+    return "";
+  }
+  const ip =
+    ((octets[0] << 24) >>> 0) |
+    ((octets[1] << 16) >>> 0) |
+    ((octets[2] << 8) >>> 0) |
+    (octets[3] >>> 0);
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+  const network = ip & mask;
+  const parts = [
+    (network >>> 24) & 0xff,
+    (network >>> 16) & 0xff,
+    (network >>> 8) & 0xff,
+    network & 0xff,
+  ];
+  return `${parts.join(".")}/${prefix}`;
+}
+
+function interfaceRouteTableId(interfaceRecord) {
+  const candidates = [
+    Number(String(interfaceRecord.agent_interface_id || "").replace(/\D+/g, "").slice(-4)),
+    Number(interfaceRecord.panel_interface_id),
+    Number(interfaceRecord.listen_port),
+  ];
+  const suffix = candidates.find((value) => Number.isInteger(value) && value > 0) || 1;
+  return 20000 + Math.min(suffix, 9999);
+}
+
+function interfaceRouteRulePriority(interfaceRecord) {
+  return 10000 + Math.min(interfaceRouteTableId(interfaceRecord), 19999);
+}
+
+function interfaceRouteMark(interfaceRecord) {
+  return interfaceRouteTableId(interfaceRecord);
+}
+
+function readTunnelRecord(tunnelDirectoryPath) {
+  const metaPath = path.join(tunnelDirectoryPath, "tunnel.json");
+  if (!fs.existsSync(metaPath) || !fs.statSync(metaPath).isFile()) {
+    return null;
+  }
+  try {
+    return JSON.parse(fs.readFileSync(metaPath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function findTunnelRecordForInterface(interfaceRecord) {
+  const ticServerId = Number(interfaceRecord.tic_server_id);
+  const takServerId = Number(interfaceRecord.tak_server_id);
+  if (!Number.isInteger(ticServerId) || ticServerId <= 0 || !Number.isInteger(takServerId) || takServerId <= 0) {
+    return null;
+  }
+  const root = tunnelsRoot();
+  if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
+    return null;
+  }
+  const entries = fs.readdirSync(root, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const record = readTunnelRecord(path.join(root, entry.name));
+    if (!record || typeof record !== "object") {
+      continue;
+    }
+    if (Number(record.tic_server_id) !== ticServerId || Number(record.tak_server_id) !== takServerId) {
+      continue;
+    }
+    return record;
+  }
+  return null;
+}
+
+function buildInterfaceForwardingCommands(interfaceRecord) {
+  const interfaceName = systemInterfaceName(interfaceRecord);
+  return [
+    "sysctl -w net.ipv4.ip_forward=1 >/dev/null",
+    `iptables -C FORWARD -i ${interfaceName} -j ACCEPT 2>/dev/null || iptables -A FORWARD -i ${interfaceName} -j ACCEPT`,
+    `iptables -C FORWARD -o ${interfaceName} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -A FORWARD -o ${interfaceName} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT`,
+  ];
+}
+
+function buildStandaloneNetworkingCommands(interfaceRecord) {
+  const subnet = ipv4NetworkCidr(interfaceRecord.address_v4);
+  if (!subnet) {
+    return [];
+  }
+  const tableId = interfaceRouteTableId(interfaceRecord);
+  const rulePriority = interfaceRouteRulePriority(interfaceRecord);
+  const mark = interfaceRouteMark(interfaceRecord);
+  const interfaceName = systemInterfaceName(interfaceRecord);
+  return [
+    ...buildInterfaceForwardingCommands(interfaceRecord),
+    `DEFAULT_IF=$(ip route show default | awk 'NR==1 {print $5}'); [ -n "$DEFAULT_IF" ] && (iptables -t nat -C POSTROUTING -s ${subnet} -o "$DEFAULT_IF" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s ${subnet} -o "$DEFAULT_IF" -j MASQUERADE)`,
+    `iptables -t mangle -D PREROUTING -i ${interfaceName} -j MARK --set-mark ${mark} 2>/dev/null || true`,
+    `ip rule del fwmark ${mark} table ${tableId} priority ${rulePriority} 2>/dev/null || true`,
+    `ip rule del from ${subnet} table ${tableId} 2>/dev/null || true`,
+    `ip route flush table ${tableId} 2>/dev/null || true`,
+  ];
+}
+
+function buildViaTakNetworkingCommands(interfaceRecord) {
+  const subnet = ipv4NetworkCidr(interfaceRecord.address_v4);
+  const tunnelRecord = findTunnelRecordForInterface(interfaceRecord);
+  if (!subnet || !tunnelRecord) {
+    return buildInterfaceForwardingCommands(interfaceRecord);
+  }
+  const tableId = interfaceRouteTableId(interfaceRecord);
+  const rulePriority = interfaceRouteRulePriority(interfaceRecord);
+  const mark = interfaceRouteMark(interfaceRecord);
+  const tunnelName = systemTunnelName(tunnelRecord);
+  const interfaceName = systemInterfaceName(interfaceRecord);
+  const takGateway = stripCidr(tunnelRecord.tak_address_v4);
+  return [
+    ...buildInterfaceForwardingCommands(interfaceRecord),
+    `iptables -C FORWARD -o ${tunnelName} -j ACCEPT 2>/dev/null || iptables -A FORWARD -o ${tunnelName} -j ACCEPT`,
+    `iptables -C FORWARD -i ${tunnelName} -j ACCEPT 2>/dev/null || iptables -A FORWARD -i ${tunnelName} -j ACCEPT`,
+    `DEFAULT_IF=$(ip route show default | awk 'NR==1 {print $5}'); [ -n "$DEFAULT_IF" ] && iptables -t nat -D POSTROUTING -s ${subnet} -o "$DEFAULT_IF" -j MASQUERADE 2>/dev/null || true`,
+    `iptables -t nat -C POSTROUTING -s ${subnet} -o ${tunnelName} -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s ${subnet} -o ${tunnelName} -j MASQUERADE`,
+    `iptables -t mangle -C PREROUTING -i ${interfaceName} -j MARK --set-mark ${mark} 2>/dev/null || iptables -t mangle -A PREROUTING -i ${interfaceName} -j MARK --set-mark ${mark}`,
+    `ip route replace table ${tableId} default via ${takGateway} dev ${tunnelName}`,
+    `ip rule add fwmark ${mark} table ${tableId} priority ${rulePriority} 2>/dev/null || true`,
+    `ip rule add from ${subnet} table ${tableId} priority ${rulePriority} 2>/dev/null || true`,
+  ];
+}
+
+function buildInterfaceNetworkingCommands(interfaceRecord) {
+  const routeMode = String(interfaceRecord.route_mode || "standalone").trim();
+  if (routeMode === "via_tak" && Number(interfaceRecord.tak_server_id) > 0) {
+    return buildViaTakNetworkingCommands(interfaceRecord);
+  }
+  return buildStandaloneNetworkingCommands(interfaceRecord);
+}
+
+function buildTunnelServerNetworkingCommands(tunnelRecord) {
+  const tunnelName = systemTunnelName(tunnelRecord);
+  const tunnelNetwork = String(tunnelRecord.network_cidr || "").trim();
+  if (!tunnelNetwork) {
+    return [];
+  }
+  return [
+    "sysctl -w net.ipv4.ip_forward=1 >/dev/null",
+    `iptables -C FORWARD -i ${tunnelName} -j ACCEPT 2>/dev/null || iptables -A FORWARD -i ${tunnelName} -j ACCEPT`,
+    `iptables -C FORWARD -o ${tunnelName} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -A FORWARD -o ${tunnelName} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT`,
+    `DEFAULT_IF=$(ip route show default | awk 'NR==1 {print $5}'); [ -n "$DEFAULT_IF" ] && (iptables -t nat -C POSTROUTING -s ${tunnelNetwork} -o "$DEFAULT_IF" -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s ${tunnelNetwork} -o "$DEFAULT_IF" -j MASQUERADE)`,
+  ];
 }
 
 function resolveTunnelQuickCommand() {
@@ -164,7 +347,7 @@ function syncAllPeerArtifacts(interfaceRecord) {
   syncInterfaceArtifacts(interfaceRecord);
   const peerRecords = Array.isArray(interfaceRecord.peers) ? interfaceRecord.peers : [];
   for (const peerRecord of peerRecords) {
-    if (!peerRecord || typeof peerRecord !== "object" || peerRecord.config_exists === false) {
+    if (!peerRecord || typeof peerRecord !== "object") {
       continue;
     }
     writeTextFile(peerConfigPath(interfaceRecord, peerRecord), renderPeerConfig(interfaceRecord, peerRecord));
@@ -332,11 +515,13 @@ function ensureSystemEnvironment() {
   };
 }
 
-function ensureSystemKeyMaterial(interfaceRecord, options = {}) {
-  if (executionMode() !== "system") {
+function ensureWireGuardKeyMaterial(interfaceRecord, options = {}) {
+  if (!commandExists("wg")) {
     return false;
   }
-  ensureSystemEnvironment();
+  if (executionMode() === "system") {
+    ensureSystemEnvironment();
+  }
   let changed = false;
   const rotatePeerSlots = new Set(
     Array.isArray(options.rotate_peer_slots)
@@ -421,14 +606,153 @@ function inspectRuntimeEnvironment() {
     }
   ];
 
+  const live_interfaces = mode === "system" && linux && wg ? inspectLiveInterfaces() : [];
+
   return {
     mode,
     runtime_root,
     wireguard_root,
     peers_root,
     ready: checks.every((item) => item.ok),
-    checks
+    checks,
+    live_interfaces
   };
+}
+
+function parseWgDump(output) {
+  const lines = String(output || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (!lines.length) {
+    return null;
+  }
+  const [interfaceLine, ...peerLines] = lines;
+  const interfaceParts = interfaceLine.split(/\t+/);
+  const interfaceData = {
+    private_key: interfaceParts[0] || "",
+    public_key: interfaceParts[1] || "",
+    listen_port: Number(interfaceParts[2]) || 0,
+    fwmark: interfaceParts[3] || "",
+    peers: []
+  };
+  for (const line of peerLines) {
+    const parts = line.split(/\t+/);
+    if (!parts.length || !parts[0]) {
+      continue;
+    }
+    const latestHandshake = Number(parts[4]) || 0;
+    interfaceData.peers.push({
+      public_key: parts[0] || "",
+      preshared_key: parts[1] || "",
+      endpoint: parts[2] || "",
+      allowed_ips: parts[3] || "",
+      latest_handshake_unix: latestHandshake,
+      latest_handshake_at: latestHandshake > 0 ? new Date(latestHandshake * 1000).toISOString() : null,
+      transfer_rx_bytes: Number(parts[5]) || 0,
+      transfer_tx_bytes: Number(parts[6]) || 0,
+      persistent_keepalive: Number(parts[7]) || 0
+    });
+  }
+  return interfaceData;
+}
+
+function inspectLiveInterface(interfaceRecord) {
+  const interfaceName = systemInterfaceName(interfaceRecord);
+  const statusCompleted = childProcess.spawnSync("bash", ["-lc", `ip link show dev ${interfaceName}`], {
+    encoding: "utf8"
+  });
+  const peerRecords = Array.isArray(interfaceRecord.peers) ? interfaceRecord.peers : [];
+  const peerByPublicKey = new Map();
+  for (const peerRecord of peerRecords) {
+    const key = String(peerRecord && peerRecord.public_key || "").trim();
+    if (key) {
+      peerByPublicKey.set(key, peerRecord);
+    }
+  }
+  const snapshot = {
+    agent_interface_id: String(interfaceRecord.agent_interface_id || "").trim() || null,
+    system_interface_name: interfaceName,
+    is_up: statusCompleted.status === 0,
+    peers: []
+  };
+  if (statusCompleted.status !== 0) {
+    for (const peerRecord of peerRecords) {
+      snapshot.peers.push({
+        slot: Number(peerRecord.slot) || 0,
+        public_key: String(peerRecord.public_key || "").trim() || null,
+        latest_handshake_at: null,
+        transfer_rx_bytes: null,
+        transfer_tx_bytes: null
+      });
+    }
+    return snapshot;
+  }
+  const dumpCompleted = childProcess.spawnSync("wg", ["show", interfaceName, "dump"], {
+    encoding: "utf8"
+  });
+  if (dumpCompleted.status !== 0) {
+    return snapshot;
+  }
+  const dump = parseWgDump(dumpCompleted.stdout);
+  if (!dump) {
+    return snapshot;
+  }
+  for (const peerSnapshot of dump.peers) {
+    const peerRecord = peerByPublicKey.get(String(peerSnapshot.public_key || "").trim());
+    snapshot.peers.push({
+      slot: peerRecord ? Number(peerRecord.slot) || 0 : 0,
+      public_key: String(peerSnapshot.public_key || "").trim() || null,
+      latest_handshake_at: peerSnapshot.latest_handshake_at,
+      transfer_rx_bytes: Number.isFinite(peerSnapshot.transfer_rx_bytes) ? peerSnapshot.transfer_rx_bytes : null,
+      transfer_tx_bytes: Number.isFinite(peerSnapshot.transfer_tx_bytes) ? peerSnapshot.transfer_tx_bytes : null
+    });
+  }
+  for (const peerRecord of peerRecords) {
+    const key = String(peerRecord.public_key || "").trim();
+    if (!key) {
+      continue;
+    }
+    const exists = snapshot.peers.some((item) => item.public_key === key);
+    if (!exists) {
+      snapshot.peers.push({
+        slot: Number(peerRecord.slot) || 0,
+        public_key: key,
+        latest_handshake_at: null,
+        transfer_rx_bytes: null,
+        transfer_tx_bytes: null
+      });
+    }
+  }
+  return snapshot;
+}
+
+function inspectLiveInterfaces() {
+  const root = path.join(runtimeRoot(), "interfaces");
+  if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
+    return [];
+  }
+  const entries = fs.readdirSync(root, { withFileTypes: true });
+  const snapshots = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const metaPath = path.join(root, entry.name, "interface.json");
+    if (!fs.existsSync(metaPath) || !fs.statSync(metaPath).isFile()) {
+      continue;
+    }
+    try {
+      const interfaceRecord = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+      if (!interfaceRecord || typeof interfaceRecord !== "object") {
+        continue;
+      }
+      snapshots.push(inspectLiveInterface(interfaceRecord));
+    } catch {
+      continue;
+    }
+  }
+  return snapshots;
 }
 
 function buildCreateInterfaceCommands(interfaceRecord) {
@@ -443,7 +767,8 @@ function buildCreateInterfaceCommands(interfaceRecord) {
     `install -d -m 700 ${systemPeerDir}`,
     `install -m 600 ${runtimeConfigPath} ${systemConfigPath}`,
     `if [ -d "${runtimePeerDir}" ]; then find "${runtimePeerDir}" -maxdepth 1 -type f -name '*.conf' -exec install -m 600 {} "${systemPeerDir}/" \\; ; fi`,
-    `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${interfaceName}) && ip link set up dev ${interfaceName}; else wg-quick up ${interfaceName}; fi`
+    `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${interfaceName}) && ip link set up dev ${interfaceName}; else wg-quick up ${interfaceName}; fi`,
+    ...buildInterfaceNetworkingCommands(interfaceRecord),
   ];
 }
 
@@ -461,7 +786,8 @@ function buildToggleInterfaceCommands(interfaceRecord) {
       `install -d -m 700 ${systemPeerDir}`,
       `install -m 600 ${runtimeConfigPath} ${systemConfigPath}`,
       `if [ -d "${runtimePeerDir}" ]; then find "${runtimePeerDir}" -maxdepth 1 -type f -name '*.conf' -exec install -m 600 {} "${systemPeerDir}/" \\; ; fi`,
-      `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${interfaceName}) && ip link set up dev ${interfaceName}; else wg-quick up ${interfaceName}; fi`
+      `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${interfaceName}) && ip link set up dev ${interfaceName}; else wg-quick up ${interfaceName}; fi`,
+      ...buildInterfaceNetworkingCommands(interfaceRecord),
     ];
   }
 
@@ -484,7 +810,8 @@ function buildTogglePeerCommands(interfaceRecord, peerRecord) {
       `install -d -m 700 ${systemPeerDir}`,
       `install -m 600 ${runtimeConfigPath} ${systemConfigPath}`,
       `install -m 600 ${runtimePeerPath} ${systemPeerPath}`,
-      `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${interfaceName}) && ip link set up dev ${interfaceName}; fi`
+      `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${interfaceName}) && ip link set up dev ${interfaceName}; fi`,
+      ...buildInterfaceNetworkingCommands(interfaceRecord),
     ];
   }
 
@@ -510,6 +837,7 @@ function buildRefreshInterfaceCommands(interfaceRecord) {
   ];
   if (interfaceRecord.is_enabled) {
     commands.push(`if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${interfaceName}) && ip link set up dev ${interfaceName}; else wg-quick up ${interfaceName}; fi`);
+    commands.push(...buildInterfaceNetworkingCommands(interfaceRecord));
   }
   return commands;
 }
@@ -525,7 +853,8 @@ function buildRecreatePeerCommands(interfaceRecord, peerRecord) {
     `install -d -m 700 ${systemPeerDir}`,
     `install -m 600 ${runtimeConfigPath} ${systemConfigPath}`,
     `install -m 600 ${peerConfigPath(interfaceRecord, peerRecord)} ${systemPeerConfigPath(interfaceRecord, peerRecord)}`,
-    `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${interfaceName}) && ip link set up dev ${interfaceName}; fi`
+    `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${interfaceName}) && ip link set up dev ${interfaceName}; fi`,
+    ...buildInterfaceNetworkingCommands(interfaceRecord),
   ];
 }
 
@@ -536,7 +865,8 @@ function buildDeletePeerCommands(interfaceRecord, peerRecord) {
   return [
     `rm -f ${systemPeerConfigPath(interfaceRecord, peerRecord)}`,
     `install -m 600 ${runtimeConfigPath} ${systemConfigPath}`,
-    `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${interfaceName}) && ip link set up dev ${interfaceName}; fi`
+    `if ip link show dev ${interfaceName} >/dev/null 2>&1; then wg syncconf ${interfaceName} <(wg-quick strip ${interfaceName}) && ip link set up dev ${interfaceName}; fi`,
+    ...buildInterfaceNetworkingCommands(interfaceRecord),
   ];
 }
 
@@ -550,6 +880,7 @@ function buildAttachTunnelCommands(tunnelRecord) {
   }
   const runtimeConfigPath = tunnelClientConfigPath(tunnelRecord);
   const systemConfigPath = systemTunnelConfigPath(tunnelRecord);
+  const quickConfigPath = systemTunnelQuickConfigPath(tunnelRecord);
   const tunnelName = systemTunnelName(tunnelRecord);
   const userspaceImplementation = resolveTunnelUserspaceImplementation();
   const quickPrefix = userspaceImplementation
@@ -557,7 +888,9 @@ function buildAttachTunnelCommands(tunnelRecord) {
     : "";
   return [
     `install -d -m 700 ${systemTunnelRoot()}`,
+    `install -d -m 700 ${systemTunnelQuickConfigRoot()}`,
     `install -m 600 ${runtimeConfigPath} ${systemConfigPath}`,
+    `install -m 600 ${runtimeConfigPath} ${quickConfigPath}`,
     `if ip link show dev ${tunnelName} >/dev/null 2>&1; then ${quickPrefix}${quickCommand} down ${systemConfigPath} || true; ${quickPrefix}${quickCommand} up ${systemConfigPath}; else ${quickPrefix}${quickCommand} up ${systemConfigPath}; fi`
   ];
 }
@@ -572,11 +905,15 @@ function buildProvisionTunnelCommands(tunnelRecord) {
   }
   const runtimeConfigPath = tunnelServerConfigPath(tunnelRecord);
   const systemConfigPath = systemTunnelConfigPath(tunnelRecord);
+  const quickConfigPath = systemTunnelQuickConfigPath(tunnelRecord);
   const tunnelName = systemTunnelName(tunnelRecord);
   return [
     `install -d -m 700 ${systemTunnelRoot()}`,
+    `install -d -m 700 ${systemTunnelQuickConfigRoot()}`,
     `install -m 600 ${runtimeConfigPath} ${systemConfigPath}`,
-    `if ip link show dev ${tunnelName} >/dev/null 2>&1; then ${quickCommand} down ${systemConfigPath} || true; ${quickCommand} up ${systemConfigPath}; else ${quickCommand} up ${systemConfigPath}; fi`
+    `install -m 600 ${runtimeConfigPath} ${quickConfigPath}`,
+    `if ip link show dev ${tunnelName} >/dev/null 2>&1; then ${quickCommand} down ${systemConfigPath} || true; ${quickCommand} up ${systemConfigPath}; else ${quickCommand} up ${systemConfigPath}; fi`,
+    ...buildTunnelServerNetworkingCommands(tunnelRecord),
   ];
 }
 
@@ -589,6 +926,7 @@ function buildDetachTunnelCommands(tunnelRecord) {
     throw new Error("System tunnel execution requires awg-quick, amneziawg-quick, or wg-quick in PATH");
   }
   const systemConfigPath = systemTunnelConfigPath(tunnelRecord);
+  const quickConfigPath = systemTunnelQuickConfigPath(tunnelRecord);
   const tunnelName = systemTunnelName(tunnelRecord);
   const userspaceImplementation = resolveTunnelUserspaceImplementation();
   const quickPrefix = userspaceImplementation
@@ -597,7 +935,8 @@ function buildDetachTunnelCommands(tunnelRecord) {
   return [
     `if ip link show dev ${tunnelName} >/dev/null 2>&1; then ${quickPrefix}${quickCommand} down ${systemConfigPath} || true; fi`,
     `if ip link show dev ${tunnelName} >/dev/null 2>&1; then ip link delete dev ${tunnelName} || true; fi`,
-    `rm -f ${systemConfigPath}`
+    `rm -f ${systemConfigPath}`,
+    `rm -f ${quickConfigPath}`
   ];
 }
 
@@ -627,7 +966,7 @@ function maybeRunSystemCommands(commands) {
 }
 
 module.exports = {
-  ensureSystemKeyMaterial,
+  ensureWireGuardKeyMaterial,
   ensureSystemEnvironment,
   inspectRuntimeEnvironment,
   interfaceConfigPath,
@@ -658,5 +997,6 @@ module.exports = {
   systemInterfaceConfigPath,
   systemPeerConfigPath,
   systemTunnelConfigPath,
+  systemTunnelQuickConfigPath,
   systemTunnelName
 };
