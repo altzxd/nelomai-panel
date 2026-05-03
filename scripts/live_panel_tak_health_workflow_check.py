@@ -13,6 +13,7 @@ STEPS = [
     ("rotation", "scripts/live_panel_tak_rotation_check.py"),
     ("fallback", "scripts/live_panel_tak_fallback_check.py"),
     ("backoff", "scripts/live_panel_tak_backoff_check.py"),
+    ("clear backoff", "scripts/live_panel_tak_clear_backoff_check.py"),
     ("partial repair", "scripts/live_panel_tak_partial_repair_check.py"),
     ("manual repair", "scripts/live_panel_tak_manual_repair_check.py"),
     ("tak switch", "scripts/live_panel_tak_switch_check.py"),

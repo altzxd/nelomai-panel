@@ -5876,7 +5876,6 @@ def clear_tak_tunnel_backoff(db: Session, actor: User, *, tic_server_id: int, ta
         commit=False,
     )
     db.commit()
-    _reconcile_tak_tunnel_routes(db)
 
 
 def get_server_bootstrap_task(db: Session, task_id: int) -> ServerBootstrapTask:
