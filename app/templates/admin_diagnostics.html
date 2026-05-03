@@ -100,6 +100,11 @@
                     <input type="hidden" name="focused_tak_server_id" value="{{ request.query_params.get('focused_tak_server_id', '') }}">
                     <button type="submit" class="ghost-button small">Ротировать артефакты</button>
                 </form>
+                <form method="post" action="/admin/diagnostics/tak-tunnels/clear-backoff">
+                    <input type="hidden" name="focused_tic_server_id" value="{{ request.query_params.get('focused_tic_server_id', '') }}">
+                    <input type="hidden" name="focused_tak_server_id" value="{{ request.query_params.get('focused_tak_server_id', '') }}">
+                    <button type="submit" class="ghost-button small">Снять backoff</button>
+                </form>
                 <form method="post" action="/admin/diagnostics/tak-tunnels/repair">
                     <input type="hidden" name="focused_tic_server_id" value="{{ request.query_params.get('focused_tic_server_id', '') }}">
                     <input type="hidden" name="focused_tak_server_id" value="{{ request.query_params.get('focused_tak_server_id', '') }}">

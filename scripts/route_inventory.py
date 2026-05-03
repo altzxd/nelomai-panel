@@ -32,6 +32,7 @@ ROUTE_RULES = [
     RouteRule(("GET",), "/admin/jobs", "admin", "panel background jobs page"),
     RouteRule(("GET",), "/admin/diagnostics", "admin", "panel self-diagnostics page"),
     RouteRule(("POST",), "/admin/diagnostics/run", "admin", "run panel self-diagnostics"),
+    RouteRule(("POST",), "/admin/diagnostics/tak-tunnels/clear-backoff", "admin", "clear focused Tic/Tak tunnel backoff state from diagnostics"),
     RouteRule(("POST",), "/admin/diagnostics/tak-tunnels/repair", "admin/agent-backed", "repair focused Tic/Tak tunnel pair from diagnostics"),
     RouteRule(("POST",), "/admin/diagnostics/tak-tunnels/rotate", "admin/agent-backed", "rotate focused Tic/Tak tunnel artifacts from diagnostics"),
     RouteRule(("GET",), "/admin/agent-contract", "admin", "panel to Node-agent contract page"),

@@ -248,6 +248,7 @@ AUDIT_EVENT_TYPE_LABELS = {
     "tak_tunnels.auto_recovered": "Автовосстановление туннеля Tic/Tak",
     "tak_tunnels.artifacts_rotated": "Ротация артефактов туннеля Tic/Tak",
     "tak_tunnels.cooldown": "Автовосстановление туннеля Tic/Tak отложено по backoff",
+    "tak_tunnels.backoff_cleared": "Сброшен backoff туннеля Tic/Tak",
     "tak_tunnels.manual_repaired": "Ручное восстановление туннеля Tic/Tak",
     "updates.agent_apply": "Обновление агента",
     "updates.agent_check": "Проверка обновлений агента",
@@ -1479,6 +1480,23 @@ def _format_audit_details_ru(log: AuditLog) -> str | None:
             parts.append(f"интерфейсы: {', '.join(str(item) for item in interface_names[:6])}")
         return " | ".join(part for part in parts if part) or log.details
 
+    if log.event_type == "tak_tunnels.backoff_cleared" and isinstance(details, dict):
+        tic_server_name = str(details.get("tic_server_name") or "")
+        tak_server_name = str(details.get("tak_server_name") or "")
+        failure_count = int(details.get("failure_count_before_clear") or 0)
+        manual_attention = bool(details.get("manual_attention_before_clear"))
+        interface_names = details.get("interface_names") or []
+        parts = []
+        if tic_server_name or tak_server_name:
+            parts.append(f"пара: {tic_server_name} → {tak_server_name}".strip())
+        if failure_count:
+            parts.append(f"сброшено неудачных попыток: {failure_count}")
+        if manual_attention:
+            parts.append("сброшен manual attention")
+        if isinstance(interface_names, list) and interface_names:
+            parts.append(f"интерфейсы: {', '.join(str(item) for item in interface_names[:6])}")
+        return " | ".join(part for part in parts if part) or log.details
+
     if log.event_type == "tak_tunnels.manual_attention_required" and isinstance(details, dict):
         tic_server_name = str(details.get("tic_server_name") or "")
         tak_server_name = str(details.get("tak_server_name") or "")
@@ -1526,6 +1544,7 @@ def serialize_audit_log(log: AuditLog) -> AuditLogView:
     diagnostics_url = None
     if log.event_type in {
         "tak_tunnels.auto_recovered",
+        "tak_tunnels.backoff_cleared",
         "tak_tunnels.cooldown",
         "tak_tunnels.manual_attention_required",
         "tak_tunnels.manual_repaired",
@@ -5789,6 +5808,58 @@ def repair_tak_tunnel_pair(db: Session, actor: User, *, tic_server_id: int, tak_
                 "repair_strategy": repair_strategy,
                 "failure_count_before_repair": failure_count_before_repair,
                 "manual_attention_before_repair": manual_attention_before_repair,
+                "interface_names": sorted(
+                    interface.name
+                    for interface in db.execute(
+                        select(Interface).where(
+                            Interface.tic_server_id == tic_server.id,
+                            Interface.tak_server_id == tak_server.id,
+                            Interface.route_mode == RouteMode.VIA_TAK,
+                        )
+                    ).scalars().all()
+                ),
+            },
+            ensure_ascii=False,
+        ),
+        commit=False,
+    )
+    _reconcile_tak_tunnel_routes(db)
+
+
+def clear_tak_tunnel_backoff(db: Session, actor: User, *, tic_server_id: int, tak_server_id: int) -> None:
+    require_admin(actor)
+    tic_server = get_server_by_id(db, tic_server_id)
+    tak_server = get_server_by_id(db, tak_server_id)
+    if tic_server.server_type != ServerType.TIC:
+        raise EntityNotFoundError("Tic server not found")
+    if tak_server.server_type != ServerType.TAK:
+        raise EntityNotFoundError("Tak server not found")
+    repair_state = _load_tak_tunnel_repair_state(db)
+    pair_key = _tak_tunnel_pair_key(tic_server_id, tak_server_id)
+    pair_state = dict(repair_state.get(pair_key) or {})
+    failure_count_before_clear = int(pair_state.get("failure_count") or 0)
+    manual_attention_before_clear = bool(pair_state.get("manual_attention_required"))
+    cooldown_until_before_clear = str(pair_state.get("cooldown_until") or "")
+    if pair_key in repair_state:
+        repair_state.pop(pair_key, None)
+        _save_tak_tunnel_repair_state(db, repair_state)
+    write_audit_log(
+        db,
+        event_type="tak_tunnels.backoff_cleared",
+        severity="info",
+        message=f"Tak tunnel backoff cleared: tic={tic_server.name}, tak={tak_server.name}",
+        message_ru=f"Backoff туннеля Tic/Tak сброшен: {tic_server.name} → {tak_server.name}",
+        actor_user_id=actor.id,
+        server_id=tic_server.id,
+        details=json.dumps(
+            {
+                "tic_server_id": tic_server.id,
+                "tic_server_name": tic_server.name,
+                "tak_server_id": tak_server.id,
+                "tak_server_name": tak_server.name,
+                "failure_count_before_clear": failure_count_before_clear,
+                "manual_attention_before_clear": manual_attention_before_clear,
+                "cooldown_until_before_clear": cooldown_until_before_clear,
                 "interface_names": sorted(
                     interface.name
                     for interface in db.execute(

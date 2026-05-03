@@ -109,6 +109,7 @@ from app.services import (
     get_agent_contract_page,
     get_panel_jobs_page,
     get_panel_diagnostics_page,
+    clear_tak_tunnel_backoff,
     repair_tak_tunnel_pair,
     rotate_tak_tunnel_pair,
     get_server_bootstrap_task_view,
@@ -700,6 +701,42 @@ def repair_admin_tak_tunnel_pair(
     except InvalidInputError as exc:
         raise_service_http_error(exc)
     except ServerOperationUnavailableError as exc:
+        raise_service_http_error(exc)
+    return templates.TemplateResponse(
+        request,
+        "admin_diagnostics.html",
+        {
+            "diagnostics_page": diagnostics_page,
+            "current_user": current_user,
+            "has_problem_jobs": has_problem_panel_jobs(db),
+        },
+    )
+
+
+@router.post("/admin/diagnostics/tak-tunnels/clear-backoff", response_class=HTMLResponse)
+def clear_admin_tak_tunnel_backoff(
+    request: Request,
+    focused_tic_server_id: int = Form(...),
+    focused_tak_server_id: int = Form(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    try:
+        clear_tak_tunnel_backoff(
+            db,
+            current_user,
+            tic_server_id=focused_tic_server_id,
+            tak_server_id=focused_tak_server_id,
+        )
+        diagnostics_page = run_panel_diagnostics(
+            db,
+            current_user,
+            focused_tic_server_id=focused_tic_server_id,
+            focused_tak_server_id=focused_tak_server_id,
+        )
+    except PermissionDeniedError as exc:
+        raise_service_http_error(exc)
+    except EntityNotFoundError as exc:
         raise_service_http_error(exc)
     return templates.TemplateResponse(
         request,
