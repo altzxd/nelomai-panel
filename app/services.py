@@ -2320,6 +2320,12 @@ def run_panel_diagnostics(
         )
         tak_tunnel_action_links.append(
             DiagnosticsCheckView.ActionLinkView(
+                label="Логи cooldown",
+                url="/admin/logs?event_type=tak_tunnels.cooldown",
+            )
+        )
+        tak_tunnel_action_links.append(
+            DiagnosticsCheckView.ActionLinkView(
                 label="Логи ручного внимания",
                 url="/admin/logs?event_type=tak_tunnels.manual_attention_required",
             )
@@ -2430,6 +2436,7 @@ def run_panel_diagnostics(
                 details=pair_details,
                 server_url=f"/admin/servers?bucket=active&selected_server_id={focused_pair.tic_server.id}",
                 auto_recovered_logs_url=f"/admin/logs?event_type=tak_tunnels.auto_recovered&server_id={focused_pair.tic_server.id}",
+                cooldown_logs_url=f"/admin/logs?event_type=tak_tunnels.cooldown&server_id={focused_pair.tic_server.id}",
                 manual_attention_logs_url=f"/admin/logs?event_type=tak_tunnels.manual_attention_required&server_id={focused_pair.tic_server.id}",
                 manual_repair_logs_url=f"/admin/logs?event_type=tak_tunnels.manual_repaired&server_id={focused_pair.tic_server.id}",
             )

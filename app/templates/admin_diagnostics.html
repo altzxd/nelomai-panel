@@ -86,6 +86,9 @@
                 {% if diagnostics_page.focused_tak_tunnel.auto_recovered_logs_url %}
                 <a class="ghost-button small" href="{{ diagnostics_page.focused_tak_tunnel.auto_recovered_logs_url }}">Логи автовосстановления</a>
                 {% endif %}
+                {% if diagnostics_page.focused_tak_tunnel.cooldown_logs_url %}
+                <a class="ghost-button small" href="{{ diagnostics_page.focused_tak_tunnel.cooldown_logs_url }}">Логи cooldown</a>
+                {% endif %}
                 {% if diagnostics_page.focused_tak_tunnel.manual_attention_logs_url %}
                 <a class="ghost-button small" href="{{ diagnostics_page.focused_tak_tunnel.manual_attention_logs_url }}">Логи ручного внимания</a>
                 {% endif %}

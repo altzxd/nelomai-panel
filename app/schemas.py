@@ -290,6 +290,7 @@ class DiagnosticsFocusedTakTunnelView(BaseModel):
     details: list[str] = []
     server_url: str | None = None
     auto_recovered_logs_url: str | None = None
+    cooldown_logs_url: str | None = None
     manual_attention_logs_url: str | None = None
     manual_repair_logs_url: str | None = None
 
