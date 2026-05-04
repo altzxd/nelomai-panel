@@ -25,6 +25,10 @@
     <section class="settings-card">
         <div class="toolbar-row">
             <form method="post" action="/admin/registration-links">
+                <label class="checkbox-inline">
+                    <input type="checkbox" name="auto_create_interfaces" value="1">
+                    <span>Создать и добавить пользователю интерфейсы</span>
+                </label>
                 <button class="primary-button small" type="submit">Выдать ссылку регистрации</button>
             </form>
             <form method="post" action="/admin/registration-links/revoke-unused">
@@ -49,6 +53,7 @@
                 <dl class="client-metrics">
                     <div><dt>Создана</dt><dd>{{ link.created_at|datetime_moscow }}</dd></div>
                     <div><dt>Кем</dt><dd>{{ link.created_by_login or "неизвестно" }}</dd></div>
+                    <div><dt>Интерфейсы</dt><dd>{{ "Автоматически" if link.auto_create_interfaces else "Нет" }}</dd></div>
                 </dl>
                 <form class="registration-link-comment-form" method="post" action="/admin/registration-links/{{ link.id }}/comment">
                     <label>

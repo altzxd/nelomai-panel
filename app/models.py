@@ -242,6 +242,7 @@ class RegistrationLink(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     token_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     comment: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    auto_create_interfaces: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     used_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -860,6 +860,10 @@
                         <p class="muted-note">Одну ссылку можно использовать только один раз. Неиспользованные ссылки можно отозвать на отдельной странице.</p>
                         <div class="toolbar-row">
                             <form method="post" action="/admin/registration-links">
+                                <label class="checkbox-inline">
+                                    <input type="checkbox" name="auto_create_interfaces" value="1">
+                                    <span>Создать и добавить пользователю интерфейсы</span>
+                                </label>
                                 <button class="primary-button small" type="submit">Выдать ссылку регистрации</button>
                             </form>
                             <a class="ghost-button small" href="/admin/registration-links">Выданные ссылки</a>

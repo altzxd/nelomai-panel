@@ -889,13 +889,20 @@ def admin_updates(
 
 
 @router.post("/admin/registration-links")
-def create_admin_registration_link(
+async def create_admin_registration_link(
     request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Response:
     try:
-        link = generate_registration_link(db, current_user, str(request.base_url))
+        form_data = await request.form()
+        auto_create_interfaces = str(form_data.get("auto_create_interfaces", "")).strip().lower() in {"1", "true", "on", "yes"}
+        link = generate_registration_link(
+            db,
+            current_user,
+            str(request.base_url),
+            auto_create_interfaces=auto_create_interfaces,
+        )
     except (EntityNotFoundError, InvalidInputError, PermissionDeniedError) as exc:
         raise_service_http_error(exc)
     return RedirectResponse(

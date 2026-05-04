@@ -9,6 +9,7 @@ import os
 import re
 import secrets
 import shutil
+import string
 import time
 import zipfile
 import subprocess
@@ -4283,6 +4284,7 @@ def check_panel_updates(db: Session, actor: User) -> dict[str, object]:
             else f"Панель актуальна: текущая версия {current_version}, последняя {latest_version}."
         ),
         actor_user_id=actor.id,
+        details=f"auto_create_interfaces={1 if auto_create_interfaces else 0}",
     )
     _PANEL_UPDATE_CACHE["fetched_at"] = time.time()
     _PANEL_UPDATE_CACHE["value"] = dict(result)
@@ -8746,6 +8748,7 @@ def serialize_registration_link(link: RegistrationLink, base_url: str) -> Regist
         id=link.id,
         url=_registration_link_url(link.token_id, base_url),
         comment=link.comment,
+        auto_create_interfaces=bool(link.auto_create_interfaces),
         created_at=link.created_at,
         created_by_login=link.created_by_user.login if link.created_by_user else None,
         used_at=link.used_at,
@@ -8757,11 +8760,118 @@ def serialize_registration_link(link: RegistrationLink, base_url: str) -> Regist
     )
 
 
-def generate_registration_link(db: Session, actor: User, base_url: str) -> RegistrationLinkView:
+def _find_default_registration_servers(db: Session) -> tuple[Server, Server]:
+    tic_server = db.execute(
+        select(Server).where(Server.server_type == ServerType.TIC).order_by(Server.id.asc())
+    ).scalars().first()
+    if tic_server is None:
+        raise InvalidInputError("No Tic server is configured for automatic interface creation")
+    tak_server = db.execute(
+        select(Server).where(Server.server_type == ServerType.TAK).order_by(Server.id.asc())
+    ).scalars().first()
+    if tak_server is None:
+        raise InvalidInputError("No Tak server is configured for automatic interface creation")
+    return tic_server, tak_server
+
+
+def _interface_name_exists(db: Session, name: str) -> bool:
+    normalized = name.strip()
+    if not normalized:
+        return False
+    existing = db.execute(
+        select(Interface.id).where(func.lower(Interface.name) == normalized.lower())
+    ).scalar_one_or_none()
+    return existing is not None
+
+
+def _unique_interface_name_from_seed(db: Session, seed: str, *, mutable_length: int) -> str:
+    candidate = seed.strip()
+    if not candidate:
+        raise InvalidInputError("Interface name seed is empty")
+    if not _interface_name_exists(db, candidate):
+        return candidate
+    mutable_length = max(1, min(mutable_length, len(candidate)))
+    seen: set[str] = {candidate.lower()}
+    for _ in range(512):
+        position = secrets.randbelow(mutable_length)
+        replacement = secrets.choice(string.ascii_lowercase)
+        mutated = list(candidate)
+        mutated[position] = replacement
+        next_candidate = "".join(mutated)
+        lowered = next_candidate.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        if not _interface_name_exists(db, next_candidate):
+            return next_candidate
+    raise InvalidInputError("Unable to generate a unique interface name from login")
+
+
+def _build_auto_interface_names(db: Session, login: str) -> tuple[str, str]:
+    login_seed = login.strip().lower()
+    standalone_seed = login_seed[:8]
+    via_tak_prefix = login_seed[:5]
+    via_tak_seed = f"{via_tak_prefix}TAK"
+    return (
+        _unique_interface_name_from_seed(db, standalone_seed, mutable_length=len(standalone_seed)),
+        _unique_interface_name_from_seed(db, via_tak_seed, mutable_length=len(via_tak_prefix)),
+    )
+
+
+def _resolve_registration_actor(db: Session, link: RegistrationLink) -> User:
+    actor = link.created_by_user
+    if actor is not None and actor.role == UserRole.ADMIN:
+        return actor
+    actor = db.execute(
+        select(User).where(User.role == UserRole.ADMIN).order_by(User.id.asc())
+    ).scalars().first()
+    if actor is None:
+        raise InvalidInputError("No admin user is available for automatic interface creation")
+    return actor
+
+
+def _auto_create_registration_interfaces(db: Session, link: RegistrationLink, user: User) -> None:
+    if not link.auto_create_interfaces:
+        return
+    actor = _resolve_registration_actor(db, link)
+    tic_server, tak_server = _find_default_registration_servers(db)
+    standalone_name, via_tak_name = _build_auto_interface_names(db, user.login)
+    for name, tak_server_id in (
+        (standalone_name, None),
+        (via_tak_name, tak_server.id),
+    ):
+        allocation = prepare_interface_creation(
+            db,
+            actor,
+            InterfacePrepareRequest(
+                name=name,
+                tic_server_id=tic_server.id,
+                tak_server_id=tak_server_id,
+            ),
+        )
+        interface = create_interface_record(
+            db,
+            actor,
+            InterfaceCreate(
+                name=name,
+                tic_server_id=tic_server.id,
+                tak_server_id=tak_server_id,
+                listen_port=allocation.listen_port,
+                address_v4=allocation.address_v4,
+                peer_limit=5,
+            ),
+        )
+        assign_interface_to_user(db, actor, interface.id, user.id)
+
+
+def generate_registration_link(db: Session, actor: User, base_url: str, *, auto_create_interfaces: bool = False) -> RegistrationLinkView:
     require_admin(actor)
+    if auto_create_interfaces:
+        _find_default_registration_servers(db)
     link = RegistrationLink(
         token_id=secrets.token_urlsafe(24),
         comment=None,
+        auto_create_interfaces=auto_create_interfaces,
         created_by_user_id=actor.id,
         revoked_at=None,
         used_at=None,
@@ -8893,6 +9003,7 @@ def register_user_via_link(db: Session, token_id: str, payload: PublicRegistrati
     db.add(link)
     db.commit()
     db.refresh(user)
+    _auto_create_registration_interfaces(db, link, user)
     write_audit_log(
         db,
         event_type="registration_links.used",
@@ -8900,7 +9011,7 @@ def register_user_via_link(db: Session, token_id: str, payload: PublicRegistrati
         message=f"Registration link used for {user.login}.",
         message_ru=f"По ссылке регистрации создан аккаунт {user.login}.",
         target_user_id=user.id,
-        details=f"registration_link_id={link.id}",
+        details=f"registration_link_id={link.id};auto_create_interfaces={1 if link.auto_create_interfaces else 0}",
     )
     return user
 

@@ -177,6 +177,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("token_id", sa.String(length=64), nullable=False),
         sa.Column("comment", sa.String(length=255), nullable=True),
+        sa.Column("auto_create_interfaces", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("created_by_user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
         sa.Column("used_by_user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
         sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),

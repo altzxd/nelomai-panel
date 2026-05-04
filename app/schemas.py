@@ -859,6 +859,7 @@ class RegistrationLinkView(BaseModel):
     id: int
     url: str
     comment: str | None = None
+    auto_create_interfaces: bool = False
     created_at: datetime
     created_by_login: str | None = None
     used_at: datetime | None = None

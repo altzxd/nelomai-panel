@@ -171,6 +171,7 @@ def apply_legacy_runtime_schema_updates(engine: Engine) -> list[str]:
                     f"id {primary_key}, "
                     "token_id VARCHAR(64) NOT NULL UNIQUE, "
                     "comment VARCHAR(255), "
+                    "auto_create_interfaces BOOLEAN NOT NULL DEFAULT 0, "
                     "created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL, "
                     "used_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL, "
                     f"revoked_at {datetime_type}, "
@@ -188,6 +189,10 @@ def apply_legacy_runtime_schema_updates(engine: Engine) -> list[str]:
             with engine.begin() as connection:
                 connection.execute(text("ALTER TABLE registration_links ADD COLUMN comment VARCHAR(255)"))
             applied.append("registration_links.comment")
+        if "auto_create_interfaces" not in registration_link_columns:
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE registration_links ADD COLUMN auto_create_interfaces BOOLEAN NOT NULL DEFAULT 0"))
+            applied.append("registration_links.auto_create_interfaces")
 
     if "peer_download_links" not in table_names:
         with engine.begin() as connection:

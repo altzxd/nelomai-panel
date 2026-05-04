@@ -372,7 +372,9 @@
                         </div>
                     </form>
                     {% else %}
-                        {% for item in dashboard.resources %}
+                        {% set visible_resources = dashboard.resources | selectattr("value") | list %}
+                        {% if visible_resources %}
+                        {% for item in visible_resources %}
                         <article class="resource-row">
                             <div>
                                 <h3>{{ item.label }}</h3>
@@ -385,6 +387,13 @@
                             {% endif %}
                         </article>
                         {% endfor %}
+                        {% else %}
+                        <article class="resource-row">
+                            <div>
+                                <p>Администратор еще не заполнил поля, ожидайте.</p>
+                            </div>
+                        </article>
+                        {% endif %}
                     {% endif %}
                 </section>
             </div>
