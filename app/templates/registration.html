@@ -18,7 +18,10 @@
             </label>
             <label>
                 <span>Пароль</span>
-                <input type="password" name="password" required>
+                <div class="password-input-row">
+                    <input type="password" name="password" data-password-input required>
+                    <button type="button" class="ghost-button small password-toggle-button" data-password-toggle aria-label="Показать пароль">Показать</button>
+                </div>
                 <small class="form-hint">Минимум 4 знака, только английские буквы и цифры, чувствителен к регистру.</small>
             </label>
             <label>
@@ -65,8 +68,18 @@
   const formCard = document.querySelector("[data-registration-form-card]");
   const progressCard = document.querySelector("[data-registration-progress]");
   const progressText = document.querySelector("[data-registration-progress-text]");
+  const passwordInput = document.querySelector("[data-password-input]");
+  const passwordToggle = document.querySelector("[data-password-toggle]");
   if (!form || !formCard || !progressCard || !progressText) {
     return;
+  }
+  if (passwordInput && passwordToggle) {
+    passwordToggle.addEventListener("click", () => {
+      const reveal = passwordInput.type === "password";
+      passwordInput.type = reveal ? "text" : "password";
+      passwordToggle.textContent = reveal ? "Скрыть" : "Показать";
+      passwordToggle.setAttribute("aria-label", reveal ? "Скрыть пароль" : "Показать пароль");
+    });
   }
   const steps = [
     "Создаю аккаунт.",

@@ -2242,6 +2242,20 @@ textarea[disabled] {
 .switch input:checked + .slider { background: linear-gradient(135deg, #6ad5ad, #58b8ff); }
 .switch input:checked + .slider::before { transform: translateX(20px); }
 
+.password-input-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.password-input-row input {
+    flex: 1;
+}
+
+.password-toggle-button {
+    white-space: nowrap;
+}
+
 @media (max-width: 980px) {
     .app-shell { grid-template-columns: 1fr; }
     .sidebar { position: relative; top: 0; height: auto; }
