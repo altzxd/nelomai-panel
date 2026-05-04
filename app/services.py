@@ -8528,7 +8528,13 @@ def download_peer_config(db: Session, actor: User, peer_id: int) -> dict[str, ob
 
 def build_peer_qr_code(db: Session, actor: User, peer_id: int) -> dict[str, object]:
     payload = download_peer_config(db, actor, peer_id)
-    content = str(payload.get("content") or "").strip()
+    raw_content = payload.get("content")
+    if isinstance(raw_content, bytes):
+        content = raw_content.decode("utf-8", errors="strict").strip()
+    elif isinstance(raw_content, str):
+        content = raw_content.strip()
+    else:
+        content = ""
     if not content:
         raise InvalidInputError("Peer config is empty")
 
