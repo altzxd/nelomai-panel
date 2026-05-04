@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block body %}
 <main class="login-shell">
-    <section class="login-card registration-card">
+    <section class="login-card registration-card" data-registration-form-card>
         <div class="brand-lockup">
             <img class="brand-logo" src="{{ url_for('static', path='/logo.svg') }}" alt="Nelomai">
             <div>
@@ -10,7 +10,7 @@
             </div>
         </div>
         <p class="login-copy">Заполните все поля. Ссылка регистрации одноразовая и после успешного создания аккаунта повторно не работает.</p>
-        <form method="post" action="/registration/{{ token }}" class="login-form">
+        <form method="post" action="/registration/{{ token }}" class="login-form" data-registration-form>
             <label>
                 <span>Логин</span>
                 <input type="text" name="login" value="{{ values.get('login', '') }}" maxlength="20" required>
@@ -47,5 +47,45 @@
             <button type="submit" class="primary-button">Создать аккаунт</button>
         </form>
     </section>
+    <section class="login-card registration-card" data-registration-progress hidden aria-live="polite">
+        <div class="brand-lockup">
+            <img class="brand-logo" src="{{ url_for('static', path='/logo.svg') }}" alt="Nelomai">
+            <div>
+                <p class="eyebrow">Registration Link</p>
+                <h1>Настройка аккаунта</h1>
+            </div>
+        </div>
+        <p class="login-copy" data-registration-progress-text>Создаю аккаунт.</p>
+        <p class="muted-note">Это может занять до минуты, если сразу настраиваются интерфейсы.</p>
+    </section>
 </main>
+<script>
+(() => {
+  const form = document.querySelector("[data-registration-form]");
+  const formCard = document.querySelector("[data-registration-form-card]");
+  const progressCard = document.querySelector("[data-registration-progress]");
+  const progressText = document.querySelector("[data-registration-progress-text]");
+  if (!form || !formCard || !progressCard || !progressText) {
+    return;
+  }
+  const steps = [
+    "Создаю аккаунт.",
+    "Настраиваю доступ.",
+    "Почти готово."
+  ];
+  form.addEventListener("submit", () => {
+    formCard.hidden = true;
+    progressCard.hidden = false;
+    let stepIndex = 0;
+    progressText.textContent = steps[stepIndex];
+    const timerId = window.setInterval(() => {
+      stepIndex = Math.min(stepIndex + 1, steps.length - 1);
+      progressText.textContent = steps[stepIndex];
+      if (stepIndex >= steps.length - 1) {
+        window.clearInterval(timerId);
+      }
+    }, 2200);
+  });
+})();
+</script>
 {% endblock %}
