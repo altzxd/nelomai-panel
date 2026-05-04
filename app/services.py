@@ -3036,6 +3036,10 @@ def _run_agent_executor_logged(
     return response
 
 
+def _run_agent_executor_quiet(payload: dict[str, object]) -> dict[str, object]:
+    return _run_tic_executor(payload)
+
+
 def _run_peer_agent_action(
     db: Session,
     action: str,
@@ -6308,6 +6312,82 @@ def _build_unavailable_server_metrics() -> dict[str, float | None]:
     }
 
 
+def _runtime_metrics_payload(response: dict[str, object]) -> dict[str, object] | None:
+    runtime_payload = response.get("runtime")
+    runtime_data = runtime_payload if isinstance(runtime_payload, dict) else response
+    if not isinstance(runtime_data, dict):
+        return None
+    metrics = runtime_data.get("metrics")
+    if isinstance(metrics, dict):
+        return metrics
+    top_level_metrics = response.get("metrics")
+    if isinstance(top_level_metrics, dict):
+        return top_level_metrics
+    return None
+
+
+def _metric_float(metrics: dict[str, object] | None, key: str) -> float | None:
+    if not metrics:
+        return None
+    value = metrics.get(key)
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
+
+
+def _metric_int(metrics: dict[str, object] | None, key: str) -> int | None:
+    if not metrics:
+        return None
+    value = metrics.get(key)
+    if isinstance(value, int):
+        return value
+    return None
+
+
+def _build_server_metrics_from_runtime(response: dict[str, object] | None) -> dict[str, float | None]:
+    metrics = _runtime_metrics_payload(response or {})
+    if not metrics:
+        return _build_unavailable_server_metrics()
+    return {
+        "cpu_percent": float(_metric_float(metrics, "cpu_percent") or 0.0),
+        "ram_percent": float(_metric_float(metrics, "ram_percent") or 0.0),
+        "disk_total_gb": float(_metric_float(metrics, "disk_total_gb") or 0.0),
+        "disk_percent": float(_metric_float(metrics, "disk_percent") or 0.0),
+        "disk_used_gb": float(_metric_float(metrics, "disk_used_gb") or 0.0),
+        "traffic_mbps": None,
+    }
+
+
+def _format_bytes_label(value: int | None) -> str | None:
+    if value is None or value < 0:
+        return None
+    units = ["Б", "КБ", "МБ", "ГБ", "ТБ"]
+    numeric = float(value)
+    for unit in units:
+        if numeric < 1024 or unit == units[-1]:
+            if unit == "Б":
+                return f"{int(numeric)} {unit}"
+            return f"{numeric:.1f} {unit}"
+        numeric /= 1024.0
+    return None
+
+
+def _format_uptime_label(seconds: int | None) -> str | None:
+    if seconds is None or seconds < 0:
+        return None
+    days, remainder = divmod(seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, _ = divmod(remainder, 60)
+    parts: list[str] = []
+    if days:
+        parts.append(f"{days}д")
+    if hours:
+        parts.append(f"{hours}ч")
+    if minutes or not parts:
+        parts.append(f"{minutes}м")
+    return " ".join(parts)
+
+
 def _server_status(server: Server | None) -> str:
     if server is None:
         return "unknown"
@@ -6323,9 +6403,29 @@ def _build_server_metrics(seed_value: int, available: bool, traffic_enabled: boo
     return _build_unavailable_server_metrics()
 
 
-def _server_metrics_note(server: Server | None, status: str) -> str:
+def _server_metrics_note(
+    server: Server | None,
+    status: str,
+    runtime_metrics: dict[str, object] | None = None,
+) -> str:
     if server is None:
         return "Нет данных."
+    if status == "online" and runtime_metrics:
+        parts: list[str] = []
+        uptime_label = _format_uptime_label(_metric_int(runtime_metrics, "uptime_seconds"))
+        if uptime_label:
+            parts.append(f"Uptime: {uptime_label}")
+        load_1 = _metric_float(runtime_metrics, "load_1m")
+        load_5 = _metric_float(runtime_metrics, "load_5m")
+        if load_1 is not None and load_5 is not None:
+            parts.append(f"Load: {load_1:.2f} / {load_5:.2f}")
+        iface = runtime_metrics.get("network_interface")
+        rx_label = _format_bytes_label(_metric_int(runtime_metrics, "network_rx_bytes"))
+        tx_label = _format_bytes_label(_metric_int(runtime_metrics, "network_tx_bytes"))
+        if isinstance(iface, str) and iface.strip() and (rx_label or tx_label):
+            parts.append(f"Сеть {iface.strip()}: RX {rx_label or 'нет данных'} / TX {tx_label or 'нет данных'}")
+        if parts:
+            return " · ".join(parts)
     if status == "online" and server.last_seen_at is not None:
         return "Подключение проверено; реальные метрики сервера пока не собираются."
     if status == "offline":
@@ -6345,15 +6445,17 @@ def _build_server_card(
     traffic_enabled: bool,
     selected_id: int | None = None,
     options: list[Server] | None = None,
+    runtime_response: dict[str, object] | None = None,
+    metrics_note: str | None = None,
 ) -> ServerCardView:
-    metrics = _build_server_metrics(seed_value, available, traffic_enabled)
+    metrics = _build_server_metrics_from_runtime(runtime_response) if runtime_response else _build_server_metrics(seed_value, available, traffic_enabled)
     return ServerCardView(
         key=key,
         name=name,
         host=host,
         available=available,
         status="online" if available else "offline",
-        metrics_note="Подключение проверено; реальные метрики сервера пока не собираются." if available else "Нет данных.",
+        metrics_note=metrics_note or ("Подключение проверено; реальные метрики сервера пока не собираются." if available else "Нет данных."),
         cpu_percent=float(metrics["cpu_percent"]),
         ram_percent=float(metrics["ram_percent"]),
         disk_used_gb=float(metrics["disk_used_gb"]),
@@ -6383,6 +6485,22 @@ def _build_panel_server_card(*, host: str) -> ServerCardView:
         selected_id=None,
         options=[],
     )
+
+
+def _collect_live_server_runtime_map(db: Session, servers: list[Server]) -> dict[int, dict[str, object]]:
+    runtime_map: dict[int, dict[str, object]] = {}
+    for server in servers:
+        if _server_status(server) != "online" or server.is_excluded:
+            continue
+        try:
+            response = _run_agent_executor_quiet(
+                _build_server_executor_payload(action="verify_server_runtime", server=server)
+            )
+        except ServerOperationUnavailableError:
+            continue
+        _sync_server_runtime_peer_stats(db, server, response)
+        runtime_map[server.id] = response
+    return runtime_map
 
 
 def _select_server(servers: list[Server], selected_id: int | None) -> Server | None:
@@ -6491,6 +6609,10 @@ def get_admin_page_data(
         ]
         access_users_without_expiry.sort(key=lambda user: (user.display_name or user.login).lower())
 
+    live_runtime_map = _collect_live_server_runtime_map(
+        db,
+        [server for server in [selected_tic, selected_tak] if server is not None],
+    )
     panel_server = _build_panel_server_card(host=urlparse(settings.panel_public_base_url).hostname or "panel-host")
     tic_card = _build_server_card(
         key="tic",
@@ -6501,10 +6623,15 @@ def get_admin_page_data(
         traffic_enabled=True,
         selected_id=selected_tic.id if selected_tic else None,
         options=tic_servers,
+        runtime_response=live_runtime_map.get(selected_tic.id) if selected_tic else None,
     )
     tic_card.status = _server_status(selected_tic)
     tic_card.last_seen_at = selected_tic.last_seen_at if selected_tic else None
-    tic_card.metrics_note = _server_metrics_note(selected_tic, tic_card.status)
+    tic_card.metrics_note = _server_metrics_note(
+        selected_tic,
+        tic_card.status,
+        _runtime_metrics_payload(live_runtime_map.get(selected_tic.id, {})) if selected_tic else None,
+    )
     tak_card = _build_server_card(
         key="tak",
         name=selected_tak.name if selected_tak else "Tak Server",
@@ -6514,10 +6641,15 @@ def get_admin_page_data(
         traffic_enabled=True,
         selected_id=selected_tak.id if selected_tak else None,
         options=tak_servers,
+        runtime_response=live_runtime_map.get(selected_tak.id) if selected_tak else None,
     )
     tak_card.status = _server_status(selected_tak)
     tak_card.last_seen_at = selected_tak.last_seen_at if selected_tak else None
-    tak_card.metrics_note = _server_metrics_note(selected_tak, tak_card.status)
+    tak_card.metrics_note = _server_metrics_note(
+        selected_tak,
+        tak_card.status,
+        _runtime_metrics_payload(live_runtime_map.get(selected_tak.id, {})) if selected_tak else None,
+    )
     backup_status = "ok"
     try:
         path = backup_storage_path(db)
@@ -6601,6 +6733,7 @@ def get_servers_page_data(
         .where(ServerBootstrapTask.status.in_(["running", "input_required"]))
         .order_by(ServerBootstrapTask.updated_at.desc(), ServerBootstrapTask.id.desc())
     ).scalars().all()
+    live_runtime_map = _collect_live_server_runtime_map(db, servers)
 
     active_servers: list[ServerListItemView] = []
     excluded_servers: list[ServerListItemView] = []
@@ -6695,7 +6828,8 @@ def get_servers_page_data(
         peer_count = sum(len(interface.peers) for interface in server.tic_interfaces) if server.server_type == ServerType.TIC else 0
         status = _server_status(server)
         available = status == "online"
-        metrics = _build_server_metrics(server.id + interface_count + endpoint_count, available, server.server_type in {ServerType.TIC, ServerType.TAK})
+        runtime_response = live_runtime_map.get(server.id)
+        metrics = _build_server_metrics_from_runtime(runtime_response) if runtime_response else _build_server_metrics(server.id + interface_count + endpoint_count, available, server.server_type in {ServerType.TIC, ServerType.TAK})
         item = ServerListItemView(
             id=server.id,
             name=server.name,
@@ -6708,7 +6842,7 @@ def get_servers_page_data(
             available=available,
             status=status,
             last_seen_at=server.last_seen_at,
-            metrics_note=_server_metrics_note(server, status),
+            metrics_note=_server_metrics_note(server, status, _runtime_metrics_payload(runtime_response) if runtime_response else None),
             ssh_port=server.ssh_port,
             cpu_percent=float(metrics["cpu_percent"]),
             ram_percent=float(metrics["ram_percent"]),

@@ -800,7 +800,8 @@ function realServerResponse(payload) {
       const runtime = inspectRuntimeEnvironment();
       return ok({
         status: runtime.ready ? "ready" : "not_ready",
-        runtime
+        runtime,
+        metrics: runtime && typeof runtime === "object" ? runtime.metrics || null : null
       });
     } catch (error) {
       return fail(error instanceof Error ? error.message : String(error));

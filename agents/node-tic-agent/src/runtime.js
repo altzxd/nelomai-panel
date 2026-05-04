@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const childProcess = require("node:child_process");
 
@@ -27,6 +28,157 @@ function commandExists(command) {
     encoding: "utf8"
   });
   return completed.status === 0;
+}
+
+function readTextFileSafe(targetPath) {
+  try {
+    if (!fs.existsSync(targetPath) || !fs.statSync(targetPath).isFile()) {
+      return "";
+    }
+    return fs.readFileSync(targetPath, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+function roundMetric(value, digits = 1) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+  const factor = 10 ** digits;
+  return Math.round(numeric * factor) / factor;
+}
+
+function readMemoryMetrics() {
+  const meminfo = readTextFileSafe("/proc/meminfo");
+  const totalMatch = meminfo.match(/^MemTotal:\s+(\d+)\s+kB$/m);
+  const availableMatch = meminfo.match(/^MemAvailable:\s+(\d+)\s+kB$/m);
+  const totalKb = Number(totalMatch && totalMatch[1]) || 0;
+  const availableKb = Number(availableMatch && availableMatch[1]) || 0;
+  if (totalKb <= 0) {
+    return {
+      ram_percent: null,
+      ram_total_gb: null,
+      ram_used_gb: null
+    };
+  }
+  const usedKb = Math.max(0, totalKb - availableKb);
+  return {
+    ram_percent: roundMetric((usedKb / totalKb) * 100),
+    ram_total_gb: roundMetric(totalKb / 1024 / 1024, 2),
+    ram_used_gb: roundMetric(usedKb / 1024 / 1024, 2)
+  };
+}
+
+function readDiskMetrics(targetPath = "/") {
+  const completed = childProcess.spawnSync("df", ["-kP", targetPath], {
+    encoding: "utf8"
+  });
+  if (completed.status !== 0) {
+    return {
+      disk_total_gb: null,
+      disk_used_gb: null,
+      disk_percent: null
+    };
+  }
+  const lines = String(completed.stdout || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length < 2) {
+    return {
+      disk_total_gb: null,
+      disk_used_gb: null,
+      disk_percent: null
+    };
+  }
+  const parts = lines[1].split(/\s+/);
+  const totalKb = Number(parts[1]) || 0;
+  const usedKb = Number(parts[2]) || 0;
+  const percentRaw = String(parts[4] || "").replace("%", "");
+  const percent = Number(percentRaw);
+  return {
+    disk_total_gb: totalKb > 0 ? roundMetric(totalKb / 1024 / 1024, 2) : null,
+    disk_used_gb: totalKb > 0 ? roundMetric(usedKb / 1024 / 1024, 2) : null,
+    disk_percent: Number.isFinite(percent) ? roundMetric(percent) : null
+  };
+}
+
+function readUptimeMetrics() {
+  const raw = readTextFileSafe("/proc/uptime").trim();
+  const [uptimeText] = raw.split(/\s+/, 1);
+  const uptimeSeconds = Number(uptimeText);
+  if (!Number.isFinite(uptimeSeconds) || uptimeSeconds < 0) {
+    return {
+      uptime_seconds: null
+    };
+  }
+  return {
+    uptime_seconds: Math.floor(uptimeSeconds)
+  };
+}
+
+function readLoadMetrics() {
+  const loads = os.loadavg();
+  return {
+    load_1m: roundMetric(loads[0], 2),
+    load_5m: roundMetric(loads[1], 2),
+    load_15m: roundMetric(loads[2], 2)
+  };
+}
+
+function readCpuPercent() {
+  const cpuCount = Math.max(1, os.cpus().length || 1);
+  const [load1] = os.loadavg();
+  if (!Number.isFinite(load1)) {
+    return null;
+  }
+  return roundMetric(Math.min(100, (load1 / cpuCount) * 100));
+}
+
+function defaultNetworkInterface() {
+  const completed = childProcess.spawnSync("bash", ["-lc", "ip route show default 2>/dev/null | awk 'NR==1 {print $5}'"], {
+    encoding: "utf8"
+  });
+  if (completed.status !== 0) {
+    return "";
+  }
+  return String(completed.stdout || "").trim();
+}
+
+function readNetworkMetrics() {
+  const iface = defaultNetworkInterface();
+  if (!iface) {
+    return {
+      network_interface: null,
+      network_rx_bytes: null,
+      network_tx_bytes: null
+    };
+  }
+  const rx = Number(readTextFileSafe(`/sys/class/net/${iface}/statistics/rx_bytes`).trim());
+  const tx = Number(readTextFileSafe(`/sys/class/net/${iface}/statistics/tx_bytes`).trim());
+  return {
+    network_interface: iface,
+    network_rx_bytes: Number.isFinite(rx) ? rx : null,
+    network_tx_bytes: Number.isFinite(tx) ? tx : null
+  };
+}
+
+function inspectSystemMetrics() {
+  const memory = readMemoryMetrics();
+  const disk = readDiskMetrics("/");
+  const uptime = readUptimeMetrics();
+  const load = readLoadMetrics();
+  const network = readNetworkMetrics();
+  return {
+    cpu_percent: readCpuPercent(),
+    ...memory,
+    ...disk,
+    ...uptime,
+    ...load,
+    ...network
+  };
 }
 
 function interfaceDirectory(interfaceRecord) {
@@ -614,6 +766,7 @@ function inspectRuntimeEnvironment() {
   ];
 
   const live_interfaces = mode === "system" && linux && wg ? inspectLiveInterfaces() : [];
+  const metrics = linux ? inspectSystemMetrics() : null;
 
   return {
     mode,
@@ -622,7 +775,8 @@ function inspectRuntimeEnvironment() {
     peers_root,
     ready: checks.every((item) => item.ok),
     checks,
-    live_interfaces
+    live_interfaces,
+    metrics
   };
 }
 
