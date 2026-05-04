@@ -44,7 +44,7 @@ def _bootstrap_plan(node_bin: str, profile: str) -> dict[str, object]:
     payload = {
         "contract_version": "1.0",
         "supported_contracts": ["1.0"],
-        "panel_version": "0.1.0",
+        "panel_version": "0.1.1",
         "component": "server-agent",
         "requested_capabilities": ["agent.bootstrap.v1", "agent.update.v1"],
         "action": "bootstrap_server",

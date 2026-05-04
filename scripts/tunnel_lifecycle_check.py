@@ -51,7 +51,7 @@ def payload_base(action: str, component: str, capability: str) -> dict[str, obje
     return {
         "contract_version": "1.0",
         "supported_contracts": ["1.0"],
-        "panel_version": "0.1.0",
+        "panel_version": "0.1.1",
         "component": component,
         "requested_capabilities": [capability],
         "action": action,

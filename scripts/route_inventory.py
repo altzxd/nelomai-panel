@@ -53,6 +53,7 @@ ROUTE_RULES = [
     RouteRule(("POST",), "/api/admin/servers", "admin/agent-backed", "bootstrap server task"),
     RouteRule(("GET",), "/api/admin/server-bootstrap/{task_id}", "admin", "bootstrap task status"),
     RouteRule(("POST",), "/api/admin/server-bootstrap/{task_id}/input", "admin", "interactive bootstrap input"),
+    RouteRule(("GET",), "/api/admin/servers/live-metrics", "admin/agent-backed", "fetch cached live server metrics for admin cards"),
     RouteRule(("POST",), "/api/admin/servers/{server_id}/restart-agent", "admin/agent-backed", "restart Node-agent"),
     RouteRule(("POST",), "/api/admin/servers/{server_id}/refresh", "admin/agent-backed", "refresh server status"),
     RouteRule(("POST",), "/api/admin/servers/{server_id}/runtime-check", "admin/agent-backed", "verify agent runtime readiness"),

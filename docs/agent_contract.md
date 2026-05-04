@@ -15,7 +15,7 @@ Every request from the panel includes versioned contract metadata:
 {
   "contract_version": "1.0",
   "supported_contracts": ["1.0"],
-  "panel_version": "0.1.0",
+  "panel_version": "0.1.1",
   "component": "tic-agent",
   "requested_capabilities": ["peer.recreate.v1"],
   "action": "recreate_peer"
@@ -40,7 +40,7 @@ Successful responses:
 ```json
 {
   "ok": true,
-  "agent_version": "0.1.0",
+  "agent_version": "0.1.1",
   "contract_version": "1.0",
   "supported_contracts": ["1.0"],
   "capabilities": ["agent.update.v1", "peer.recreate.v1"]
@@ -105,7 +105,7 @@ Most interface/peer actions include:
 {
   "contract_version": "1.0",
   "supported_contracts": ["1.0"],
-  "panel_version": "0.1.0",
+  "panel_version": "0.1.1",
   "component": "tic-agent",
   "requested_capabilities": ["interface.state.v1"],
   "action": "action_name",
@@ -297,7 +297,7 @@ operate against a blank Ubuntu 22.04 host:
 {
   "contract_version": "1.0",
   "supported_contracts": ["1.0"],
-  "panel_version": "0.1.0",
+  "panel_version": "0.1.1",
   "component": "tic-agent",
   "requested_capabilities": ["agent.lifecycle.v1"],
   "action": "restart_server_agent",
@@ -434,7 +434,7 @@ what to update by `component` (`tic-agent` or `tak-agent`):
 {
   "contract_version": "1.0",
   "supported_contracts": ["1.0"],
-  "panel_version": "0.1.0",
+  "panel_version": "0.1.1",
   "component": "tic-agent",
   "requested_capabilities": ["agent.update.v1"],
   "action": "check_server_agent_update",
@@ -450,7 +450,7 @@ update is available:
 {
   "ok": true,
   "status": "checked",
-  "current_version": "0.1.0",
+  "current_version": "0.1.1",
   "latest_version": "0.1.1",
   "update_available": true,
   "message": "Update is available"

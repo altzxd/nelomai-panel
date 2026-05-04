@@ -20,7 +20,7 @@ function componentName() {
 }
 
 function version() {
-  return String(process.env.NELOMAI_AGENT_VERSION || "0.1.0").trim() || "0.1.0";
+  return String(process.env.NELOMAI_AGENT_VERSION || "0.1.1").trim() || "0.1.1";
 }
 
 function stateFilePath() {

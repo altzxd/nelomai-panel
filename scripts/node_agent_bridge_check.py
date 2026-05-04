@@ -93,7 +93,7 @@ def main() -> None:
         # Node skeleton is executable and responds through the same bridge.
         payload = (
             '{"contract_version":"1.0","supported_contracts":["1.0"],'
-            '"panel_version":"0.1.0","component":"server-agent",'
+            '"panel_version":"0.1.1","component":"server-agent",'
             '"requested_capabilities":["agent.bootstrap.v1","agent.update.v1"],'
             '"action":"bootstrap_server",'
             '"server":{"id":1,"name":"bridge-check-server","server_type":"tic","host":"127.0.0.60","ssh_port":22,"ssh_login":"root","ssh_password":"secret"},'

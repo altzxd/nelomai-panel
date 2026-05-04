@@ -62,9 +62,9 @@ def build_bulk_update_item() -> ServerAgentUpdateView:
         server_type="tic",
         repository_url="https://github.com/altzxd/nelomai-panel.git",
         status="checked",
-        agent_version="0.1.0",
+        agent_version="0.1.1",
         contract_version="agent.runtime.v1",
-        current_version="0.1.0",
+        current_version="0.1.1",
         latest_version="0.2.0",
         update_available=True,
         release_url="https://github.com/altzxd/nelomai-panel/releases/tag/0.2.0",
@@ -95,7 +95,7 @@ def stub_page() -> UpdatesPageView:
     healthy_item = build_healthy_item()
     return UpdatesPageView(
         panel_update_summary=PanelUpdateCheckView(
-            current_version="0.1.0",
+            current_version="0.1.1",
             latest_version="0.2.0",
             update_available=True,
             repo_url="https://github.com/altzxd/nelomai-panel.git",
@@ -126,7 +126,7 @@ def stub_tic_page() -> UpdatesPageView:
     bulk_update_item = build_bulk_update_item()
     return UpdatesPageView(
         panel_update_summary=PanelUpdateCheckView(
-            current_version="0.1.0",
+            current_version="0.1.1",
             latest_version="0.2.0",
             update_available=True,
             repo_url="https://github.com/altzxd/nelomai-panel.git",

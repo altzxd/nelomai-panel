@@ -1,6 +1,6 @@
 {
   "name": "nelomai-node-tic-agent",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Node.js skeleton for the future Nelomai Tic server agent",
   "main": "src/index.js",

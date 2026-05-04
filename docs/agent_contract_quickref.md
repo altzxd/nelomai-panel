@@ -24,7 +24,7 @@ Every request includes:
 {
   "contract_version": "1.0",
   "supported_contracts": ["1.0"],
-  "panel_version": "0.1.0",
+  "panel_version": "0.1.1",
   "component": "tic-agent",
   "requested_capabilities": ["peer.recreate.v1"],
   "action": "recreate_peer"
@@ -51,7 +51,7 @@ Recommended success:
 ```json
 {
   "ok": true,
-  "agent_version": "0.1.0",
+  "agent_version": "0.1.1",
   "contract_version": "1.0",
   "supported_contracts": ["1.0"],
   "capabilities": ["peer.recreate.v1"]

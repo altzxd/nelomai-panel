@@ -253,8 +253,8 @@ function ensureServerRecord(state, serverPayload) {
         ssh_password: serverPayload.ssh_password == null ? null : String(serverPayload.ssh_password),
         is_active: false,
         agent_installed: false,
-        current_version: process.env.NELOMAI_AGENT_VERSION || "0.1.0",
-      latest_version: process.env.NELOMAI_AGENT_LATEST_VERSION || process.env.NELOMAI_AGENT_VERSION || "0.1.0",
+        current_version: process.env.NELOMAI_AGENT_VERSION || "0.1.1",
+      latest_version: process.env.NELOMAI_AGENT_LATEST_VERSION || process.env.NELOMAI_AGENT_VERSION || "0.1.1",
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
@@ -879,7 +879,7 @@ function refreshServerStatusRecord(state, payload) {
     record.is_active = true;
     if (daemonRunning) {
       record.agent_installed = true;
-      record.current_version = String(daemonStatus.version || record.current_version || process.env.NELOMAI_AGENT_VERSION || "0.1.0");
+      record.current_version = String(daemonStatus.version || record.current_version || process.env.NELOMAI_AGENT_VERSION || "0.1.1");
     }
     record.last_seen_at = new Date().toISOString();
   }
@@ -891,7 +891,7 @@ function refreshServerStatusRecord(state, payload) {
 function checkServerUpdateRecord(state, payload) {
   const serverPayload = payload.server && typeof payload.server === "object" ? payload.server : null;
   const record = ensureServerRecord(state, serverPayload);
-  const latestVersion = process.env.NELOMAI_AGENT_LATEST_VERSION || record.latest_version || record.current_version || "0.1.0";
+  const latestVersion = process.env.NELOMAI_AGENT_LATEST_VERSION || record.latest_version || record.current_version || "0.1.1";
   record.latest_version = latestVersion;
   touch(record);
   saveState(state);
@@ -903,7 +903,7 @@ function checkServerUpdateRecord(state, payload) {
 
 function applyServerUpdateRecord(state, payload) {
   const { record } = checkServerUpdateRecord(state, payload);
-  record.current_version = record.latest_version || record.current_version || "0.1.0";
+  record.current_version = record.latest_version || record.current_version || "0.1.1";
   record.agent_installed = true;
   record.is_active = true;
   record.last_seen_at = new Date().toISOString();

@@ -10,7 +10,7 @@ from pathlib import Path
 CONTRACT_RESPONSE = {
     "contract_version": "1.0",
     "supported_contracts": ["1.0"],
-    "agent_version": "0.1.0",
+    "agent_version": "0.1.1",
     "capabilities": [
         "agent.bootstrap.v1",
         "agent.lifecycle.v1",
@@ -75,7 +75,7 @@ def main() -> None:
                 {
                     "ok": True,
                     "status": "checked",
-                    "current_version": "0.1.0",
+                    "current_version": "0.1.1",
                     "latest_version": "0.1.1",
                     "update_available": True,
                     "message": "fake update is available",

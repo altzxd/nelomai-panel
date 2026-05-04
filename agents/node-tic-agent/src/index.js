@@ -897,8 +897,8 @@ function stubSuccessResponse(payload) {
   if (action === "check_server_agent_update") {
     return ok({
       status: "checked",
-      current_version: "0.1.0",
-      latest_version: "0.1.0",
+      current_version: "0.1.1",
+      latest_version: "0.1.1",
       update_available: false,
       message: "No update available in stub mode"
     });
@@ -907,8 +907,8 @@ function stubSuccessResponse(payload) {
   if (action === "update_server_agent") {
     return ok({
       status: "updated",
-      current_version: "0.1.0",
-      latest_version: "0.1.0",
+      current_version: "0.1.1",
+      latest_version: "0.1.1",
       update_available: false,
       message: "Stub update completed"
     });

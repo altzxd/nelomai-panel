@@ -114,7 +114,7 @@ Behavior:
 - `NELOMAI_AGENT_COMPONENT`
   default: `tic-agent`
 - `NELOMAI_AGENT_VERSION`
-  default: `0.1.0`
+  default: `0.1.1`
 - `NELOMAI_AGENT_SUPPORTED_CONTRACTS`
   default: `1.0`
 - `NELOMAI_AGENT_LOG`

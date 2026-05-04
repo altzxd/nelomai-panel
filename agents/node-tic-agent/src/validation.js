@@ -20,7 +20,7 @@ function parseSupportedContractsFromEnv() {
 
 function agentRuntimeMeta() {
   return {
-    agentVersion: process.env.NELOMAI_AGENT_VERSION || "0.1.0",
+    agentVersion: process.env.NELOMAI_AGENT_VERSION || "0.1.1",
     contractVersion: AGENT_CONTRACT_VERSION,
     supportedContracts: parseSupportedContractsFromEnv(),
     component: process.env.NELOMAI_AGENT_COMPONENT || DEFAULT_COMPONENT
