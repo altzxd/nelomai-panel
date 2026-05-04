@@ -61,6 +61,7 @@ const {
   buildProvisionTunnelCommands,
   buildAttachTunnelCommands,
   buildDetachTunnelCommands,
+  buildFirewallReconcileCommands,
   inspectRuntimeEnvironment,
   maybeRunSystemCommands,
   ensureWireGuardKeyMaterial,
@@ -254,6 +255,7 @@ function realInterfaceResponse(payload) {
   }
 
   const state = loadState();
+  const firewallServerRecord = { server_type: "tic" };
   if (action === "prepare_interface") {
     return ok({
       listen_port: findFirstFreePort(state, ticServerId),
@@ -268,7 +270,10 @@ function realInterfaceResponse(payload) {
         saveState(state);
       }
       syncInterfaceArtifacts(record);
-      const execution = maybeRunSystemCommands(buildCreateInterfaceCommands(record));
+      const execution = maybeRunSystemCommands([
+        ...buildCreateInterfaceCommands(record),
+        ...buildFirewallReconcileCommands(state, firewallServerRecord)
+      ]);
       return ok({
         agent_interface_id: record.agent_interface_id,
         execution_mode: execution.mode,
@@ -286,7 +291,10 @@ function realInterfaceResponse(payload) {
         saveState(state);
       }
       syncAllPeerArtifacts(record);
-      const execution = maybeRunSystemCommands(buildToggleInterfaceCommands(record));
+      const execution = maybeRunSystemCommands([
+        ...buildToggleInterfaceCommands(record),
+        ...buildFirewallReconcileCommands(state, firewallServerRecord)
+      ]);
       return ok({
         status: "updated",
         interface: {
@@ -309,7 +317,10 @@ function realInterfaceResponse(payload) {
         saveState(state);
       }
       syncAllPeerArtifacts(record);
-      const execution = maybeRunSystemCommands(buildRefreshInterfaceCommands(record));
+      const execution = maybeRunSystemCommands([
+        ...buildRefreshInterfaceCommands(record),
+        ...buildFirewallReconcileCommands(state, firewallServerRecord)
+      ]);
       return ok({
         status: "updated",
         interface: {
@@ -332,7 +343,10 @@ function realInterfaceResponse(payload) {
         saveState(state);
       }
       syncAllPeerArtifacts(record);
-      const execution = maybeRunSystemCommands(buildRefreshInterfaceCommands(record));
+      const execution = maybeRunSystemCommands([
+        ...buildRefreshInterfaceCommands(record),
+        ...buildFirewallReconcileCommands(state, firewallServerRecord)
+      ]);
       return ok({
         status: "updated",
         interface: {
@@ -374,7 +388,10 @@ function realInterfaceResponse(payload) {
         saveState(state);
       }
       syncPeerArtifacts(persisted.interfaceRecord, persisted.peerRecord);
-      const execution = maybeRunSystemCommands(buildTogglePeerCommands(persisted.interfaceRecord, persisted.peerRecord));
+      const execution = maybeRunSystemCommands([
+        ...buildTogglePeerCommands(persisted.interfaceRecord, persisted.peerRecord),
+        ...buildFirewallReconcileCommands(state, firewallServerRecord)
+      ]);
       return ok({
         status: "updated",
         peer: {
@@ -417,7 +434,10 @@ function realInterfaceResponse(payload) {
         saveState(state);
       }
       syncPeerArtifacts(persisted.interfaceRecord, record);
-      const execution = maybeRunSystemCommands(buildRecreatePeerCommands(persisted.interfaceRecord, record));
+      const execution = maybeRunSystemCommands([
+        ...buildRecreatePeerCommands(persisted.interfaceRecord, record),
+        ...buildFirewallReconcileCommands(state, firewallServerRecord)
+      ]);
       return ok({
         status: "recreated",
         peer: {
@@ -440,7 +460,10 @@ function realInterfaceResponse(payload) {
       const interfaceRecord = persisted.interfaceRecord;
       const record = deletePeerRecord(state, payload);
       removePeerArtifacts(interfaceRecord, record);
-      const execution = maybeRunSystemCommands(buildDeletePeerCommands(interfaceRecord, record));
+      const execution = maybeRunSystemCommands([
+        ...buildDeletePeerCommands(interfaceRecord, record),
+        ...buildFirewallReconcileCommands(state, firewallServerRecord)
+      ]);
       return ok({
         status: "deleted",
         peer: {

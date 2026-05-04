@@ -10,6 +10,7 @@ const {
   buildAttachTunnelCommands,
   buildProvisionTunnelCommands,
   buildRefreshInterfaceCommands,
+  buildFirewallReconcileCommands,
   maybeRunSystemCommands
 } = require("./runtime");
 const { loadState } = require("./state");
@@ -183,6 +184,15 @@ function restoreRuntimeFromState() {
         error: error instanceof Error ? error.message : String(error)
       });
     }
+  }
+
+  try {
+    maybeRunSystemCommands(buildFirewallReconcileCommands(state, {}));
+  } catch (error) {
+    summary.errors.push({
+      kind: "firewall",
+      error: error instanceof Error ? error.message : String(error)
+    });
   }
 
   return summary;

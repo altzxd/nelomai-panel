@@ -217,8 +217,7 @@ function firewallRules(serverRecord) {
   if (type === "tic") {
     return [
       "22/tcp",
-      "40404/udp",
-      "10001:10007/udp"
+      "40404/udp"
     ];
   }
   return [];

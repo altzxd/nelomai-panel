@@ -755,6 +755,54 @@ function inspectLiveInterfaces() {
   return snapshots;
 }
 
+function firewallServerType(serverRecord) {
+  const explicit = String(serverRecord && serverRecord.server_type || "").trim().toLowerCase();
+  if (explicit) {
+    return explicit;
+  }
+  const component = String(process.env.NELOMAI_AGENT_COMPONENT || "").trim().toLowerCase();
+  if (component === "tak-agent") {
+    return "tak";
+  }
+  if (component === "tic-agent") {
+    return "tic";
+  }
+  return "tic";
+}
+
+function desiredFirewallRules(state, serverRecord) {
+  const type = firewallServerType(serverRecord);
+  if (type === "tak") {
+    return ["22/tcp", "40404/udp", "42001/udp"];
+  }
+  const interfaces = Array.isArray(state && state.interfaces) ? state.interfaces : [];
+  const dynamicPorts = interfaces
+    .filter((item) => item && item.is_enabled)
+    .map((item) => Number(item.listen_port))
+    .filter((value) => Number.isInteger(value) && value > 0)
+    .sort((left, right) => left - right)
+    .map((value) => `${value}/udp`);
+  return Array.from(new Set(["22/tcp", "40404/udp", ...dynamicPorts]));
+}
+
+function buildFirewallReconcileCommands(state, serverRecord) {
+  if (executionMode() !== "system") {
+    return [];
+  }
+  if (!commandExists("ufw")) {
+    return [];
+  }
+  const rules = desiredFirewallRules(state, serverRecord);
+  return [
+    "ufw --force reset",
+    "ufw default deny incoming",
+    "ufw default allow outgoing",
+    ...rules.map((rule) => `ufw allow ${rule}`),
+    "ufw --force enable",
+    "ufw status",
+  ];
+}
+
 function buildCreateInterfaceCommands(interfaceRecord) {
   const interfaceName = systemInterfaceName(interfaceRecord);
   const systemConfigPath = systemInterfaceConfigPath(interfaceRecord);
@@ -993,6 +1041,7 @@ module.exports = {
   buildProvisionTunnelCommands,
   buildAttachTunnelCommands,
   buildDetachTunnelCommands,
+  buildFirewallReconcileCommands,
   maybeRunSystemCommands,
   systemInterfaceConfigPath,
   systemPeerConfigPath,

@@ -168,8 +168,8 @@ def main() -> None:
             raise SafeInitCheckFailure("safe-init must include ssh firewall rule")
         if not any("ufw allow 40404/udp" == command for command in commands):
             raise SafeInitCheckFailure("safe-init must include AWG firewall rule")
-        if not any("ufw allow 10001:10007/udp" == command for command in commands):
-            raise SafeInitCheckFailure("safe-init must include tic interface firewall range")
+        if any("ufw allow 10001:" in command for command in commands):
+            raise SafeInitCheckFailure("safe-init must not include a wide tic interface firewall range")
         if not any("systemctl enable" in command for command in commands):
             raise SafeInitCheckFailure("safe-init must include systemctl enable step")
         if not any("systemctl restart" in command for command in commands):
