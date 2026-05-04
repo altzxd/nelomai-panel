@@ -281,8 +281,8 @@
                                 {% endif %}
                                 <dl class="peer-metrics">
                                     <div><dt>Handshake</dt><dd>{{ peer.handshake_at|handshake_moscow }}</dd></div>
-                                    <div><dt>RX live</dt><dd>{{ peer.live_rx_bytes|bytes_compact }}</dd></div>
-                                    <div><dt>TX live</dt><dd>{{ peer.live_tx_bytes|bytes_compact }}</dd></div>
+                                    <div><dt>Получено</dt><dd>{{ peer.live_rx_bytes|bytes_compact }}</dd></div>
+                                    <div><dt>Отправлено</dt><dd>{{ peer.live_tx_bytes|bytes_compact }}</dd></div>
                                     <div><dt>Трафик 7 дней</dt><dd>{{ "%.1f"|format(peer.traffic_7d_mb / 1024) }} ГБ</dd></div>
                                     <div><dt>Трафик 30 дней</dt><dd>{{ "%.1f"|format(peer.traffic_30d_mb / 1024) }} ГБ</dd></div>
                                 </dl>
