@@ -88,6 +88,89 @@ document.addEventListener("DOMContentLoaded", () => {
     return response.json();
   };
 
+  const clampPercent = (value) => {
+    const numeric = Number(value || 0);
+    if (!Number.isFinite(numeric)) {
+      return 0;
+    }
+    return Math.max(0, Math.min(100, numeric));
+  };
+
+  const formatFixed = (value, digits = 1) => {
+    const numeric = Number(value || 0);
+    if (!Number.isFinite(numeric)) {
+      return "0";
+    }
+    return numeric.toFixed(digits);
+  };
+
+  const loadLiveServerMetrics = async () => {
+    const cards = Array.from(document.querySelectorAll("[data-live-server-card][data-server-id]"))
+      .filter((card) => String(card.getAttribute("data-server-id") || "").trim() !== "");
+    if (!cards.length) {
+      return;
+    }
+    const ids = [...new Set(cards.map((card) => card.getAttribute("data-server-id")).filter(Boolean))];
+    const query = ids.map((id) => `server_id=${encodeURIComponent(id)}`).join("&");
+    let payload = null;
+    try {
+      payload = await requestJson(`/api/admin/servers/live-metrics?${query}`, { method: "GET" });
+    } catch {
+      return;
+    }
+    const items = Array.isArray(payload?.servers) ? payload.servers : [];
+    const byId = new Map(items.map((item) => [String(item.server_id), item]));
+    cards.forEach((card) => {
+      const item = byId.get(String(card.getAttribute("data-server-id") || ""));
+      if (!item) {
+        return;
+      }
+      const noteNode = card.querySelector("[data-live-server-note]");
+      if (noteNode && item.metrics_note) {
+        noteNode.textContent = String(item.metrics_note);
+      }
+      const emptyNoteNode = card.querySelector("[data-live-server-empty-note]");
+      if (emptyNoteNode && item.metrics_note) {
+        emptyNoteNode.textContent = String(item.metrics_note);
+      }
+      const cpuBar = card.querySelector("[data-live-server-cpu-bar]");
+      const cpuLabel = card.querySelector("[data-live-server-cpu-label]");
+      const ramBar = card.querySelector("[data-live-server-ram-bar]");
+      const ramLabel = card.querySelector("[data-live-server-ram-label]");
+      const diskBar = card.querySelector("[data-live-server-disk-bar]");
+      const diskLabel = card.querySelector("[data-live-server-disk-label]");
+      const trafficBar = card.querySelector("[data-live-server-traffic-bar]");
+      const trafficLabel = card.querySelector("[data-live-server-traffic-label]");
+      if (cpuBar) {
+        cpuBar.style.width = `${clampPercent(item.cpu_percent)}%`;
+      }
+      if (cpuLabel) {
+        cpuLabel.textContent = `${formatFixed(item.cpu_percent)}%`;
+      }
+      if (ramBar) {
+        ramBar.style.width = `${clampPercent(item.ram_percent)}%`;
+      }
+      if (ramLabel) {
+        ramLabel.textContent = `${formatFixed(item.ram_percent)}%`;
+      }
+      if (diskBar) {
+        diskBar.style.width = `${clampPercent(item.disk_percent)}%`;
+      }
+      if (diskLabel) {
+        diskLabel.textContent = `${formatFixed(item.disk_used_gb)} / ${formatFixed(item.disk_total_gb)} ГБ`;
+      }
+      const trafficValue = item.traffic_mbps == null ? 0 : Number(item.traffic_mbps);
+      if (trafficBar) {
+        trafficBar.style.width = `${clampPercent(trafficValue * 4)}%`;
+      }
+      if (trafficLabel) {
+        trafficLabel.textContent = `${formatFixed(trafficValue)} МБ/с`;
+      }
+    });
+  };
+
+  loadLiveServerMetrics();
+
   const isValidIPv4FilterValue = (value) => {
     const parts = String(value || "").trim().split(".");
     return parts.length === 4 && parts.every((part) => {

@@ -114,6 +114,7 @@ from app.services import (
     get_admin_page_data,
     get_dashboard_data,
     get_initial_admin_setup_token,
+    get_live_server_metrics_map,
     get_public_registration_link,
     get_registration_links_page,
     get_filter_by_id,
@@ -1626,6 +1627,18 @@ def verify_latest_full_backup_server_copies_api(
 ) -> BackupServerSnapshotVerifyView:
     try:
         return verify_latest_full_backup_server_copies(db, current_user)
+    except (EntityNotFoundError, InvalidInputError, PermissionDeniedError, ServerOperationUnavailableError) as exc:
+        raise_service_http_error(exc)
+
+
+@router.get("/api/admin/servers/live-metrics")
+def read_admin_live_server_metrics(
+    server_id: list[int] = Query(default=[]),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, object]:
+    try:
+        return {"servers": list(get_live_server_metrics_map(db, current_user, server_id).values())}
     except (EntityNotFoundError, InvalidInputError, PermissionDeniedError, ServerOperationUnavailableError) as exc:
         raise_service_http_error(exc)
 

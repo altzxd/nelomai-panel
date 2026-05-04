@@ -118,7 +118,7 @@
         {% endif %}
 
         {% if servers_page.selected_view == 'servers' and servers_page.selected_server %}
-        <section class="settings-card server-detail-card">
+        <section class="settings-card server-detail-card" data-live-server-card data-server-id="{{ servers_page.selected_server.id }}">
             <div class="server-list-head">
                 <div>
                     <p class="eyebrow">{{ servers_page.selected_server.server_type|upper }} сервер</p>
@@ -129,7 +129,7 @@
                     {{ servers_page.selected_server.status }}
                 </span>
             </div>
-            <p class="server-metrics-note">
+            <p class="server-metrics-note" data-live-server-note>
                 {{ servers_page.selected_server.metrics_note }}
                 {% if servers_page.selected_server.status == 'online' and servers_page.selected_server.last_seen_at %}
                 · {{ servers_page.selected_server.last_seen_at|datetime_moscow }}
@@ -145,24 +145,24 @@
             <div class="metric-stack">
                 <div class="metric-row">
                     <span>CPU</span>
-                    <div class="metric-bar"><span style="width: {{ servers_page.selected_server.cpu_percent }}%"></span></div>
-                    <strong>{{ servers_page.selected_server.cpu_percent }}%</strong>
+                    <div class="metric-bar"><span data-live-server-cpu-bar style="width: {{ servers_page.selected_server.cpu_percent }}%"></span></div>
+                    <strong data-live-server-cpu-label>{{ servers_page.selected_server.cpu_percent }}%</strong>
                 </div>
                 <div class="metric-row">
                     <span>RAM</span>
-                    <div class="metric-bar"><span style="width: {{ servers_page.selected_server.ram_percent }}%"></span></div>
-                    <strong>{{ servers_page.selected_server.ram_percent }}%</strong>
+                    <div class="metric-bar"><span data-live-server-ram-bar style="width: {{ servers_page.selected_server.ram_percent }}%"></span></div>
+                    <strong data-live-server-ram-label>{{ servers_page.selected_server.ram_percent }}%</strong>
                 </div>
                 <div class="metric-row">
                     <span>Disk</span>
-                    <div class="metric-bar"><span style="width: {{ servers_page.selected_server.disk_percent }}%"></span></div>
-                    <strong>{{ servers_page.selected_server.disk_used_gb }} / {{ servers_page.selected_server.disk_total_gb }} ГБ</strong>
+                    <div class="metric-bar"><span data-live-server-disk-bar style="width: {{ servers_page.selected_server.disk_percent }}%"></span></div>
+                    <strong data-live-server-disk-label>{{ servers_page.selected_server.disk_used_gb }} / {{ servers_page.selected_server.disk_total_gb }} ГБ</strong>
                 </div>
                 {% if servers_page.selected_server.traffic_mbps is not none %}
                 <div class="metric-row">
                     <span>Трафик</span>
-                    <div class="metric-bar"><span style="width: {{ ((servers_page.selected_server.traffic_mbps or 0) * 4) }}%"></span></div>
-                    <strong>{{ servers_page.selected_server.traffic_mbps }} МБ/с</strong>
+                    <div class="metric-bar"><span data-live-server-traffic-bar style="width: {{ ((servers_page.selected_server.traffic_mbps or 0) * 4) }}%"></span></div>
+                    <strong data-live-server-traffic-label>{{ servers_page.selected_server.traffic_mbps }} МБ/с</strong>
                 </div>
                 {% endif %}
             </div>
@@ -461,7 +461,7 @@
         {% endif %}
         <section class="server-list-grid">
             {% for server in server_cards %}
-            <a class="server-list-card server-list-link {% if servers_page.selected_server and servers_page.selected_server.id == server.id %}is-selected{% endif %}" href="/admin/servers?view=servers&bucket={{ servers_page.selected_bucket }}&server_type={{ servers_page.selected_type }}&location={{ servers_page.selected_location|urlencode }}&sort={{ servers_page.selected_sort }}&selected_server_id={{ server.id }}">
+            <a class="server-list-card server-list-link {% if servers_page.selected_server and servers_page.selected_server.id == server.id %}is-selected{% endif %}" data-live-server-card data-server-id="{{ server.id }}" href="/admin/servers?view=servers&bucket={{ servers_page.selected_bucket }}&server_type={{ servers_page.selected_type }}&location={{ servers_page.selected_location|urlencode }}&sort={{ servers_page.selected_sort }}&selected_server_id={{ server.id }}">
                 <div class="server-list-head">
                     <div>
                         <h3>{{ server.name }}</h3>
@@ -471,7 +471,7 @@
                         {{ server.status }}
                     </span>
                 </div>
-                <p class="server-metrics-note">
+                <p class="server-metrics-note" data-live-server-note>
                     {{ server.metrics_note }}
                     {% if server.status == 'online' and server.last_seen_at %}
                     · {{ server.last_seen_at|datetime_moscow }}
@@ -481,24 +481,24 @@
                 <div class="metric-stack">
                     <div class="metric-row">
                         <span>CPU</span>
-                        <div class="metric-bar"><span style="width: {{ server.cpu_percent }}%"></span></div>
-                        <strong>{{ server.cpu_percent }}%</strong>
+                        <div class="metric-bar"><span data-live-server-cpu-bar style="width: {{ server.cpu_percent }}%"></span></div>
+                        <strong data-live-server-cpu-label>{{ server.cpu_percent }}%</strong>
                     </div>
                     <div class="metric-row">
                         <span>RAM</span>
-                        <div class="metric-bar"><span style="width: {{ server.ram_percent }}%"></span></div>
-                        <strong>{{ server.ram_percent }}%</strong>
+                        <div class="metric-bar"><span data-live-server-ram-bar style="width: {{ server.ram_percent }}%"></span></div>
+                        <strong data-live-server-ram-label>{{ server.ram_percent }}%</strong>
                     </div>
                     <div class="metric-row">
                         <span>Disk</span>
-                        <div class="metric-bar"><span style="width: {{ server.disk_percent }}%"></span></div>
-                        <strong>{{ server.disk_used_gb }} / {{ server.disk_total_gb }} ГБ</strong>
+                        <div class="metric-bar"><span data-live-server-disk-bar style="width: {{ server.disk_percent }}%"></span></div>
+                        <strong data-live-server-disk-label>{{ server.disk_used_gb }} / {{ server.disk_total_gb }} ГБ</strong>
                     </div>
                     {% if server.traffic_mbps is not none %}
                     <div class="metric-row">
                         <span>Трафик</span>
-                        <div class="metric-bar"><span style="width: {{ ((server.traffic_mbps or 0) * 4) }}%"></span></div>
-                        <strong>{{ server.traffic_mbps }} МБ/с</strong>
+                        <div class="metric-bar"><span data-live-server-traffic-bar style="width: {{ ((server.traffic_mbps or 0) * 4) }}%"></span></div>
+                        <strong data-live-server-traffic-label>{{ server.traffic_mbps }} МБ/с</strong>
                     </div>
                     {% endif %}
                 </div>

@@ -534,6 +534,7 @@ def _tak_tunnel_status_label_ui(status: str) -> str:
     return mapping.get(status, status)
 TAK_TUNNEL_AUTO_REPAIR_BACKOFF_SECONDS = (60, 300, 900, 3600, 10800)
 UPDATES_CACHE_TTL_SECONDS = 120
+SERVER_RUNTIME_CACHE_TTL_SECONDS = 10
 PANEL_JOB_TYPE_LABELS = {
     "server_bootstrap": "Добавление сервера",
     "expired_peers_cleanup": "Очистка истёкших пиров",
@@ -555,6 +556,7 @@ PANEL_JOB_STATUS_LABELS = {
 }
 _PANEL_UPDATE_CACHE: dict[str, object] = {"fetched_at": 0.0, "value": None}
 _SERVER_AGENT_UPDATE_CACHE: dict[int, tuple[float, ServerAgentUpdateView]] = {}
+_SERVER_RUNTIME_CACHE: dict[int, tuple[float, dict[str, object]]] = {}
 
 
 def _tak_tunnel_pair_key(tic_server_id: int, tak_server_id: int) -> str:
@@ -6494,15 +6496,70 @@ def _collect_live_server_runtime_map(db: Session, servers: list[Server]) -> dict
     for server in servers:
         if _server_status(server) != "online" or server.is_excluded:
             continue
-        try:
-            response = _run_agent_executor_quiet(
-                _build_server_executor_payload(action="verify_server_runtime", server=server)
-            )
-        except ServerOperationUnavailableError:
+        response = _get_live_server_runtime_response_cached(db, server)
+        if response is None:
             continue
-        _sync_server_runtime_peer_stats(db, server, response)
         runtime_map[server.id] = response
     return runtime_map
+
+
+def _get_live_server_runtime_response_cached(
+    db: Session,
+    server: Server,
+    *,
+    force: bool = False,
+) -> dict[str, object] | None:
+    cached = _SERVER_RUNTIME_CACHE.get(server.id)
+    if (
+        not force
+        and cached is not None
+        and (time.time() - cached[0]) < SERVER_RUNTIME_CACHE_TTL_SECONDS
+    ):
+        return dict(cached[1])
+    try:
+        response = _run_agent_executor_quiet(
+            _build_server_executor_payload(action="verify_server_runtime", server=server)
+        )
+    except ServerOperationUnavailableError:
+        return None
+    _sync_server_runtime_peer_stats(db, server, response)
+    _SERVER_RUNTIME_CACHE[server.id] = (time.time(), dict(response))
+    return response
+
+
+def get_live_server_metrics_map(
+    db: Session,
+    actor: User,
+    server_ids: list[int],
+) -> dict[int, dict[str, object]]:
+    require_admin(actor)
+    unique_ids = []
+    seen: set[int] = set()
+    for server_id in server_ids:
+        if server_id in seen:
+            continue
+        seen.add(server_id)
+        unique_ids.append(server_id)
+    if not unique_ids:
+        return {}
+    servers = db.execute(select(Server).where(Server.id.in_(unique_ids))).scalars().all()
+    result: dict[int, dict[str, object]] = {}
+    for server in servers:
+        status = _server_status(server)
+        runtime_response = _get_live_server_runtime_response_cached(db, server) if status == "online" and not server.is_excluded else None
+        metrics = _build_server_metrics_from_runtime(runtime_response) if runtime_response else _build_unavailable_server_metrics()
+        result[server.id] = {
+            "server_id": server.id,
+            "status": status,
+            "metrics_note": _server_metrics_note(server, status, _runtime_metrics_payload(runtime_response) if runtime_response else None),
+            "cpu_percent": float(metrics["cpu_percent"]),
+            "ram_percent": float(metrics["ram_percent"]),
+            "disk_used_gb": float(metrics["disk_used_gb"]),
+            "disk_total_gb": float(metrics["disk_total_gb"]),
+            "disk_percent": float(metrics["disk_percent"]),
+            "traffic_mbps": float(metrics["traffic_mbps"]) if metrics["traffic_mbps"] is not None else None,
+        }
+    return result
 
 
 def _select_server(servers: list[Server], selected_id: int | None) -> Server | None:
@@ -6611,10 +6668,8 @@ def get_admin_page_data(
         ]
         access_users_without_expiry.sort(key=lambda user: (user.display_name or user.login).lower())
 
-    live_runtime_map = _collect_live_server_runtime_map(
-        db,
-        [server for server in [selected_tic, selected_tak] if server is not None],
-    )
+    show_remote_live_metrics = active_tab == "overview"
+    live_runtime_map: dict[int, dict[str, object]] = {}
     panel_server = _build_panel_server_card(host=urlparse(settings.panel_public_base_url).hostname or "panel-host")
     tic_card = _build_server_card(
         key="tic",
@@ -6692,6 +6747,7 @@ def get_admin_page_data(
         panel_server=panel_server,
         tic_server=tic_card,
         tak_server=tak_card,
+        show_remote_live_metrics=show_remote_live_metrics,
         beta_readiness=beta_readiness,
         panel_update_summary=panel_update_summary,
         agent_update_summaries=agent_update_summaries,
@@ -6735,7 +6791,7 @@ def get_servers_page_data(
         .where(ServerBootstrapTask.status.in_(["running", "input_required"]))
         .order_by(ServerBootstrapTask.updated_at.desc(), ServerBootstrapTask.id.desc())
     ).scalars().all()
-    live_runtime_map = _collect_live_server_runtime_map(db, servers)
+    live_runtime_map: dict[int, dict[str, object]] = {}
 
     active_servers: list[ServerListItemView] = []
     excluded_servers: list[ServerListItemView] = []

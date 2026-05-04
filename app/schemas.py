@@ -900,6 +900,7 @@ class AdminPageView(BaseModel):
     panel_server: ServerCardView
     tic_server: ServerCardView
     tak_server: ServerCardView
+    show_remote_live_metrics: bool = True
     beta_readiness: BetaReadinessSummaryView | None = None
     panel_update_summary: PanelUpdateCheckView | None = None
     agent_update_summaries: list[ServerAgentUpdateView] = []

@@ -100,7 +100,7 @@
             </article>
 
             {% for server_card in [admin_page.tic_server, admin_page.tak_server] %}
-            <article class="server-card">
+            <article class="server-card" data-live-server-card data-server-id="{{ server_card.selected_id or '' }}">
                 <form class="server-card-head" method="get" action="/admin">
                     <input type="hidden" name="tab" value="{{ active_tab }}">
                     <input type="hidden" name="settings_view" value="{{ settings_view }}">
@@ -119,7 +119,7 @@
                     </span>
                 </form>
                 <p class="server-host">{{ server_card.host }}</p>
-                <p class="server-metrics-note">
+                <p class="server-metrics-note" data-live-server-note>
                     {{ server_card.metrics_note }}
                     {% if server_card.status == 'online' and server_card.last_seen_at %}
                     · {{ server_card.last_seen_at|datetime_moscow }}
@@ -129,28 +129,28 @@
                 <div class="metric-stack">
                     <div class="metric-row">
                         <span>CPU</span>
-                        <div class="metric-bar"><span style="width: {{ server_card.cpu_percent }}%"></span></div>
-                        <strong>{{ server_card.cpu_percent }}%</strong>
+                        <div class="metric-bar"><span data-live-server-cpu-bar style="width: {{ server_card.cpu_percent }}%"></span></div>
+                        <strong data-live-server-cpu-label>{{ server_card.cpu_percent }}%</strong>
                     </div>
                     <div class="metric-row">
                         <span>RAM</span>
-                        <div class="metric-bar"><span style="width: {{ server_card.ram_percent }}%"></span></div>
-                        <strong>{{ server_card.ram_percent }}%</strong>
+                        <div class="metric-bar"><span data-live-server-ram-bar style="width: {{ server_card.ram_percent }}%"></span></div>
+                        <strong data-live-server-ram-label>{{ server_card.ram_percent }}%</strong>
                     </div>
                     <div class="metric-row">
                         <span>Disk</span>
-                        <div class="metric-bar"><span style="width: {{ server_card.disk_percent }}%"></span></div>
-                        <strong>{{ server_card.disk_used_gb }} / {{ server_card.disk_total_gb }} ГБ</strong>
+                        <div class="metric-bar"><span data-live-server-disk-bar style="width: {{ server_card.disk_percent }}%"></span></div>
+                        <strong data-live-server-disk-label>{{ server_card.disk_used_gb }} / {{ server_card.disk_total_gb }} ГБ</strong>
                     </div>
                     <div class="metric-row">
                         <span>Трафик</span>
-                        <div class="metric-bar"><span style="width: {{ ((server_card.traffic_mbps or 0) * 4) }}%"></span></div>
-                        <strong>{{ server_card.traffic_mbps or 0 }} МБ/с</strong>
+                        <div class="metric-bar"><span data-live-server-traffic-bar style="width: {{ ((server_card.traffic_mbps or 0) * 4) }}%"></span></div>
+                        <strong data-live-server-traffic-label>{{ server_card.traffic_mbps or 0 }} МБ/с</strong>
                     </div>
                 </div>
                 {% else %}
                 <div class="server-metrics-empty">
-                    <p>{{ server_card.metrics_note }}</p>
+                    <p>{% if admin_page.show_remote_live_metrics %}{{ server_card.metrics_note }}{% else %}Live-метрики серверов доступны на вкладке «Главная».{% endif %}</p>
                 </div>
                 {% endif %}
             </article>

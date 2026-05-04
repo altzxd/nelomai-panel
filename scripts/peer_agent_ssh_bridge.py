@@ -16,13 +16,37 @@ from app.models import Server
 from app.security import decrypt_secret
 
 
-PLINK_BIN = Path(os.environ.get("NELOMAI_PANEL_PLINK_BIN", r"C:\Program Files\PuTTY\plink.exe"))
-SSH_STRICT_HOST_KEY_CHECKING = os.environ.get("NELOMAI_PANEL_SSH_STRICT_HOST_KEY_CHECKING", "accept-new").strip() or "accept-new"
-SSH_CONNECT_TIMEOUT = os.environ.get("NELOMAI_PANEL_SSH_CONNECT_TIMEOUT", "10").strip() or "10"
-SSH_KNOWN_HOSTS_FILE = os.environ.get("NELOMAI_PANEL_SSH_KNOWN_HOSTS_FILE", "").strip()
-SSH_PASS_BIN = os.environ.get("NELOMAI_PANEL_SSHPASS_BIN", "sshpass").strip() or "sshpass"
-SSH_BIN = os.environ.get("NELOMAI_PANEL_SSH_BIN", "ssh").strip() or "ssh"
-SSH_KEY_FILE = os.environ.get("NELOMAI_PANEL_SSH_KEY_FILE", "").strip()
+def _load_local_env_defaults() -> dict[str, str]:
+    env_path = ROOT_DIR / ".env"
+    if not env_path.exists():
+        return {}
+    values: dict[str, str] = {}
+    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
+
+
+_LOCAL_ENV_DEFAULTS = _load_local_env_defaults()
+
+
+def _env_value(name: str, default: str = "") -> str:
+    value = os.environ.get(name)
+    if value is None or not str(value).strip():
+        value = _LOCAL_ENV_DEFAULTS.get(name, default)
+    return str(value).strip() or default
+
+
+PLINK_BIN = Path(_env_value("NELOMAI_PANEL_PLINK_BIN", r"C:\Program Files\PuTTY\plink.exe"))
+SSH_STRICT_HOST_KEY_CHECKING = _env_value("NELOMAI_PANEL_SSH_STRICT_HOST_KEY_CHECKING", "accept-new")
+SSH_CONNECT_TIMEOUT = _env_value("NELOMAI_PANEL_SSH_CONNECT_TIMEOUT", "10")
+SSH_KNOWN_HOSTS_FILE = _env_value("NELOMAI_PANEL_SSH_KNOWN_HOSTS_FILE", "")
+SSH_PASS_BIN = _env_value("NELOMAI_PANEL_SSHPASS_BIN", "sshpass")
+SSH_BIN = _env_value("NELOMAI_PANEL_SSH_BIN", "ssh")
+SSH_KEY_FILE = _env_value("NELOMAI_PANEL_SSH_KEY_FILE", "")
 
 
 def fail(message: str, code: int = 1) -> None:
