@@ -84,6 +84,7 @@ needed for later provisioning, for example:
 - `python3`
 - `tar`
 - `unzip`
+- `ufw`
 - `wireguard`
 - `wireguard-tools`
 - `zip`
@@ -99,8 +100,23 @@ This safe slice is intentionally smaller than the final full bootstrap.
 It may already include installation of `nodejs` as the last package/runtime
 layer before repository rollout, and may also perform the first `git clone` /
 `git pull` into the working tree, `npm install` for the agent module,
-systemd unit file generation with `daemon-reload`, `systemctl enable`,
+environment file generation, installation of an admin public key, SSH
+hardening, secret permissions hardening, role-specific `ufw` rules, systemd
+unit file generation with `daemon-reload`, `systemctl enable`,
 `systemctl restart`, and a first service status check.
+
+For new `Tic`/`Tak` hosts the bootstrap path should also converge them to the
+same base security posture:
+
+- install `ufw` and set default `deny incoming`;
+- keep `22/tcp` open;
+- keep only the required role-specific UDP ports open;
+- install an approved admin SSH public key before disabling password login;
+- disable `PasswordAuthentication`, `KbdInteractiveAuthentication`,
+  `X11Forwarding`, and `AllowTcpForwarding`;
+- enforce `PermitRootLogin prohibit-password`;
+- set `/etc/default/nelomai-*.service` style env files and private keys to
+  `0600`.
 
 If a separate `full` profile exists, it should not fork into a second large
 bootstrap path. It should only add the remaining delta over `safe-init` for

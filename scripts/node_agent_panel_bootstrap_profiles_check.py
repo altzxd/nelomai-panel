@@ -117,7 +117,7 @@ def _assert_profile_view(task: dict[str, Any], expected_profile: str) -> None:
         raise NodePanelBootstrapProfilesFailure("bootstrap_packages is missing")
     if not isinstance(safe_init_packages, list) or not safe_init_packages:
         raise NodePanelBootstrapProfilesFailure("bootstrap_safe_init_packages is missing")
-    if "wireguard" not in safe_init_packages or "build-essential" not in safe_init_packages or "python3" not in safe_init_packages:
+    if "wireguard" not in safe_init_packages or "build-essential" not in safe_init_packages or "python3" not in safe_init_packages or "ufw" not in safe_init_packages:
         raise NodePanelBootstrapProfilesFailure("bootstrap_safe_init_packages is missing required runtime dependencies")
     if "nodejs" in safe_init_packages:
         raise NodePanelBootstrapProfilesFailure("nodejs must remain a command step, not a safe-init package baseline entry")

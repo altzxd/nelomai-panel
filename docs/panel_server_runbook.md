@@ -23,6 +23,8 @@ Start from `.env.example` and replace at least:
 - `DATABASE_URL` with the real PostgreSQL connection string;
 - `PANEL_PUBLIC_BASE_URL` with the real public panel URL;
 - `PEER_AGENT_COMMAND` with the production SSH bridge command.
+- `NELOMAI_AGENT_BOOTSTRAP_ADMIN_PUBKEY` with the public admin key that new
+  `Tic/Tak` bootstrap jobs should install before password SSH is disabled.
 
 Do not deploy with:
 
@@ -51,6 +53,8 @@ Minimum install flow:
 3. Set at least:
    - `PANEL_PUBLIC_BASE_URL=https://nelomai.ru`;
    - `PANEL_TLS_EMAIL=<your-email>` if you want the script to request TLS.
+   - `NELOMAI_AGENT_BOOTSTRAP_ADMIN_PUBKEY="$(cat ~/.ssh/nelomai_admin_ed25519.pub)"` if
+     new agent bootstrap jobs must harden SSH automatically.
 4. After the script completes, inspect:
    - `systemctl status nelomai-panel.service`;
    - `journalctl -u nelomai-panel.service -n 50 --no-pager`.

@@ -44,6 +44,12 @@ Bootstrap assumption:
   install it or update it before the service is started;
 - do not assume preinstalled `wireguard`, `iproute2`, `iptables`, `curl`,
   `git`, `ca-certificates`, `python3`, `zip`, `tar`, or Node.js.
+- bootstrap should also harden a fresh host:
+  - install `ufw`;
+  - switch SSH to key-based admin access;
+  - disable password SSH, `X11Forwarding`, and `AllowTcpForwarding`;
+  - lock secret files down to `0600`;
+  - apply the minimum inbound firewall for the selected server role.
 - current full bootstrap package baseline for Tic/Tak:
   - `bash`
   - `build-essential`
@@ -54,6 +60,7 @@ Bootstrap assumption:
   - `python3`
   - `tar`
   - `unzip`
+  - `ufw`
   - `zip`
   - `iproute2`
   - `iptables`
@@ -151,8 +158,12 @@ Behavior:
 - `NELOMAI_AGENT_BOOTSTRAP_COMMAND_PROFILE`
   default: `safe-init`
   available values:
-  - `safe-init`: remote sanity checks, `apt-get update`, `apt-get upgrade -y`, install of the required runtime baseline (`bash`, `build-essential`, `ca-certificates`, `curl`, `git`, `iproute2`, `iptables`, `jq`, `nftables`, `python3`, `tar`, `unzip`, `wireguard`, `wireguard-tools`, `zip`), NodeSource bootstrap, `nodejs` install, latest Go bootstrap from `go.dev`, build/install of official `amneziawg-tools`, build/install of official `amneziawg-go`, runtime command verification, directory preparation, `git clone/pull` of the monorepo, `npm install --omit=dev` for `agents/node-tic-agent`, environment file generation under `/etc/default/nelomai-<type>-agent`, systemd unit generation, `daemon-reload`, `systemctl enable`, `systemctl restart`, and service status check on a blank Ubuntu 22.04 host
+  - `safe-init`: remote sanity checks, `apt-get update`, `apt-get upgrade -y`, install of the required runtime baseline (`bash`, `build-essential`, `ca-certificates`, `curl`, `git`, `iproute2`, `iptables`, `jq`, `nftables`, `python3`, `tar`, `ufw`, `unzip`, `wireguard`, `wireguard-tools`, `zip`), NodeSource bootstrap, `nodejs` install, latest Go bootstrap from `go.dev`, build/install of official `amneziawg-tools`, build/install of official `amneziawg-go`, runtime command verification, directory preparation, `git clone/pull` of the monorepo, `npm install --omit=dev` for `agents/node-tic-agent`, environment file generation under `/etc/default/nelomai-<type>-agent`, SSH hardening, secret permissions hardening, role-specific `ufw` rules, systemd unit generation, `daemon-reload`, `systemctl enable`, `systemctl restart`, and service status check on a blank Ubuntu 22.04 host
   - `full`: same bootstrap path plus only the package delta that is still missing for the selected server type
+- `NELOMAI_AGENT_BOOTSTRAP_ADMIN_PUBKEY`
+  default: unset
+  optional public SSH key installed into `/root/.ssh/authorized_keys` during
+  bootstrap before password SSH is disabled
 - `NELOMAI_AGENT_BOOTSTRAP_ALLOW_LOCAL`
   default: unset
   must be `1` before `apply` mode can execute commands locally

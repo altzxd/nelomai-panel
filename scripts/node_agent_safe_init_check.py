@@ -114,7 +114,7 @@ def main() -> None:
         checks = [
             "apt-get update",
             "apt-get upgrade -y",
-            "apt-get install -y bash build-essential ca-certificates curl git iproute2 iptables jq nftables python3 tar unzip wireguard wireguard-tools zip",
+            "apt-get install -y bash build-essential ca-certificates curl git iproute2 iptables jq nftables python3 tar unzip ufw wireguard wireguard-tools zip",
             "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -",
             "apt-get install -y nodejs",
             "GO_VERSION=$(curl -fsSL https://go.dev/VERSION?m=text | head -n 1 | tr -d '\\r'); echo \"$GO_VERSION\" > /tmp/nelomai-go-version",
@@ -127,6 +127,10 @@ def main() -> None:
             "command -v python3",
             "command -v awg-quick",
             "command -v amneziawg-go",
+            "chmod 600 '/etc/default/nelomai-tic-agent'",
+            "sshd -t",
+            "systemctl restart ssh",
+            "ufw --force enable",
             "systemctl daemon-reload",
         ]
         indexes = {command: _assert_index(commands, command) for command in checks}
@@ -158,6 +162,14 @@ def main() -> None:
             raise SafeInitCheckFailure("safe-init must include npm install step")
         if not any("cat > '/etc/default/nelomai-tic-agent'" in command for command in commands):
             raise SafeInitCheckFailure("safe-init must include tic env file generation")
+        if not any("cat > '/etc/ssh/sshd_config.d/90-nelomai-hardening.conf'" in command for command in commands):
+            raise SafeInitCheckFailure("safe-init must include ssh hardening config generation")
+        if not any("ufw allow 22/tcp" == command for command in commands):
+            raise SafeInitCheckFailure("safe-init must include ssh firewall rule")
+        if not any("ufw allow 40404/udp" == command for command in commands):
+            raise SafeInitCheckFailure("safe-init must include AWG firewall rule")
+        if not any("ufw allow 10001:10007/udp" == command for command in commands):
+            raise SafeInitCheckFailure("safe-init must include tic interface firewall range")
         if not any("systemctl enable" in command for command in commands):
             raise SafeInitCheckFailure("safe-init must include systemctl enable step")
         if not any("systemctl restart" in command for command in commands):

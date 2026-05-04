@@ -146,8 +146,8 @@ def main() -> None:
         raise FullProfileCheckFailure(f"Unexpected full-profile delta: {extra_commands!r}")
 
     packages = full_plan.get("packages")
-    if not isinstance(packages, list) or "bash" not in packages or "python3" not in packages or "build-essential" not in packages:
-        raise FullProfileCheckFailure("full profile must expose complete package baseline including bash, build-essential, and python3")
+    if not isinstance(packages, list) or "bash" not in packages or "python3" not in packages or "build-essential" not in packages or "ufw" not in packages:
+        raise FullProfileCheckFailure("full profile must expose complete package baseline including bash, build-essential, python3, and ufw")
 
     print("OK: node full-profile bootstrap check passed")
 

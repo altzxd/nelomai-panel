@@ -29,6 +29,10 @@ function environmentFilePath(serverRecord) {
   return `/etc/default/nelomai-${type}-agent`;
 }
 
+function sshHardeningConfigPath() {
+  return "/etc/ssh/sshd_config.d/90-nelomai-hardening.conf";
+}
+
 function thirdPartyRoot() {
   return `${installRoot()}/third_party`;
 }
@@ -47,6 +51,10 @@ function bootstrapCommandProfile() {
     return value;
   }
   return "safe-init";
+}
+
+function bootstrapAdminPublicKey() {
+  return String(process.env.NELOMAI_AGENT_BOOTSTRAP_ADMIN_PUBKEY || "").trim();
 }
 
 function repositoryUrl(payload) {
@@ -69,6 +77,7 @@ function bootstrapPackageList(serverRecord) {
     "python3",
     "tar",
     "unzip",
+    "ufw",
     "zip"
   ];
   const networkRuntimePackages = [
@@ -104,6 +113,7 @@ function safeInitPackageList(serverRecord) {
     "python3",
     "tar",
     "unzip",
+    "ufw",
     "wireguard",
     "wireguard-tools",
     "zip"
@@ -119,6 +129,7 @@ function safeInitPackageList(serverRecord) {
       "python3",
       "tar",
       "unzip",
+      "ufw",
       "zip"
     ];
   }
@@ -181,6 +192,38 @@ function renderEnvironmentFile(serverRecord) {
   return `${lines.join("\n")}\n`;
 }
 
+function renderSshHardeningConfig() {
+  return [
+    "PubkeyAuthentication yes",
+    "PasswordAuthentication no",
+    "KbdInteractiveAuthentication no",
+    "PermitRootLogin prohibit-password",
+    "X11Forwarding no",
+    "AllowTcpForwarding no",
+    "MaxAuthTries 3",
+    "LoginGraceTime 30"
+  ].join("\n");
+}
+
+function firewallRules(serverRecord) {
+  const type = String(serverRecord && serverRecord.server_type || "tic").trim().toLowerCase();
+  if (type === "tak") {
+    return [
+      "22/tcp",
+      "40404/udp",
+      "42001/udp"
+    ];
+  }
+  if (type === "tic") {
+    return [
+      "22/tcp",
+      "40404/udp",
+      "10001:10007/udp"
+    ];
+  }
+  return [];
+}
+
 function buildBootstrapPlan(serverRecord, payload) {
   const repoUrl = repositoryUrl(payload);
   const root = installRoot();
@@ -195,6 +238,10 @@ function buildBootstrapPlan(serverRecord, payload) {
   const awgToolsDir = `${thirdParty}/amneziawg-tools`;
   const awgGoDir = `${thirdParty}/amneziawg-go`;
   const needsAmneziaRuntime = type === "tic" || type === "tak";
+  const adminPublicKey = bootstrapAdminPublicKey();
+  const sshConfigPath = sshHardeningConfigPath();
+  const sshHardeningConfig = renderSshHardeningConfig();
+  const ufwRules = firewallRules(serverRecord);
   const unitContent = renderSystemdUnit(serverRecord);
   const envContent = renderEnvironmentFile(serverRecord);
   const amneziaRuntimeCommands = needsAmneziaRuntime ? [
@@ -244,7 +291,28 @@ function buildBootstrapPlan(serverRecord, payload) {
     `if [ ! -d ${shellQuote(`${root}/current/.git`)} ]; then rm -rf ${shellQuote(`${root}/current`)} && git clone ${shellQuote(repoUrl)} ${shellQuote(`${root}/current`)}; else git -C ${shellQuote(`${root}/current`)} pull --ff-only; fi`,
     `cd ${shellQuote(`${root}/current/agents/node-tic-agent`)} && npm install --omit=dev`,
     `cat > ${shellQuote(envPath)} <<'ENV'\n${envContent}ENV`,
+    `chmod 600 ${shellQuote(envPath)}`,
+    ...(adminPublicKey ? [
+      "install -d -m 700 /root/.ssh",
+      `touch ${shellQuote("/root/.ssh/authorized_keys")}`,
+      `grep -qxF ${shellQuote(adminPublicKey)} ${shellQuote("/root/.ssh/authorized_keys")} || printf '%s\\n' ${shellQuote(adminPublicKey)} >> ${shellQuote("/root/.ssh/authorized_keys")}`,
+      `chmod 600 ${shellQuote("/root/.ssh/authorized_keys")}`
+    ] : []),
+    `cat > ${shellQuote(sshConfigPath)} <<'SSHD'\n${sshHardeningConfig}\nSSHD`,
+    "sshd -t",
+    "systemctl restart ssh",
     `cat > ${shellQuote(svcPath)} <<'UNIT'\n${unitContent}\nUNIT`,
+    "find /etc/wireguard -type f \\( -name '*.conf' -o -name '*.key' -o -name '*private*' \\) -exec chmod 600 {} + 2>/dev/null || true",
+    "install -d -m 700 /etc/amnezia/amneziawg 2>/dev/null || true",
+    "find /etc/amnezia/amneziawg -type f \\( -name '*.conf' -o -name '*.key' -o -name '*private*' \\) -exec chmod 600 {} + 2>/dev/null || true",
+    ...(ufwRules.length > 0 ? [
+      "ufw --force reset",
+      "ufw default deny incoming",
+      "ufw default allow outgoing",
+      ...ufwRules.map((rule) => `ufw allow ${rule}`),
+      "ufw --force enable",
+      "ufw status"
+    ] : []),
     "systemctl daemon-reload",
     `systemctl enable ${svcName}`,
     `systemctl restart ${svcName}`,
@@ -266,7 +334,9 @@ function buildBootstrapPlan(serverRecord, payload) {
     `Full-only packages: ${fullOnlyPackages.join(", ") || "none"}`,
     `Install root: ${root}`,
     `Service: ${svcName}`,
-    `Bootstrap command profile: ${commandProfile}`
+    `Bootstrap command profile: ${commandProfile}`,
+    `SSH hardening: ${needsAmneziaRuntime ? "enabled" : "disabled"}`,
+    `Firewall rules: ${ufwRules.join(", ") || "none"}`
   ];
   return {
     os_family: "ubuntu",

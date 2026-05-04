@@ -28,6 +28,7 @@ PANEL_SECRET_KEY="${PANEL_SECRET_KEY:-}"
 NELOMAI_GIT_REPO_VALUE="${NELOMAI_GIT_REPO:-https://github.com/altzxd/nelomai-panel.git}"
 PEER_AGENT_COMMAND_VALUE="${PEER_AGENT_COMMAND_VALUE:-}"
 ACCESS_TOKEN_EXPIRE_MINUTES_VALUE="${ACCESS_TOKEN_EXPIRE_MINUTES_VALUE:-720}"
+NELOMAI_AGENT_BOOTSTRAP_ADMIN_PUBKEY_VALUE="${NELOMAI_AGENT_BOOTSTRAP_ADMIN_PUBKEY:-}"
 PANEL_RUN_USER="${PANEL_RUN_USER:-}"
 DATABASE_URL_VALUE=""
 
@@ -147,6 +148,7 @@ write_env_file() {
   local git_repo="$6"
   local peer_agent_command="$7"
   local access_minutes="$8"
+  local bootstrap_admin_pubkey="$9"
 
   cp "${env_example}" "${env_path}"
   python3 - <<PY
@@ -162,6 +164,9 @@ values = {
     "NELOMAI_GIT_REPO": r"${git_repo}",
     "PEER_AGENT_COMMAND": r"${peer_agent_command}",
 }
+bootstrap_admin_pubkey = r"${bootstrap_admin_pubkey}"
+if bootstrap_admin_pubkey:
+    values["NELOMAI_AGENT_BOOTSTRAP_ADMIN_PUBKEY"] = bootstrap_admin_pubkey
 
 lines = env_path.read_text(encoding="utf-8").splitlines()
 updated = []
@@ -178,6 +183,7 @@ for key, value in values.items():
         updated.append(f"{key}={value}")
 env_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
 PY
+  chmod 600 "${env_path}"
 }
 
 install_python_dependencies() {
@@ -205,6 +211,7 @@ Type=simple
 User=${PANEL_RUN_USER}
 Group=${PANEL_RUN_USER}
 WorkingDirectory=${ROOT_DIR}
+EnvironmentFile=-${ENV_PATH}
 ExecStart=${VENV_PATH}/bin/python -m uvicorn app.main:app --host ${PANEL_BIND_HOST} --port ${PANEL_BIND_PORT}
 Restart=always
 RestartSec=3
@@ -349,7 +356,8 @@ main() {
     "${PANEL_PUBLIC_BASE_URL}" \
     "${NELOMAI_GIT_REPO_VALUE}" \
     "${PEER_AGENT_COMMAND_VALUE}" \
-    "${ACCESS_TOKEN_EXPIRE_MINUTES_VALUE}"
+    "${ACCESS_TOKEN_EXPIRE_MINUTES_VALUE}" \
+    "${NELOMAI_AGENT_BOOTSTRAP_ADMIN_PUBKEY_VALUE}"
   install_python_dependencies
   run_migrations
   write_systemd_unit
