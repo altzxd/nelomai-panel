@@ -19,6 +19,8 @@ from urllib.parse import quote, urlparse
 from zoneinfo import ZoneInfo
 
 import httpx
+import qrcode
+from qrcode.image.svg import SvgPathImage
 from sqlalchemy import Select, func, inspect, or_, select
 from sqlalchemy.orm import Session, joinedload
 
@@ -8522,6 +8524,32 @@ def download_peer_config(db: Session, actor: User, peer_id: int) -> dict[str, ob
         default_filename=f"{peer.interface.name}-{peer.slot}.conf",
         default_content_type="text/plain; charset=utf-8",
     )
+
+
+def build_peer_qr_code(db: Session, actor: User, peer_id: int) -> dict[str, object]:
+    payload = download_peer_config(db, actor, peer_id)
+    content = str(payload.get("content") or "").strip()
+    if not content:
+        raise InvalidInputError("Peer config is empty")
+
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=10,
+        border=4,
+        image_factory=SvgPathImage,
+    )
+    qr.add_data(content)
+    qr.make(fit=True)
+    image = qr.make_image()
+    buffer = io.BytesIO()
+    image.save(buffer)
+    svg_bytes = buffer.getvalue()
+    data_url = f"data:image/svg+xml;base64,{base64.b64encode(svg_bytes).decode('ascii')}"
+    return {
+        "filename": str(payload.get("filename") or f"peer-{peer_id}.conf"),
+        "data_url": data_url,
+    }
 
 
 def download_peer_config_public(db: Session, peer_id: int, token_id: str) -> dict[str, object]:

@@ -336,6 +336,15 @@ def run() -> None:
             )
 
             assert_status(client.get("/dashboard", headers=user_headers), 200, "user dashboard")
+            if peer_id is not None:
+                qr_response = client.get(f"/api/peers/{peer_id}/qr", headers=user_headers)
+                if settings.peer_agent_command:
+                    assert_status(qr_response, 200, "user own peer qr")
+                    qr_payload = qr_response.json()
+                    if not str(qr_payload.get("data_url") or "").startswith("data:image/svg+xml;base64,"):
+                        raise SmokeFailure("peer qr must return svg data url")
+                else:
+                    assert_status(qr_response, 503, "user own peer qr without agent command")
             assert_status(
                 client.get(f"/dashboard?target_user_id={user_id}&preview=1", headers=admin_headers),
                 200,
@@ -752,6 +761,11 @@ def run() -> None:
                     client.get(f"/api/peers/{foreign_peer_id}/download", headers=user_headers),
                     403,
                     "regular user cannot download foreign peer config",
+                )
+                assert_status(
+                    client.get(f"/api/peers/{foreign_peer_id}/qr", headers=user_headers),
+                    403,
+                    "regular user cannot get foreign peer qr",
                 )
                 assert_status(
                     client.put(

@@ -310,6 +310,7 @@
                                     <button class="ghost-button small" type="button" {% if not preview_mode %}data-peer-recreate="{{ peer.id }}"{% else %}disabled{% endif %}>Пересоздать</button>
                                     {% if peer.download_url %}
                                     <a class="ghost-button small" href="{{ peer.download_url }}">Скачать</a>
+                                    <button class="ghost-button small" type="button" data-peer-qr="{{ peer.id }}">QR</button>
                                     {% endif %}
                                     <button class="ghost-button small danger" type="button" {% if not preview_mode %}data-peer-delete="{{ peer.id }}"{% else %}disabled{% endif %}>Удалить</button>
                                 </div>
@@ -622,4 +623,19 @@
     </div>
 </div>
 {% endif %}
+<div class="modal-backdrop" data-peer-qr-modal hidden>
+    <div class="modal-card">
+        <div class="section-header">
+            <div>
+                <p class="eyebrow">QR</p>
+                <h3 data-peer-qr-title>Peer QR</h3>
+            </div>
+            <button class="ghost-button small" type="button" data-close-peer-qr>Закрыть</button>
+        </div>
+        <div class="contact-links">
+            <img data-peer-qr-image alt="Peer QR" style="width: min(100%, 360px); height: auto; background: white; padding: 12px; border-radius: 18px;">
+        </div>
+        <p class="modal-note">Отсканируйте QR код в мобильном клиенте WireGuard.</p>
+    </div>
+</div>
 {% endblock %}

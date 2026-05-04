@@ -98,6 +98,7 @@ from app.services import (
     delete_all_audit_logs,
     delete_audit_logs_older_than,
     delete_peer,
+    build_peer_qr_code,
     download_interface_bundle,
     download_peer_config,
     download_peer_config_public,
@@ -2117,6 +2118,18 @@ def download_peer_config_endpoint(
         payload = download_peer_config(db, current_user, peer_id)
         return build_download_response(payload)
     except (EntityNotFoundError, PermissionDeniedError, ServerOperationUnavailableError) as exc:
+        raise_service_http_error(exc)
+
+
+@router.get("/api/peers/{peer_id}/qr")
+def peer_qr_code_endpoint(
+    peer_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    try:
+        return build_peer_qr_code(db, current_user, peer_id)
+    except (EntityNotFoundError, PermissionDeniedError, InvalidInputError, ServerOperationUnavailableError) as exc:
         raise_service_http_error(exc)
 
 

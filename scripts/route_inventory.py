@@ -110,6 +110,7 @@ ROUTE_RULES = [
     RouteRule(("GET",), "/downloads/peer/{token}", "public-token", "direct config download only"),
     RouteRule(("DELETE",), "/api/peers/{peer_id}", "auth/owner-or-admin/agent-backed", "delete own peer; preview denied"),
     RouteRule(("GET",), "/api/peers/{peer_id}/download", "auth/owner-or-admin/agent-backed", "download own peer config"),
+    RouteRule(("GET",), "/api/peers/{peer_id}/qr", "auth/owner-or-admin/agent-backed", "download own peer qr"),
     RouteRule(("GET",), "/api/interfaces/{interface_id}/download-all", "auth/owner-or-admin/agent-backed", "download own interface bundle"),
     RouteRule(("POST",), "/api/admin/users/{user_id}/assign-interface/{interface_id}", "admin", "assign pending interface"),
     RouteRule(("POST",), "/api/admin/users/{user_id}/detach-interface/{interface_id}", "admin", "detach interface; preview denied"),

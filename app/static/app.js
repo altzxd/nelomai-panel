@@ -170,6 +170,45 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  const peerQrModal = document.querySelector("[data-peer-qr-modal]");
+  const peerQrImage = peerQrModal?.querySelector("[data-peer-qr-image]");
+  const peerQrTitle = peerQrModal?.querySelector("[data-peer-qr-title]");
+  document.querySelector("[data-close-peer-qr]")?.addEventListener("click", () => {
+    if (!peerQrModal) {
+      return;
+    }
+    peerQrModal.hidden = true;
+  });
+  peerQrModal?.addEventListener("click", (event) => {
+    if (event.target === peerQrModal) {
+      peerQrModal.hidden = true;
+    }
+  });
+
+  document.querySelectorAll("[data-peer-qr]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const peerId = button.getAttribute("data-peer-qr");
+      if (!peerId || !peerQrModal || !peerQrImage) {
+        return;
+      }
+      const previous = button.textContent;
+      try {
+        setActionBusy(button, true);
+        button.textContent = "Загрузка...";
+        const result = await requestJson(`/api/peers/${peerId}/qr`);
+        peerQrImage.setAttribute("src", result.data_url || "");
+        peerQrTitle.textContent = result.filename ? `QR: ${result.filename}` : "Peer QR";
+        peerQrModal.hidden = false;
+      } catch (error) {
+        window.alert(error.message);
+        showToast("error", error.message, "error");
+      } finally {
+        setActionBusy(button, false);
+        button.textContent = previous;
+      }
+    });
+  });
+
   document.querySelectorAll("[data-copy]").forEach((button) => {
     button.addEventListener("click", async () => {
       const value = button.getAttribute("data-copy") || "";
