@@ -77,6 +77,10 @@ const ACTION_REGISTRY = {
     components: ["tic-agent"],
     capabilities: ["interface.create.v1"]
   },
+  delete_interface: {
+    components: ["tic-agent"],
+    capabilities: ["interface.delete.v1"]
+  },
   toggle_interface: {
     components: ["tic-agent"],
     capabilities: ["interface.state.v1"]

@@ -1136,6 +1136,13 @@ function createInterfaceRecord(state, payload) {
   return record;
 }
 
+function deleteInterfaceRecord(state, payload) {
+  const interfaceRecord = ensureInterfaceRecord(state, payload);
+  state.interfaces = state.interfaces.filter((item) => item !== interfaceRecord);
+  saveState(state);
+  return interfaceRecord;
+}
+
 function toggleInterfaceRecord(state, payload) {
   const targetState = payload.target_state && typeof payload.target_state === "object" ? payload.target_state : {};
   if (typeof targetState.is_enabled !== "boolean") {
@@ -1273,6 +1280,7 @@ module.exports = {
   findFirstFreePort,
   findFirstFreeAddress,
   createInterfaceRecord,
+  deleteInterfaceRecord,
   createBootstrapTaskRecord,
   findBootstrapTaskRecord,
   completeBootstrapTaskRecord,

@@ -417,6 +417,13 @@ function removeTunnelArtifacts(tunnelRecord) {
   fs.rmSync(directory, { recursive: true, force: true });
 }
 
+function removeInterfaceArtifacts(interfaceRecord) {
+  const directory = interfaceDirectory(interfaceRecord);
+  if (fs.existsSync(directory) && fs.statSync(directory).isDirectory()) {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 function collectInterfaceBundleEntries(interfaceRecord) {
   const directory = interfaceDirectory(interfaceRecord);
   const entries = [];
@@ -890,6 +897,17 @@ function buildRefreshInterfaceCommands(interfaceRecord) {
   return commands;
 }
 
+function buildDeleteInterfaceCommands(interfaceRecord) {
+  const interfaceName = systemInterfaceName(interfaceRecord);
+  const systemConfigPath = systemInterfaceConfigPath(interfaceRecord);
+  const systemPeerDir = systemInterfacePeersRoot(interfaceRecord);
+  return [
+    `if [ -f "${systemConfigPath}" ]; then wg-quick down ${interfaceName} || (ip link show dev ${interfaceName} >/dev/null 2>&1 && ip link delete dev ${interfaceName}) || true; elif ip link show dev ${interfaceName} >/dev/null 2>&1; then ip link delete dev ${interfaceName}; fi`,
+    `rm -f ${systemConfigPath}`,
+    `rm -rf ${systemPeerDir}`,
+  ];
+}
+
 function buildRecreatePeerCommands(interfaceRecord, peerRecord) {
   const systemPeerDir = systemInterfacePeersRoot(interfaceRecord);
   const systemConfigPath = systemInterfaceConfigPath(interfaceRecord);
@@ -1030,9 +1048,11 @@ module.exports = {
   syncTunnelArtifacts,
   inspectTunnelArtifacts,
   removeTunnelArtifacts,
+  removeInterfaceArtifacts,
   removePeerArtifacts,
   collectInterfaceBundleEntries,
   buildCreateInterfaceCommands,
+  buildDeleteInterfaceCommands,
   buildToggleInterfaceCommands,
   buildTogglePeerCommands,
   buildRefreshInterfaceCommands,

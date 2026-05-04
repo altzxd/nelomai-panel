@@ -13,6 +13,7 @@ const {
   findFirstFreePort,
   findFirstFreeAddress,
   createInterfaceRecord,
+  deleteInterfaceRecord,
   createBootstrapTaskRecord,
   findBootstrapTaskRecord,
   completeBootstrapTaskRecord,
@@ -50,9 +51,11 @@ const {
   syncInterfaceArtifacts,
   syncAllPeerArtifacts,
   syncPeerArtifacts,
+  removeInterfaceArtifacts,
   removePeerArtifacts,
   collectInterfaceBundleEntries,
   buildCreateInterfaceCommands,
+  buildDeleteInterfaceCommands,
   buildToggleInterfaceCommands,
   buildTogglePeerCommands,
   buildRefreshInterfaceCommands,
@@ -233,6 +236,7 @@ function realInterfaceResponse(payload) {
   const interfaceActions = new Set([
     "prepare_interface",
     "create_interface",
+    "delete_interface",
     "toggle_interface",
     "update_interface_route_mode",
     "update_interface_tak_server",
@@ -278,6 +282,28 @@ function realInterfaceResponse(payload) {
         agent_interface_id: record.agent_interface_id,
         execution_mode: execution.mode,
         system_commands_applied: execution.applied
+      });
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (action === "delete_interface") {
+    try {
+      const record = ensureInterfaceRecordPersisted(state, payload);
+      const deleteExecution = maybeRunSystemCommands(buildDeleteInterfaceCommands(record));
+      removeInterfaceArtifacts(record);
+      deleteInterfaceRecord(state, payload);
+      const firewallExecution = maybeRunSystemCommands(buildFirewallReconcileCommands(state, firewallServerRecord));
+      return ok({
+        status: "deleted",
+        interface: {
+          panel_interface_id: record.panel_interface_id,
+          agent_interface_id: record.agent_interface_id,
+          name: record.name
+        },
+        execution_mode: deleteExecution.mode,
+        system_commands_applied: Boolean(deleteExecution.applied || firewallExecution.applied)
       });
     } catch (error) {
       return fail(error instanceof Error ? error.message : String(error));

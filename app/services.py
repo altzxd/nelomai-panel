@@ -242,6 +242,7 @@ ACTION_CAPABILITIES = {
     "detach_tak_tunnel": ["tunnel.tak.detach.v1"],
     "prepare_interface": ["interface.create.v1"],
     "create_interface": ["interface.create.v1"],
+    "delete_interface": ["interface.delete.v1"],
     "toggle_interface": ["interface.state.v1"],
     "update_interface_route_mode": ["interface.route_mode.v1"],
     "update_interface_tak_server": ["interface.tak_server.v1"],
@@ -9003,7 +9004,22 @@ def register_user_via_link(db: Session, token_id: str, payload: PublicRegistrati
     db.add(link)
     db.commit()
     db.refresh(user)
-    _auto_create_registration_interfaces(db, link, user)
+    try:
+        _auto_create_registration_interfaces(db, link, user)
+    except Exception:
+        db.rollback()
+        cleanup_user = db.get(User, user.id)
+        cleanup_link = db.get(RegistrationLink, link.id)
+        actor = _resolve_registration_actor(db, link)
+        if cleanup_user is not None:
+            _delete_interfaces_for_user(db, cleanup_user, actor_user_id=actor.id if actor is not None else None)
+            db.delete(cleanup_user)
+        if cleanup_link is not None:
+            cleanup_link.used_by_user_id = None
+            cleanup_link.used_at = None
+            db.add(cleanup_link)
+        db.commit()
+        raise
     write_audit_log(
         db,
         event_type="registration_links.used",
@@ -9091,6 +9107,44 @@ def assign_interface_to_user(db: Session, actor: User, interface_id: int, user_i
     )
 
 
+def _delete_interface_runtime(db: Session, interface: Interface, *, actor_user_id: int | None = None) -> None:
+    if not settings.peer_agent_command:
+        return
+    _ensure_interface_uses_tic_agent(interface)
+    _run_agent_executor_logged(
+        db,
+        _build_tic_executor_payload(
+            "delete_interface",
+            interface,
+            exclusion_filters_enabled=interface_exclusion_filters_enabled(db, interface),
+            block_filters_enabled=block_filters_enabled(db),
+        ),
+        actor_user_id=actor_user_id,
+    )
+
+
+def _delete_interfaces_for_user(db: Session, user: User, *, actor_user_id: int | None = None) -> None:
+    interfaces = (
+        db.execute(
+            select(Interface)
+            .options(
+                joinedload(Interface.peers),
+                joinedload(Interface.tic_server),
+                joinedload(Interface.tak_server),
+            )
+            .where(Interface.user_id == user.id)
+            .order_by(Interface.id.asc())
+        )
+        .unique()
+        .scalars()
+        .all()
+    )
+    for interface in interfaces:
+        _delete_interface_runtime(db, interface, actor_user_id=actor_user_id)
+    for interface in interfaces:
+        db.delete(interface)
+
+
 def unassign_interface_from_user(db: Session, actor: User, interface_id: int, user_id: int) -> None:
     require_admin(actor)
     interface = get_interface_by_id(db, interface_id)
@@ -9124,6 +9178,7 @@ def delete_pending_interface(db: Session, actor: User, interface_id: int) -> Non
         raise PermissionDeniedError("Only interfaces waiting for owner can be deleted")
     if any(peer.is_enabled for peer in interface.peers):
         raise PermissionDeniedError("Disable the interface before deleting it")
+    _delete_interface_runtime(db, interface, actor_user_id=actor.id)
     db.delete(interface)
     db.commit()
 
@@ -9209,6 +9264,7 @@ def delete_user_account(db: Session, actor: User, user_id: int) -> None:
     user = get_user_by_id(db, user_id)
     if user.role == UserRole.ADMIN:
         raise PermissionDeniedError("Admin user cannot be deleted")
+    _delete_interfaces_for_user(db, user, actor_user_id=actor.id)
     db.delete(user)
     db.commit()
 

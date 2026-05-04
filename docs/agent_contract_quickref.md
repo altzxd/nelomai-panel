@@ -131,6 +131,11 @@ These actions are supported only by `tic-agent`. `tak-agent` must reject them.
 - output: optional `agent_interface_id`;
 - panel persists interface only after agent success.
 
+`delete_interface`
+- agent removes the live interface, system/runtime artifacts, and persistent
+  agent state for that interface;
+- panel deletes the DB row only after success.
+
 `toggle_interface`
 - `target_state.is_enabled`
 
@@ -359,6 +364,7 @@ The minimum useful Tic-agent implementation should support:
 
 - `prepare_interface`
 - `create_interface`
+- `delete_interface`
 - `toggle_interface`
 - `toggle_peer`
 - `recreate_peer`

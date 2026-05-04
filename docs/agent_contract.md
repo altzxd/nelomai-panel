@@ -81,6 +81,7 @@ operations explicitly:
 | `detach_tak_tunnel` | `tic-agent` / `tak-agent` | `tunnel.tak.detach.v1` |
 | `prepare_interface` | `tic-agent` | `interface.create.v1` |
 | `create_interface` | `tic-agent` | `interface.create.v1` |
+| `delete_interface` | `tic-agent` | `interface.delete.v1` |
 | `toggle_interface` | `tic-agent` | `interface.state.v1` |
 | `update_interface_route_mode` | `tic-agent` | `interface.route_mode.v1` |
 | `update_interface_tak_server` | `tic-agent` | `interface.tak_server.v1` |
@@ -174,6 +175,12 @@ Expected optional response:
 
 If `agent_interface_id` is omitted, the panel keeps it as `null` and continues
 to identify the server-side interface by `tic_server_id + name`.
+
+`delete_interface`
+
+Panel sends interface identity for a full remove. Agent must stop the live
+interface if it exists, remove system/runtime artifacts, then remove the
+interface record from persistent agent state.
 
 `toggle_interface`
 
