@@ -224,12 +224,18 @@ write_nginx_site() {
 server {
     listen 443 ssl http2;
     server_name ${PANEL_PUBLIC_HOST};
+    server_tokens off;
 
     client_max_body_size 20m;
     ssl_certificate ${cert_dir}/fullchain.pem;
     ssl_certificate_key ${cert_dir}/privkey.pem;
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "same-origin" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Content-Security-Policy "frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
 
     location / {
         proxy_pass http://${PANEL_BIND_HOST}:${PANEL_BIND_PORT};
@@ -246,6 +252,7 @@ server {
 server {
     listen 80;
     server_name ${PANEL_PUBLIC_HOST};
+    server_tokens off;
     return 301 https://\$host\$request_uri;
 }
 EOF
@@ -254,8 +261,13 @@ EOF
 server {
     listen 80;
     server_name ${PANEL_PUBLIC_HOST};
+    server_tokens off;
 
     client_max_body_size 20m;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "same-origin" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Content-Security-Policy "frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
 
     location / {
         proxy_pass http://${PANEL_BIND_HOST}:${PANEL_BIND_PORT};

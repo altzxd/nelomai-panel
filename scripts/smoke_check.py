@@ -389,6 +389,11 @@ def run() -> None:
             assert_status(client.get("/admin/jobs", headers=admin_headers), 200, "admin jobs")
             assert_status(client.get("/admin/diagnostics", headers=admin_headers), 200, "admin diagnostics")
             assert_status(client.post("/admin/diagnostics/run", headers=admin_headers), 200, "run admin diagnostics")
+            assert_status(
+                client.post("/login", data={"login": "admin", "password": ""}),
+                400,
+                "login form rejects empty password without 500",
+            )
             assert_status(client.get("/admin/agent-contract", headers=admin_headers), 200, "admin agent contract page")
             contract_manifest_response = client.get("/api/admin/agent-contract", headers=admin_headers)
             assert_status(contract_manifest_response, 200, "admin agent contract api")

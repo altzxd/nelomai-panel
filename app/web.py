@@ -616,7 +616,15 @@ async def login(
     db: Session = Depends(get_db),
 ) -> Response:
     form_data = await request.form()
-    form = LoginForm(login=str(form_data.get("login", "")), password=str(form_data.get("password", "")))
+    try:
+        form = LoginForm(login=str(form_data.get("login", "")), password=str(form_data.get("password", "")))
+    except ValidationError:
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {"error": "Заполните логин и пароль корректно"},
+            status_code=status.HTTP_400_BAD_REQUEST,
+        )
     retry_after = _login_rate_limit_retry_after_seconds(request, form.login)
     if retry_after is not None:
         write_audit_log(
