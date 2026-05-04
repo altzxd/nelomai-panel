@@ -22,6 +22,7 @@ SSH_CONNECT_TIMEOUT = os.environ.get("NELOMAI_PANEL_SSH_CONNECT_TIMEOUT", "10").
 SSH_KNOWN_HOSTS_FILE = os.environ.get("NELOMAI_PANEL_SSH_KNOWN_HOSTS_FILE", "").strip()
 SSH_PASS_BIN = os.environ.get("NELOMAI_PANEL_SSHPASS_BIN", "sshpass").strip() or "sshpass"
 SSH_BIN = os.environ.get("NELOMAI_PANEL_SSH_BIN", "ssh").strip() or "ssh"
+SSH_KEY_FILE = os.environ.get("NELOMAI_PANEL_SSH_KEY_FILE", "").strip()
 
 
 def fail(message: str, code: int = 1) -> None:
@@ -57,8 +58,10 @@ def _resolve_server_identity(server: dict[str, object]) -> tuple[str, str, str, 
                 ssh_login = ssh_login or record.ssh_login or "root"
                 ssh_password = ssh_password or decrypt_secret(record.ssh_password or "")
                 ssh_port = ssh_port or record.ssh_port or 22
-    if not host or not ssh_password:
-        fail("server payload must include host and ssh_password")
+    if not host:
+        fail("server payload must include host")
+    if not ssh_password and not SSH_KEY_FILE:
+        fail("server payload must include ssh_password or panel SSH key must be configured")
     return host, ssh_login, ssh_password, ssh_port
 
 
@@ -130,6 +133,38 @@ def _run_linux_ssh(host: str, ssh_login: str, ssh_password: str, ssh_port: int, 
     )
 
 
+def _run_linux_ssh_key(host: str, ssh_login: str, ssh_port: int, remote_command: str, key_file: str) -> subprocess.CompletedProcess[str]:
+    command = [
+        SSH_BIN,
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        f"StrictHostKeyChecking={SSH_STRICT_HOST_KEY_CHECKING}",
+        "-o",
+        f"ConnectTimeout={SSH_CONNECT_TIMEOUT}",
+        "-i",
+        key_file,
+    ]
+    if SSH_KNOWN_HOSTS_FILE:
+        command.extend(["-o", f"UserKnownHostsFile={SSH_KNOWN_HOSTS_FILE}"])
+    command.extend(
+        [
+            "-p",
+            str(ssh_port),
+            f"{ssh_login}@{host}",
+            remote_command,
+        ]
+    )
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+
+
 def main() -> None:
     raw_payload = sys.stdin.read()
     try:
@@ -147,7 +182,18 @@ def main() -> None:
     if sys.platform == "win32":
         completed = _run_windows_plink(host, ssh_login, ssh_password, ssh_port, remote_command)
     else:
-        completed = _run_linux_ssh(host, ssh_login, ssh_password, ssh_port, remote_command)
+        completed = None
+        key_file = SSH_KEY_FILE
+        if key_file:
+            key_path = Path(key_file)
+            if not key_path.exists():
+                fail(f"panel SSH key file not found: {key_file}")
+            completed = _run_linux_ssh_key(host, ssh_login, ssh_port, remote_command, key_file)
+            if completed.returncode != 0 and not ssh_password:
+                detail = (completed.stderr or completed.stdout or f"exit={completed.returncode}").strip()
+                fail(detail)
+        if completed is None or completed.returncode != 0:
+            completed = _run_linux_ssh(host, ssh_login, ssh_password, ssh_port, remote_command)
 
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout or f"exit={completed.returncode}").strip()
