@@ -6423,7 +6423,9 @@ def _server_metrics_note(
         rx_label = _format_bytes_label(_metric_int(runtime_metrics, "network_rx_bytes"))
         tx_label = _format_bytes_label(_metric_int(runtime_metrics, "network_tx_bytes"))
         if isinstance(iface, str) and iface.strip() and (rx_label or tx_label):
-            parts.append(f"Сеть {iface.strip()}: RX {rx_label or 'нет данных'} / TX {tx_label or 'нет данных'}")
+            parts.append(
+                f"Сеть {iface.strip()}: Получено {rx_label or 'нет данных'} / Отправлено {tx_label or 'нет данных'}"
+            )
         if parts:
             return " · ".join(parts)
     if status == "online" and server.last_seen_at is not None:
