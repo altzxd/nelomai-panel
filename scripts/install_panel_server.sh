@@ -18,6 +18,7 @@ NGINX_SITE_AVAILABLE_PATH="/etc/nginx/sites-available/${NGINX_SITE_NAME}"
 NGINX_SITE_ENABLED_PATH="/etc/nginx/sites-enabled/${NGINX_SITE_NAME}"
 PANEL_BIND_HOST="${PANEL_BIND_HOST:-127.0.0.1}"
 PANEL_BIND_PORT="${PANEL_BIND_PORT:-8000}"
+PANEL_WORKERS="${PANEL_WORKERS:-2}"
 PANEL_PUBLIC_BASE_URL="${PANEL_PUBLIC_BASE_URL:-https://nelomai.ru}"
 PANEL_PUBLIC_HOST="${PANEL_PUBLIC_HOST:-}"
 PANEL_TLS_EMAIL="${PANEL_TLS_EMAIL:-}"
@@ -218,7 +219,7 @@ User=${PANEL_RUN_USER}
 Group=${PANEL_RUN_USER}
 WorkingDirectory=${ROOT_DIR}
 EnvironmentFile=-${ENV_PATH}
-ExecStart=${VENV_PATH}/bin/python -m uvicorn app.main:app --host ${PANEL_BIND_HOST} --port ${PANEL_BIND_PORT}
+ExecStart=${VENV_PATH}/bin/python -m uvicorn app.main:app --host ${PANEL_BIND_HOST} --port ${PANEL_BIND_PORT} --workers ${PANEL_WORKERS}
 Restart=always
 RestartSec=3
 

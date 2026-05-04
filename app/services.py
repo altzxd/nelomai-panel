@@ -7984,6 +7984,39 @@ def _ensure_interface_network_values_available(
         raise PermissionDeniedError("IPv4 address is already used on this Tic server")
 
 
+def _first_free_listen_port_from_db(db: Session, *, tic_server_id: int, start: int = 10001) -> int:
+    used_ports = set(
+        db.execute(select(Interface.listen_port).where(Interface.tic_server_id == tic_server_id)).scalars().all()
+    )
+    port = start
+    while port in used_ports:
+        port += 1
+    return port
+
+
+def _first_free_address_v4_from_db(db: Session, *, tic_server_id: int) -> str:
+    rows = db.execute(select(Interface.address_v4).where(Interface.tic_server_id == tic_server_id)).scalars().all()
+    used_slots: set[int] = set()
+    for value in rows:
+        raw = str(value or "").strip()
+        if not raw:
+            continue
+        ip_part = raw.split("/", 1)[0]
+        parts = ip_part.split(".")
+        if len(parts) != 4:
+            continue
+        try:
+            slot = int(parts[2])
+        except ValueError:
+            continue
+        if 1 <= slot <= 254:
+            used_slots.add(slot)
+    slot = 1
+    while slot in used_slots:
+        slot += 1
+    return f"10.8.{slot}.1/24"
+
+
 def prepare_interface_creation(db: Session, actor: User, payload: InterfacePrepareRequest) -> InterfaceAllocationView:
     require_admin(actor)
     name = _ensure_interface_name_available(db, payload.name)
@@ -8014,6 +8047,12 @@ def prepare_interface_creation(db: Session, actor: User, payload: InterfacePrepa
         raise ServerOperationUnavailableError("Tic server did not return listen_port")
     if not isinstance(address_v4, str) or not address_v4.strip():
         raise ServerOperationUnavailableError("Tic server did not return address_v4")
+    db_listen_port = _first_free_listen_port_from_db(db, tic_server_id=tic_server.id)
+    db_address_v4 = _first_free_address_v4_from_db(db, tic_server_id=tic_server.id)
+    if listen_port != db_listen_port:
+        listen_port = db_listen_port
+    if address_v4.strip() != db_address_v4:
+        address_v4 = db_address_v4
     _ensure_interface_network_values_available(
         db,
         tic_server_id=tic_server.id,

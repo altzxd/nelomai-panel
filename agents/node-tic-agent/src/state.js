@@ -993,6 +993,26 @@ function ensureInterfaceRecord(state, payload) {
   if (!record) {
     throw new Error("Interface is not known to agent state");
   }
+  const panelInterfaceId = Number(interfacePayload.id);
+  if (Number.isInteger(panelInterfaceId) && panelInterfaceId > 0 && Number(record.panel_interface_id || 0) !== panelInterfaceId) {
+    record.panel_interface_id = panelInterfaceId;
+  }
+  const listenPort = Number(interfacePayload.listen_port);
+  if (Number.isInteger(listenPort) && listenPort > 0) {
+    record.listen_port = listenPort;
+  }
+  const addressV4 = String(interfacePayload.address_v4 || "").trim();
+  if (addressV4) {
+    record.address_v4 = addressV4;
+  }
+  const routeMode = String(interfacePayload.route_mode || "").trim();
+  if (routeMode) {
+    record.route_mode = routeMode;
+  }
+  const interfaceName = String(interfacePayload.name || "").trim();
+  if (interfaceName) {
+    record.name = interfaceName;
+  }
   if (!Array.isArray(record.peers)) {
     record.peers = [];
   }
