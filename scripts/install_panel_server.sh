@@ -168,19 +168,25 @@ bootstrap_admin_pubkey = r"${bootstrap_admin_pubkey}"
 if bootstrap_admin_pubkey:
     values["NELOMAI_AGENT_BOOTSTRAP_ADMIN_PUBKEY"] = bootstrap_admin_pubkey
 
+def render_value(key: str, value: str) -> str:
+    if key == "NELOMAI_AGENT_BOOTSTRAP_ADMIN_PUBKEY":
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    return value
+
 lines = env_path.read_text(encoding="utf-8").splitlines()
 updated = []
 seen = set()
 for line in lines:
     key = line.split("=", 1)[0] if "=" in line else line
     if key in values:
-        updated.append(f"{key}={values[key]}")
+        updated.append(f"{key}={render_value(key, values[key])}")
         seen.add(key)
     else:
         updated.append(line)
 for key, value in values.items():
     if key not in seen:
-        updated.append(f"{key}={value}")
+        updated.append(f"{key}={render_value(key, value)}")
 env_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
 PY
   chmod 600 "${env_path}"
