@@ -49,6 +49,7 @@ ROUTE_RULES = [
     RouteRule(("GET",), "/api/admin/agent-contract", "admin", "JSON contract manifest for future Node-agent"),
     RouteRule(("POST",), "/api/admin/jobs/expired-peers/run", "admin/agent-backed", "run expired peers cleanup job"),
     RouteRule(("POST",), "/api/admin/jobs/{job_id}/cancel", "admin", "cancel queued, running or stuck panel job"),
+    RouteRule(("POST",), "/api/admin/jobs/cleanup", "admin", "delete inactive panel jobs by current filters"),
     RouteRule(("POST",), "/api/admin/servers", "admin/agent-backed", "bootstrap server task"),
     RouteRule(("GET",), "/api/admin/server-bootstrap/{task_id}", "admin", "bootstrap task status"),
     RouteRule(("POST",), "/api/admin/server-bootstrap/{task_id}/input", "admin", "interactive bootstrap input"),

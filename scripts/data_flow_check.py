@@ -39,6 +39,7 @@ from app.services import (
     PermissionDeniedError,
     assign_interface_to_user,
     cancel_panel_job,
+    cleanup_inactive_panel_jobs,
     create_panel_job,
     delete_user_account,
     delete_server_record,
@@ -512,6 +513,34 @@ def check_panel_jobs_lifecycle() -> None:
         assert_true(marked >= 1, "stuck panel job was not detected")
         assert_true(stuck_job.status == PanelJobStatus.STUCK, "running panel job was not marked stuck")
         assert_true(has_problem_panel_jobs(db), "problem panel jobs indicator is false")
+
+        completed_job = create_panel_job(db, admin, f"{PREFIX}-completed-job")
+        completed_job.status = PanelJobStatus.COMPLETED
+        completed_job.completed_at = datetime.now(UTC)
+        failed_job = create_panel_job(db, admin, "server_bootstrap")
+        failed_job.status = PanelJobStatus.FAILED
+        failed_job.completed_at = datetime.now(UTC)
+        cleanup_bootstrap_task = ServerBootstrapTask(
+            panel_job_id=failed_job.id,
+            server_name=f"{PREFIX}bootstrap-cleanup",
+            server_type=ServerType.TIC,
+            host="127.0.0.1",
+            ssh_port=22,
+            ssh_login="root",
+            ssh_password="secret",
+            status="failed",
+            logs_json="[]",
+        )
+        db.add_all([completed_job, failed_job, cleanup_bootstrap_task])
+        db.commit()
+
+        result = cleanup_inactive_panel_jobs(db, admin)
+        assert_true(int(result["deleted"]) >= 3, "inactive panel jobs cleanup did not delete expected jobs")
+        assert_true(db.get(PanelJob, completed_job.id) is None, "completed panel job was not deleted")
+        assert_true(db.get(PanelJob, failed_job.id) is None, "failed panel job was not deleted")
+        db.refresh(cleanup_bootstrap_task)
+        assert_true(cleanup_bootstrap_task.panel_job_id is None, "bootstrap task still points to deleted panel job")
+        assert_true(db.get(PanelJob, stuck_job.id) is None, "stuck panel job was not deleted by cleanup")
 
 
 def run() -> None:

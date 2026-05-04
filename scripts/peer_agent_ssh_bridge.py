@@ -13,6 +13,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from app.database import SessionLocal
 from app.models import Server
+from app.security import decrypt_secret
 
 
 PLINK_BIN = Path(os.environ.get("NELOMAI_PANEL_PLINK_BIN", r"C:\Program Files\PuTTY\plink.exe"))
@@ -45,7 +46,7 @@ def _load_server_from_payload(payload: dict[str, object]) -> dict[str, object]:
 def _resolve_server_identity(server: dict[str, object]) -> tuple[str, str, str, int]:
     host = str(server.get("host") or "").strip()
     ssh_login = str(server.get("ssh_login") or "").strip() or "root"
-    ssh_password = str(server.get("ssh_password") or "").strip()
+    ssh_password = decrypt_secret(str(server.get("ssh_password") or "").strip())
     ssh_port = int(server.get("ssh_port") or 22)
     server_id = server.get("id")
     if (not host or not ssh_password) and isinstance(server_id, int):
@@ -54,7 +55,7 @@ def _resolve_server_identity(server: dict[str, object]) -> tuple[str, str, str, 
             if record is not None:
                 host = host or record.host
                 ssh_login = ssh_login or record.ssh_login or "root"
-                ssh_password = ssh_password or record.ssh_password or ""
+                ssh_password = ssh_password or decrypt_secret(record.ssh_password or "")
                 ssh_port = ssh_port or record.ssh_port or 22
     if not host or not ssh_password:
         fail("server payload must include host and ssh_password")

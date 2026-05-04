@@ -86,6 +86,7 @@ def run() -> None:
         assert_status(client.get("/admin/jobs", headers=user_headers), 403, "user cannot open /admin/jobs")
         assert_status(client.get("/admin/diagnostics", headers=user_headers), 403, "user cannot open /admin/diagnostics")
         assert_status(client.get("/api/admin/agent-contract", headers=user_headers), 403, "user cannot open /api/admin/agent-contract")
+        assert_status(client.post("/api/admin/jobs/cleanup", headers=user_headers), 403, "user cannot clean panel jobs")
 
         assert_status(client.get("/dashboard", headers=user_headers), 200, "user dashboard opens")
         assert_status(client.get("/admin", headers=admin_headers), 200, "admin dashboard opens")

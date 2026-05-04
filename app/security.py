@@ -1,11 +1,20 @@
+import base64
+import hashlib
 from datetime import UTC, datetime, timedelta
 
 import jwt
+from cryptography.fernet import Fernet, InvalidToken
 from passlib.context import CryptContext
 
 from app.config import settings
 
 pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+SECRET_ENCRYPTION_PREFIX = "enc::"
+
+
+def _secret_fernet() -> Fernet:
+    key = base64.urlsafe_b64encode(hashlib.sha256(settings.secret_key.encode("utf-8")).digest())
+    return Fernet(key)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -59,3 +68,30 @@ def decode_auth_download_token(token: str) -> dict:
     if scope not in {"peer_auth_download", "interface_auth_download"}:
         raise jwt.InvalidTokenError("Invalid authenticated download scope")
     return payload
+
+
+def is_encrypted_secret(value: str | None) -> bool:
+    return bool(value and str(value).startswith(SECRET_ENCRYPTION_PREFIX))
+
+
+def encrypt_secret(value: str | None) -> str:
+    raw = str(value or "")
+    if not raw:
+        return ""
+    if is_encrypted_secret(raw):
+        return raw
+    token = _secret_fernet().encrypt(raw.encode("utf-8")).decode("ascii")
+    return f"{SECRET_ENCRYPTION_PREFIX}{token}"
+
+
+def decrypt_secret(value: str | None) -> str:
+    raw = str(value or "")
+    if not raw:
+        return ""
+    if not is_encrypted_secret(raw):
+        return raw
+    try:
+        decrypted = _secret_fernet().decrypt(raw[len(SECRET_ENCRYPTION_PREFIX):].encode("ascii"))
+    except InvalidToken as exc:
+        raise ValueError("Unable to decrypt stored secret") from exc
+    return decrypted.decode("utf-8")

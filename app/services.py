@@ -134,7 +134,14 @@ from app.serializers import (
     serialize_server_options,
     serialize_servers_page,
 )
-from app.security import create_peer_download_token, get_password_hash, verify_password
+from app.security import (
+    create_peer_download_token,
+    decrypt_secret,
+    encrypt_secret,
+    get_password_hash,
+    is_encrypted_secret,
+    verify_password,
+)
 from app.version import get_panel_version
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -366,6 +373,63 @@ def _component_for_action(action: str) -> str:
     return "server-agent"
 
 
+def _encrypt_ssh_password(value: str | None) -> str:
+    return encrypt_secret(value)
+
+
+def _decrypt_ssh_password(value: str | None) -> str:
+    return decrypt_secret(value)
+
+
+def normalize_stored_ssh_secrets(db: Session) -> int:
+    updated = 0
+    for server in db.execute(select(Server)).scalars().all():
+        if server.ssh_password and not is_encrypted_secret(server.ssh_password):
+            server.ssh_password = _encrypt_ssh_password(server.ssh_password)
+            db.add(server)
+            updated += 1
+    for task in db.execute(select(ServerBootstrapTask)).scalars().all():
+        if task.ssh_password and not is_encrypted_secret(task.ssh_password):
+            task.ssh_password = _encrypt_ssh_password(task.ssh_password)
+            db.add(task)
+            updated += 1
+    if updated:
+        db.commit()
+    return updated
+
+
+SENSITIVE_AUDIT_VALUE_RE = re.compile(r"(?i)\b(ssh_)?password=([^;\s]+)")
+
+
+def scrub_sensitive_audit_logs(db: Session) -> int:
+    updated = 0
+    logs = db.execute(
+        select(AuditLog).where(
+            or_(
+                AuditLog.details.ilike("%password=%"),
+                AuditLog.message.ilike("%password=%"),
+                AuditLog.message_ru.ilike("%password=%"),
+            )
+        )
+    ).scalars().all()
+    for log in logs:
+        changed = False
+        for field_name in ("details", "message", "message_ru"):
+            value = getattr(log, field_name)
+            if not value or "password=" not in value.lower():
+                continue
+            sanitized = SENSITIVE_AUDIT_VALUE_RE.sub(lambda match: f"{match.group(1) or ''}password=[REDACTED]", value)
+            if sanitized != value:
+                setattr(log, field_name, sanitized)
+                changed = True
+        if changed:
+            db.add(log)
+            updated += 1
+    if updated:
+        db.commit()
+    return updated
+
+
 def audit_log_retention_days(db: Session) -> int:
     row = db.get(AppSetting, "audit_log_retention_days")
     try:
@@ -449,6 +513,7 @@ def write_audit_log(
 PANEL_JOB_STUCK_AFTER = timedelta(minutes=15)
 PANEL_JOB_PROBLEM_STATUSES = {PanelJobStatus.FAILED, PanelJobStatus.STUCK}
 PANEL_JOB_ACTIVE_STATUSES = {PanelJobStatus.QUEUED, PanelJobStatus.RUNNING, PanelJobStatus.STUCK}
+PANEL_JOB_CLEANUP_STATUSES = {PanelJobStatus.COMPLETED, PanelJobStatus.FAILED, PanelJobStatus.CANCELLED, PanelJobStatus.STUCK}
 TAK_TUNNEL_REPAIR_STATE_KEY = "tak_tunnel_repair_state_json"
 TAK_TUNNEL_AUTO_REPAIR_FAILURE_LIMIT = 5
 
@@ -724,17 +789,12 @@ def serialize_panel_job(
     )
 
 
-def get_panel_jobs_page(
-    db: Session,
-    actor: User,
-    status_filter: str = "all",
-    type_filter: str = "all",
-    selected_job_id: int | None = None,
-) -> PanelJobsPageView:
-    require_admin(actor)
-    mark_stuck_panel_jobs(db)
-    status_filter = status_filter if status_filter in {"all", *[status.value for status in PanelJobStatus]} else "all"
-    type_filter = type_filter if type_filter in {
+def _normalize_panel_job_status_filter(status_filter: str) -> str:
+    return status_filter if status_filter in {"all", *[status.value for status in PanelJobStatus]} else "all"
+
+
+def _normalize_panel_job_type_filter(type_filter: str) -> str:
+    return type_filter if type_filter in {
         "all",
         "server_bootstrap",
         "expired_peers_cleanup",
@@ -746,6 +806,19 @@ def get_panel_jobs_page(
         "agent_updates_check",
         "agent_updates_apply",
     } else "all"
+
+
+def get_panel_jobs_page(
+    db: Session,
+    actor: User,
+    status_filter: str = "all",
+    type_filter: str = "all",
+    selected_job_id: int | None = None,
+) -> PanelJobsPageView:
+    require_admin(actor)
+    mark_stuck_panel_jobs(db)
+    status_filter = _normalize_panel_job_status_filter(status_filter)
+    type_filter = _normalize_panel_job_type_filter(type_filter)
     query = select(PanelJob).options(joinedload(PanelJob.created_by_user))
     if status_filter != "all":
         query = query.where(PanelJob.status == PanelJobStatus(status_filter))
@@ -821,6 +894,56 @@ def cancel_panel_job(db: Session, actor: User, job_id: int) -> PanelJobView:
     db.commit()
     db.refresh(job)
     return serialize_panel_job(job, db)
+
+
+def cleanup_inactive_panel_jobs(
+    db: Session,
+    actor: User,
+    status_filter: str = "all",
+    type_filter: str = "all",
+) -> dict[str, int | str]:
+    require_admin(actor)
+    mark_stuck_panel_jobs(db)
+    status_filter = _normalize_panel_job_status_filter(status_filter)
+    type_filter = _normalize_panel_job_type_filter(type_filter)
+
+    query = select(PanelJob).where(PanelJob.status.in_(PANEL_JOB_CLEANUP_STATUSES))
+    if status_filter != "all":
+        selected_status = PanelJobStatus(status_filter)
+        if selected_status not in PANEL_JOB_CLEANUP_STATUSES:
+            return {"deleted": 0, "status_filter": status_filter, "type_filter": type_filter}
+        query = query.where(PanelJob.status == selected_status)
+    if type_filter != "all":
+        query = query.where(PanelJob.job_type == type_filter)
+
+    jobs = db.execute(query.order_by(PanelJob.id.asc())).scalars().all()
+    if not jobs:
+        return {"deleted": 0, "status_filter": status_filter, "type_filter": type_filter}
+
+    job_ids = [job.id for job in jobs]
+    if job_ids:
+        bootstrap_tasks = db.execute(
+            select(ServerBootstrapTask).where(ServerBootstrapTask.panel_job_id.in_(job_ids))
+        ).scalars().all()
+        for bootstrap_task in bootstrap_tasks:
+            bootstrap_task.panel_job_id = None
+            db.add(bootstrap_task)
+
+    deleted = len(jobs)
+    for job in jobs:
+        db.delete(job)
+
+    write_audit_log(
+        db,
+        event_type="panel_jobs.cleanup",
+        severity="info",
+        message=f"Deleted inactive panel jobs: {deleted}",
+        message_ru=f"Удалены неактуальные задачи панели: {deleted}",
+        actor_user_id=actor.id,
+        details=f"deleted={deleted}; status_filter={status_filter}; type_filter={type_filter}",
+    )
+    db.commit()
+    return {"deleted": deleted, "status_filter": status_filter, "type_filter": type_filter}
 
 
 def run_expired_peers_cleanup_job(db: Session, actor: User) -> PanelJobView:
@@ -1009,7 +1132,7 @@ def _build_server_executor_payload(
             "host": server.host,
             "ssh_port": server.ssh_port,
             "ssh_login": server.ssh_login,
-            "ssh_password": server.ssh_password,
+            "ssh_password": _decrypt_ssh_password(server.ssh_password),
         }
     if extra:
         payload.update(extra)
@@ -2481,15 +2604,14 @@ def run_panel_diagnostics(
                         )
                     )
             else:
-                artifact_revision = int(sample.tak_tunnel_artifact_revision or 0)
-                if artifact_revision > 0:
-                    rotation_event = _latest_tak_tunnel_rotation_event(
-                        db,
-                        tic_server_id=sample.tic_server_id,
-                        tak_server_id=sample.tak_server_id,
-                    )
-                    rotation_at = rotation_event.created_at.isoformat() if rotation_event is not None else "время неизвестно"
-                    rotated_pairs.append(f"{pair_label} · rev {artifact_revision} · {rotation_at}")
+                rotation_event = _latest_tak_tunnel_rotation_event(
+                    db,
+                    tic_server_id=sample.tic_server_id,
+                    tak_server_id=sample.tak_server_id,
+                )
+                if rotation_event is not None:
+                    rotation_at = rotation_event.created_at.isoformat()
+                    rotated_pairs.append(f"{pair_label} ? latest rotation ? {rotation_at}")
                 if any(interface.tak_tunnel_fallback_active for interface in pair_interfaces):
                     tak_tunnel_status = "warning" if tak_tunnel_status == "ok" else tak_tunnel_status
                     interface_names = ", ".join(sorted(interface.name for interface in pair_interfaces))
@@ -2594,18 +2716,22 @@ def run_panel_diagnostics(
                             )
                 else:
                     raw_status = focused_pair.tak_tunnel_last_status or ("fallback" if focused_pair.tak_tunnel_fallback_active else "unknown")
-                    artifact_revision = int(focused_pair.tak_tunnel_artifact_revision or 0)
+                    raw_status = focused_pair.tak_tunnel_last_status or ("fallback" if focused_pair.tak_tunnel_fallback_active else "unknown")
                     pair_status = "warning" if focused_pair.tak_tunnel_fallback_active else "ok"
                     pair_message = (
-                        "Снимок пары показывает fallback или деградацию."
+                        "?????? ???? ?????????? fallback ??? ??????????."
                         if focused_pair.tak_tunnel_fallback_active
-                        else "Снимок пары не показывает активного fallback."
+                        else "?????? ???? ?? ?????????? ????????? fallback."
                     )
-                    pair_details.append(f"Snapshot-статус панели: {raw_status}")
-                    pair_details.append("Live tunnel-check выполняется только по кнопке «Запустить проверку».")
-                    if artifact_revision > 0:
-                        pair_details.append(f"Ревизия артефактов: {artifact_revision}")
-                failure_count = int(focused_pair_state.get("failure_count") or 0)
+                    pair_details.append(f"Snapshot-?????? ??????: {raw_status}")
+                    pair_details.append("Live tunnel-check ??????????? ?????? ?? ?????? ?????????? ?????????.")
+                    rotation_event = _latest_tak_tunnel_rotation_event(
+                        db,
+                        tic_server_id=focused_pair.tic_server_id,
+                        tak_server_id=focused_pair.tak_server_id,
+                    )
+                    if rotation_event is not None:
+                        pair_details.append(f"????????? ??????? ??????????: {rotation_event.created_at.isoformat()}")
                 if bool(focused_pair_state.get("manual_attention_required")):
                     pair_details.append("РђРІС‚РѕРІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёРµ РѕСЃС‚Р°РЅРѕРІР»РµРЅРѕ: С‚СЂРµР±СѓРµС‚СЃСЏ СЂСѓС‡РЅРѕРµ РІРјРµС€Р°С‚РµР»СЊСЃС‚РІРѕ.")
                 elif failure_count:
@@ -7155,6 +7281,10 @@ def _finalize_server_bootstrap_success(db: Session, task: ServerBootstrapTask) -
         server = existing
         server.tic_region = task.tic_region
         server.tak_country = task.tak_country
+        server.host = task.host
+        server.ssh_port = task.ssh_port
+        server.ssh_login = task.ssh_login
+        server.ssh_password = task.ssh_password
     task.server_id = server.id
     task.status = "completed"
     task.input_prompt = None
@@ -7248,7 +7378,7 @@ def _build_server_bootstrap_context(task: ServerBootstrapTask) -> dict[str, obje
             "host": task.host,
             "ssh_port": task.ssh_port,
             "ssh_login": task.ssh_login,
-            "ssh_password": task.ssh_password,
+            "ssh_password": _decrypt_ssh_password(task.ssh_password),
         },
         "repository_url": task.repository_url,
         "os_family": "ubuntu",
@@ -7273,7 +7403,7 @@ def create_server_bootstrap_task(db: Session, actor: User, payload: ServerCreate
         host=host,
         ssh_port=payload.ssh_port,
         ssh_login=ssh_login,
-        ssh_password=ssh_password,
+        ssh_password=_encrypt_ssh_password(ssh_password),
         repository_url=repo_url,
         status="running",
     )
@@ -7403,7 +7533,7 @@ def create_server_record(db: Session, actor: User, payload: ServerCreate) -> Ser
         host=host,
         ssh_port=payload.ssh_port,
         ssh_login=ssh_login,
-        ssh_password=ssh_password,
+        ssh_password=_encrypt_ssh_password(ssh_password),
         is_active=False,
         is_excluded=False,
         last_seen_at=None,

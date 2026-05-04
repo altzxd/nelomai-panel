@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     peer_agent_command: str | None = None
     peer_agent_timeout_seconds: int = 20
     peer_agent_bootstrap_timeout_seconds: int = 1800
+    login_rate_limit_window_seconds: int = 900
+    login_rate_limit_max_attempts: int = 10
+    login_rate_limit_lockout_seconds: int = 900
 
 
 @lru_cache

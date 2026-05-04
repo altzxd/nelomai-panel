@@ -1913,6 +1913,32 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
 
+    document.querySelectorAll("[data-cleanup-panel-jobs]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const params = new URLSearchParams(window.location.search);
+        const status = params.get("status") || "all";
+        const type = params.get("type") || "all";
+        try {
+          setActionBusy(button, true);
+          setStatus(jobsStatusNode, "Очищаем неактуальные задачи...");
+          const response = await requestJson(`/api/admin/jobs/cleanup?status=${encodeURIComponent(status)}&type=${encodeURIComponent(type)}`, {
+            method: "POST",
+          });
+          const deleted = Number(response?.deleted || 0);
+          const message = deleted > 0
+            ? `Удалено задач: ${deleted}`
+            : "Неактуальных задач по текущему фильтру нет";
+          showToastAfterReload("success", message);
+          window.setTimeout(() => window.location.reload(), 200);
+        } catch (error) {
+          setStatus(jobsStatusNode, error.message, true);
+          showToast("error", error.message, "error");
+        } finally {
+          setActionBusy(button, false);
+        }
+      });
+    });
+
     document.querySelectorAll("[data-panel-job-cancel]").forEach((button) => {
       button.addEventListener("click", async () => {
         const jobId = button.getAttribute("data-panel-job-cancel");

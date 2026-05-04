@@ -398,6 +398,7 @@ def run() -> None:
             if not isinstance(contract_manifest.get("actions"), list) or not contract_manifest["actions"]:
                 raise SmokeFailure("agent contract manifest does not expose actions")
             assert_status(client.post("/api/admin/jobs/999999/cancel", headers=admin_headers), 404, "admin gets 404 for missing job")
+            assert_status(client.post("/api/admin/jobs/cleanup", headers=admin_headers), 200, "admin can clean inactive panel jobs")
             assert_status(client.get("/admin/logs?severity=error&sort=event_type", headers=admin_headers), 200, "admin logs filters")
             assert_status(client.get("/admin/logs?server_id=&user_id=&sort=server", headers=admin_headers), 200, "admin logs empty filters")
             assert_status(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC
+from datetime import UTC, datetime, timedelta
+from threading import Lock
 from zoneinfo import ZoneInfo
 
 import jwt
@@ -12,6 +13,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
+from app.config import settings
 from app.database import Base, SessionLocal, engine, get_db
 from app.models import FilterKind, Interface, Server, User, UserRole
 from app.runtime_schema import apply_legacy_runtime_schema_updates
@@ -137,6 +139,7 @@ from app.services import (
     update_registration_link_comment,
     run_expired_peers_cleanup_job,
     cancel_panel_job,
+    cleanup_inactive_panel_jobs,
     has_available_updates,
     has_problem_panel_jobs,
     delete_server_record,
@@ -190,6 +193,9 @@ from app.services import (
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 moscow_tz = ZoneInfo("Europe/Moscow")
+_LOGIN_RATE_LIMIT_LOCK = Lock()
+_LOGIN_RATE_LIMIT_STATE: dict[str, list[datetime]] = {}
+_LOGIN_RATE_LIMIT_BLOCKED_UNTIL: dict[str, datetime] = {}
 
 Base.metadata.create_all(bind=engine)
 apply_legacy_runtime_schema_updates(engine)
@@ -292,6 +298,54 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     if user is None:
         raise HTTPException(status_code=status.HTTP_303_SEE_OTHER, headers={"Location": "/"})
     return user
+
+
+def _access_cookie_secure() -> bool:
+    return settings.panel_public_base_url.strip().lower().startswith("https://")
+
+
+def _login_rate_limit_key(request: Request, login: str) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    client_ip = forwarded.split(",")[0].strip() if forwarded else ""
+    if not client_ip:
+        client_ip = request.client.host if request.client is not None else "unknown"
+    return f"{client_ip}|{login.strip().lower()}"
+
+
+def _login_rate_limit_retry_after_seconds(request: Request, login: str) -> int | None:
+    key = _login_rate_limit_key(request, login)
+    now = datetime.now(UTC)
+    with _LOGIN_RATE_LIMIT_LOCK:
+        blocked_until = _LOGIN_RATE_LIMIT_BLOCKED_UNTIL.get(key)
+        if blocked_until is None:
+            return None
+        if blocked_until <= now:
+            _LOGIN_RATE_LIMIT_BLOCKED_UNTIL.pop(key, None)
+            _LOGIN_RATE_LIMIT_STATE.pop(key, None)
+            return None
+        return max(1, int((blocked_until - now).total_seconds()))
+
+
+def _register_failed_login_attempt(request: Request, login: str) -> int | None:
+    key = _login_rate_limit_key(request, login)
+    now = datetime.now(UTC)
+    window_start = now - timedelta(seconds=settings.login_rate_limit_window_seconds)
+    with _LOGIN_RATE_LIMIT_LOCK:
+        attempts = [item for item in _LOGIN_RATE_LIMIT_STATE.get(key, []) if item >= window_start]
+        attempts.append(now)
+        _LOGIN_RATE_LIMIT_STATE[key] = attempts
+        if len(attempts) >= settings.login_rate_limit_max_attempts:
+            blocked_until = now + timedelta(seconds=settings.login_rate_limit_lockout_seconds)
+            _LOGIN_RATE_LIMIT_BLOCKED_UNTIL[key] = blocked_until
+            return max(1, int((blocked_until - now).total_seconds()))
+    return None
+
+
+def _clear_failed_login_attempts(request: Request, login: str) -> None:
+    key = _login_rate_limit_key(request, login)
+    with _LOGIN_RATE_LIMIT_LOCK:
+        _LOGIN_RATE_LIMIT_STATE.pop(key, None)
+        _LOGIN_RATE_LIMIT_BLOCKED_UNTIL.pop(key, None)
 
 
 def raise_service_http_error(exc: Exception) -> None:
@@ -563,15 +617,32 @@ async def login(
 ) -> Response:
     form_data = await request.form()
     form = LoginForm(login=str(form_data.get("login", "")), password=str(form_data.get("password", "")))
+    retry_after = _login_rate_limit_retry_after_seconds(request, form.login)
+    if retry_after is not None:
+        write_audit_log(
+            db,
+            event_type="auth.login_rate_limited",
+            severity="warning",
+            message=f"Rate-limited login for {form.login}",
+            message_ru="Слишком много попыток входа. Попробуйте позже.",
+            details=f"login={form.login}; retry_after={retry_after}",
+        )
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {"error": f"Слишком много попыток входа. Повторите через {retry_after} сек."},
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
     user = authenticate_user(db, form.login, form.password)
     if not user:
+        lockout_seconds = _register_failed_login_attempt(request, form.login)
         write_audit_log(
             db,
             event_type="auth.login_failed",
             severity="error",
             message=f"Failed login for {form.login}",
             message_ru="Не удалось войти: неверный логин или пароль.",
-            details=f"login={form.login}",
+            details=f"login={form.login}" + (f"; locked_for={lockout_seconds}" if lockout_seconds is not None else ""),
         )
         return templates.TemplateResponse(
             request,
@@ -580,6 +651,7 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
 
+    _clear_failed_login_attempts(request, form.login)
     write_audit_log(
         db,
         event_type="auth.login_success",
@@ -595,7 +667,7 @@ async def login(
         value=create_access_token(user.login),
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=_access_cookie_secure(),
     )
     return response
 
@@ -622,7 +694,7 @@ def logout(
         except Exception:
             pass
     response = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
-    response.delete_cookie("access_token")
+    response.delete_cookie("access_token", httponly=True, samesite="lax", secure=_access_cookie_secure())
     return response
 
 
@@ -1172,6 +1244,19 @@ def cancel_panel_job_endpoint(
     try:
         return cancel_panel_job(db, current_user, job_id)
     except (EntityNotFoundError, PermissionDeniedError) as exc:
+        raise_service_http_error(exc)
+
+
+@router.post("/api/admin/jobs/cleanup")
+def cleanup_inactive_panel_jobs_endpoint(
+    status_filter: str = Query(default="all", alias="status"),
+    type_filter: str = Query(default="all", alias="type"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    try:
+        return cleanup_inactive_panel_jobs(db, current_user, status_filter=status_filter, type_filter=type_filter)
+    except PermissionDeniedError as exc:
         raise_service_http_error(exc)
 
 

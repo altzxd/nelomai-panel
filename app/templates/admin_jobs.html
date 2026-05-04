@@ -47,6 +47,7 @@
             </div>
             <div class="topbar-actions">
                 <button class="primary-button" type="button" data-run-expired-peers-job>Очистить истёкшие пиры</button>
+                <button class="ghost-button danger" type="button" data-cleanup-panel-jobs>Очистить неактуальные задачи</button>
                 <form method="post" action="/logout">
                     <button type="submit" class="ghost-button">Выйти</button>
                 </form>
@@ -83,6 +84,9 @@
                     </select>
                 </label>
             </form>
+            <div class="settings-inline-actions">
+                <button class="ghost-button danger" type="button" data-cleanup-panel-jobs>Очистить неактуальные задачи</button>
+            </div>
             <p>Остановка на этом этапе отменяет задачу в панели. Если команда уже ушла агенту, реальное agent-side прерывание появится отдельным контрактом.</p>
             <span class="status-text" data-panel-jobs-status></span>
         </section>
