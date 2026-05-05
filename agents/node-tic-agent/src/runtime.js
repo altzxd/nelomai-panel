@@ -397,8 +397,10 @@ function buildViaTakNetworkingCommands(interfaceRecord) {
   const tunnelName = systemTunnelName(tunnelRecord);
   const interfaceName = systemInterfaceName(interfaceRecord);
   const takGateway = stripCidr(tunnelRecord.tak_address_v4);
+  const waitForTunnel = `for _ in $(seq 1 20); do ip link show dev ${tunnelName} >/dev/null 2>&1 && break; sleep 0.2; done`;
   return [
     ...buildInterfaceForwardingCommands(interfaceRecord),
+    waitForTunnel,
     `iptables -C FORWARD -o ${tunnelName} -j ACCEPT 2>/dev/null || iptables -A FORWARD -o ${tunnelName} -j ACCEPT`,
     `iptables -C FORWARD -i ${tunnelName} -j ACCEPT 2>/dev/null || iptables -A FORWARD -i ${tunnelName} -j ACCEPT`,
     `DEFAULT_IF=$(ip route show default | awk 'NR==1 {print $5}'); [ -n "$DEFAULT_IF" ] && iptables -t nat -D POSTROUTING -s ${subnet} -o "$DEFAULT_IF" -j MASQUERADE 2>/dev/null || true`,
@@ -946,6 +948,34 @@ function desiredFirewallRules(state, serverRecord) {
   return Array.from(new Set(["22/tcp", "40404/udp", ...dynamicPorts]));
 }
 
+function buildViaTakRouteReconcileCommands(state) {
+  const interfaces = Array.isArray(state && state.interfaces) ? state.interfaces : [];
+  const commands = [];
+  for (const interfaceRecord of interfaces) {
+    if (!interfaceRecord || !interfaceRecord.is_enabled) {
+      continue;
+    }
+    if (String(interfaceRecord.route_mode || "").trim() !== "via_tak" || Number(interfaceRecord.tak_server_id) <= 0) {
+      continue;
+    }
+    const tunnelRecord = findTunnelRecordForInterface(interfaceRecord);
+    const subnet = ipv4NetworkCidr(interfaceRecord.address_v4);
+    const takGateway = tunnelRecord ? stripCidr(tunnelRecord.tak_address_v4) : "";
+    if (!tunnelRecord || !subnet || !takGateway) {
+      continue;
+    }
+    const tableId = interfaceRouteTableId(interfaceRecord);
+    const rulePriority = interfaceRouteRulePriority(interfaceRecord);
+    const mark = interfaceRouteMark(interfaceRecord);
+    const tunnelName = systemTunnelName(tunnelRecord);
+    commands.push(`for _ in $(seq 1 20); do ip link show dev ${tunnelName} >/dev/null 2>&1 && break; sleep 0.2; done`);
+    commands.push(`ip route replace table ${tableId} default via ${takGateway} dev ${tunnelName}`);
+    commands.push(`ip rule add fwmark ${mark} table ${tableId} priority ${rulePriority} 2>/dev/null || true`);
+    commands.push(`ip rule add from ${subnet} table ${tableId} priority ${rulePriority} 2>/dev/null || true`);
+  }
+  return commands;
+}
+
 function buildFirewallReconcileCommands(state, serverRecord) {
   if (executionMode() !== "system") {
     return [];
@@ -960,6 +990,7 @@ function buildFirewallReconcileCommands(state, serverRecord) {
     "ufw default allow outgoing",
     ...rules.map((rule) => `ufw allow ${rule}`),
     "ufw --force enable",
+    ...buildViaTakRouteReconcileCommands(state),
     "ufw status",
   ];
 }
