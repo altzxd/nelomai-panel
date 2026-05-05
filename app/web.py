@@ -2123,7 +2123,7 @@ def delete_peer_endpoint(
     preview_mode = is_preview_mode(request, current_user)
     try:
         delete_peer(db, current_user, peer_id, preview_mode)
-    except (EntityNotFoundError, PermissionDeniedError) as exc:
+    except (EntityNotFoundError, PermissionDeniedError, ServerOperationUnavailableError) as exc:
         raise_service_http_error(exc)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

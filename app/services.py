@@ -8742,6 +8742,7 @@ def delete_peer(db: Session, actor: User, peer_id: int, preview_mode: bool) -> N
     ensure_interface_is_valid(peer.interface)
     _ensure_interface_uses_tic_agent(peer.interface)
     _run_peer_agent_action(db, "delete_peer", peer.interface, peer, actor_user_id=actor.id)
+    peer = get_peer_by_id(db, peer_id)
     db.delete(peer)
     db.commit()
 
