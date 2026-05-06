@@ -1248,6 +1248,7 @@ module.exports = {
   buildDetachTunnelCommands,
   buildFirewallReconcileCommands,
   maybeRunSystemCommands,
+  systemInterfaceName,
   systemInterfaceConfigPath,
   systemPeerConfigPath,
   systemTunnelConfigPath,

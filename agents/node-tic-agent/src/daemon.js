@@ -11,7 +11,9 @@ const {
   buildProvisionTunnelCommands,
   buildRefreshInterfaceCommands,
   buildFirewallReconcileCommands,
-  maybeRunSystemCommands
+  maybeRunSystemCommands,
+  systemInterfaceName,
+  systemTunnelName
 } = require("./runtime");
 const { loadState } = require("./state");
 
@@ -47,6 +49,18 @@ function heartbeatIntervalMs() {
     return Math.floor(value * 1000);
   }
   return 30000;
+}
+
+function selfHealIntervalMs() {
+  const value = Number(process.env.NELOMAI_AGENT_DAEMON_SELF_HEAL_SEC || 30);
+  if (Number.isFinite(value) && value >= 5) {
+    return Math.floor(value * 1000);
+  }
+  return heartbeatIntervalMs();
+}
+
+function selfHealEnabled() {
+  return String(process.env.NELOMAI_AGENT_DAEMON_SELF_HEAL_ENABLED || "1").trim() !== "0";
 }
 
 function writeStatus(status, runtime, extra = {}) {
@@ -93,6 +107,13 @@ function executionMode() {
   return String(process.env.NELOMAI_AGENT_EXEC_MODE || "filesystem").trim().toLowerCase();
 }
 
+function commandSucceeds(command) {
+  const completed = require("node:child_process").spawnSync("bash", ["-lc", command], {
+    encoding: "utf8"
+  });
+  return completed.status === 0;
+}
+
 function defaultTunnelLocalRole() {
   const component = String(process.env.NELOMAI_AGENT_COMPONENT || "").trim().toLowerCase();
   if (component === "tak-agent") {
@@ -107,6 +128,167 @@ function defaultTunnelLocalRole() {
 function tunnelLocalRole(tunnelRecord) {
   const explicit = String(tunnelRecord && tunnelRecord.local_role || "").trim().toLowerCase();
   return explicit || defaultTunnelLocalRole();
+}
+
+function ipv4NetworkCidr(address) {
+  const raw = String(address || "").trim();
+  if (!raw.includes("/")) {
+    return "";
+  }
+  const [host, prefixText] = raw.split("/", 2);
+  const octets = host.split(".").map((value) => Number(value));
+  const prefix = Number(prefixText);
+  if (octets.length !== 4 || octets.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) {
+    return "";
+  }
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) {
+    return "";
+  }
+  const ip =
+    ((octets[0] << 24) >>> 0) |
+    ((octets[1] << 16) >>> 0) |
+    ((octets[2] << 8) >>> 0) |
+    (octets[3] >>> 0);
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+  const network = ip & mask;
+  const parts = [
+    (network >>> 24) & 0xff,
+    (network >>> 16) & 0xff,
+    (network >>> 8) & 0xff,
+    network & 0xff,
+  ];
+  return `${parts.join(".")}/${prefix}`;
+}
+
+function interfaceRouteTableId(interfaceRecord) {
+  const candidates = [
+    Number(String(interfaceRecord.agent_interface_id || "").replace(/\D+/g, "").slice(-4)),
+    Number(interfaceRecord.panel_interface_id),
+    Number(interfaceRecord.listen_port),
+  ];
+  const suffix = candidates.find((value) => Number.isInteger(value) && value > 0) || 1;
+  return 20000 + Math.min(suffix, 9999);
+}
+
+function viaTakInterfaces(state) {
+  const interfaces = Array.isArray(state && state.interfaces) ? state.interfaces : [];
+  return interfaces.filter((item) =>
+    item &&
+    item.is_enabled &&
+    String(item.route_mode || "").trim() === "via_tak" &&
+    Number(item.tak_server_id) > 0
+  );
+}
+
+function tunnelsByPair(state) {
+  const map = new Map();
+  const tunnels = Array.isArray(state && state.tunnels) ? state.tunnels : [];
+  for (const tunnelRecord of tunnels) {
+    if (!tunnelRecord || typeof tunnelRecord !== "object") {
+      continue;
+    }
+    const key = `${Number(tunnelRecord.tic_server_id) || 0}:${Number(tunnelRecord.tak_server_id) || 0}`;
+    map.set(key, tunnelRecord);
+  }
+  return map;
+}
+
+function collectViaTakMismatches(state) {
+  const issues = [];
+  const tunnelMap = tunnelsByPair(state);
+  for (const interfaceRecord of viaTakInterfaces(state)) {
+    const key = `${Number(interfaceRecord.tic_server_id) || 0}:${Number(interfaceRecord.tak_server_id) || 0}`;
+    const tunnelRecord = tunnelMap.get(key);
+    if (!tunnelRecord || !shouldRestoreTunnel(tunnelRecord)) {
+      issues.push({
+        kind: "missing_tunnel_record",
+        agent_interface_id: String(interfaceRecord.agent_interface_id || ""),
+        tak_server_id: Number(interfaceRecord.tak_server_id) || 0
+      });
+      continue;
+    }
+    const interfaceName = systemInterfaceName(interfaceRecord);
+    const tunnelName = systemTunnelName(tunnelRecord);
+    const tableId = interfaceRouteTableId(interfaceRecord);
+    const subnet = ipv4NetworkCidr(interfaceRecord.address_v4);
+    const takGateway = String(tunnelRecord.tak_address_v4 || "").split("/", 1)[0];
+    const hasTunnel = commandSucceeds(`ip link show dev ${tunnelName} >/dev/null 2>&1`);
+    const hasInterface = commandSucceeds(`ip link show dev ${interfaceName} >/dev/null 2>&1`);
+    const hasDefaultRoute = takGateway
+      ? commandSucceeds(`ip route show table ${tableId} | grep -F "default via ${takGateway} dev ${tunnelName}" >/dev/null 2>&1`)
+      : false;
+    const hasSubnetRule = subnet
+      ? commandSucceeds(`ip rule show | grep -F "from ${subnet} lookup ${tableId}" >/dev/null 2>&1`)
+      : false;
+    if (!hasTunnel || !hasInterface || !hasDefaultRoute || !hasSubnetRule) {
+      issues.push({
+        kind: "via_tak_datapath_drift",
+        agent_interface_id: String(interfaceRecord.agent_interface_id || ""),
+        tunnel_id: String(tunnelRecord.tunnel_id || ""),
+        checks: {
+          tunnel_up: hasTunnel,
+          interface_up: hasInterface,
+          default_route: hasDefaultRoute,
+          subnet_rule: hasSubnetRule
+        }
+      });
+    }
+  }
+  return issues;
+}
+
+function repairViaTakDatapath(state, issues) {
+  const repairedTunnels = new Set();
+  const repairedInterfaces = new Set();
+  const tunnelMap = tunnelsByPair(state);
+  for (const interfaceRecord of viaTakInterfaces(state)) {
+    const key = `${Number(interfaceRecord.tic_server_id) || 0}:${Number(interfaceRecord.tak_server_id) || 0}`;
+    const tunnelRecord = tunnelMap.get(key);
+    if (!tunnelRecord || !shouldRestoreTunnel(tunnelRecord)) {
+      continue;
+    }
+    syncTunnelArtifacts(tunnelRecord);
+    syncAllPeerArtifacts(interfaceRecord);
+    if (!repairedTunnels.has(String(tunnelRecord.tunnel_id || ""))) {
+      maybeRunSystemCommands(buildAttachTunnelCommands(tunnelRecord));
+      repairedTunnels.add(String(tunnelRecord.tunnel_id || ""));
+    }
+    maybeRunSystemCommands(buildRefreshInterfaceCommands(interfaceRecord));
+    repairedInterfaces.add(String(interfaceRecord.agent_interface_id || ""));
+  }
+  maybeRunSystemCommands(buildFirewallReconcileCommands(state, {}));
+  return {
+    repaired: true,
+    repaired_tunnels: Array.from(repairedTunnels),
+    repaired_interfaces: Array.from(repairedInterfaces),
+    issue_count: Array.isArray(issues) ? issues.length : 0
+  };
+}
+
+function runPeriodicSelfHeal() {
+  if (!selfHealEnabled() || executionMode() !== "system") {
+    return {
+      enabled: selfHealEnabled(),
+      skipped: true,
+      reason: executionMode() !== "system" ? "filesystem_mode" : "disabled"
+    };
+  }
+  const state = loadState();
+  const issues = collectViaTakMismatches(state);
+  if (!issues.length) {
+    return {
+      enabled: true,
+      skipped: true,
+      reason: "healthy",
+      issue_count: 0
+    };
+  }
+  return {
+    enabled: true,
+    skipped: false,
+    issues,
+    repair: repairViaTakDatapath(state, issues)
+  };
 }
 
 function shouldRestoreTunnel(tunnelRecord) {
@@ -168,6 +350,15 @@ function restoreRuntimeFromState() {
     }
   }
 
+  try {
+    maybeRunSystemCommands(buildFirewallReconcileCommands(state, {}));
+  } catch (error) {
+    summary.errors.push({
+      kind: "firewall_pre",
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+
   const interfaces = Array.isArray(state.interfaces) ? state.interfaces : [];
   for (const interfaceRecord of interfaces) {
     try {
@@ -190,7 +381,7 @@ function restoreRuntimeFromState() {
     maybeRunSystemCommands(buildFirewallReconcileCommands(state, {}));
   } catch (error) {
     summary.errors.push({
-      kind: "firewall",
+      kind: "firewall_post",
       error: error instanceof Error ? error.message : String(error)
     });
   }
@@ -222,10 +413,41 @@ function main() {
     restore: restoreSummary
   });
 
+  let lastSelfHeal = {
+    skipped: true,
+    reason: "not_run_yet"
+  };
+  let selfHealInFlight = false;
+
+  const selfHealTick = () => {
+    if (selfHealInFlight) {
+      return;
+    }
+    selfHealInFlight = true;
+    try {
+      lastSelfHeal = runPeriodicSelfHeal();
+      if (!lastSelfHeal.skipped || (lastSelfHeal.reason && lastSelfHeal.reason !== "healthy")) {
+        log("Agent daemon self-heal tick", lastSelfHeal);
+      }
+    } catch (error) {
+      lastSelfHeal = {
+        skipped: false,
+        error: error instanceof Error ? error.message : String(error)
+      };
+      log("Agent daemon self-heal failed", lastSelfHeal);
+    } finally {
+      selfHealInFlight = false;
+    }
+  };
+
+  selfHealTick();
+
   const timer = setInterval(() => {
     const currentRuntime = inspectRuntimeEnvironment();
-    writeStatus("running", currentRuntime);
+    writeStatus("running", currentRuntime, { last_self_heal: lastSelfHeal });
   }, heartbeatIntervalMs());
+
+  const selfHealTimer = setInterval(selfHealTick, selfHealIntervalMs());
 
   process.on("SIGTERM", shutdown("SIGTERM"));
   process.on("SIGINT", shutdown("SIGINT"));
