@@ -47,6 +47,8 @@ SSH_KNOWN_HOSTS_FILE = _env_value("NELOMAI_PANEL_SSH_KNOWN_HOSTS_FILE", "")
 SSH_PASS_BIN = _env_value("NELOMAI_PANEL_SSHPASS_BIN", "sshpass")
 SSH_BIN = _env_value("NELOMAI_PANEL_SSH_BIN", "ssh")
 SSH_KEY_FILE = _env_value("NELOMAI_PANEL_SSH_KEY_FILE", "")
+AGENT_HEARTBEAT_MAX_AGE_SEC = _env_value("NELOMAI_PANEL_AGENT_HEARTBEAT_MAX_AGE_SEC", "120")
+AGENT_AUTO_RESTART_STALE = _env_value("NELOMAI_PANEL_AGENT_AUTO_RESTART_STALE", "1")
 
 
 def fail(message: str, code: int = 1) -> None:
@@ -57,6 +59,16 @@ def fail(message: str, code: int = 1) -> None:
 def _env_file_for(component: str) -> str:
     normalized = component.replace("-agent", "")
     return f"/etc/default/nelomai-{normalized}-agent"
+
+
+def _service_name_for(component: str) -> str:
+    normalized = component.replace("-agent", "")
+    return f"nelomai-{normalized}-agent.service"
+
+
+def _default_status_file_for(component: str) -> str:
+    normalized = component.replace("-agent", "")
+    return f"/opt/nelomai/state/{normalized}-agent-daemon-status.json"
 
 
 def _load_server_from_payload(payload: dict[str, object]) -> dict[str, object]:
@@ -91,9 +103,31 @@ def _resolve_server_identity(server: dict[str, object]) -> tuple[str, str, str, 
 
 def _remote_command(component: str, exec_mode: str, payload_b64: str) -> str:
     env_file = _env_file_for(component)
+    service_name = _service_name_for(component)
+    default_status_file = _default_status_file_for(component)
     return (
         "bash -lc "
         f"\"set -a && test -f '{env_file}' && . '{env_file}'; set +a; "
+        f"service_name='{service_name}'; "
+        f"status_file=\\${{NELOMAI_AGENT_DAEMON_STATUS_FILE:-{default_status_file}}}; "
+        f"max_age='{AGENT_HEARTBEAT_MAX_AGE_SEC}'; "
+        f"auto_restart='{AGENT_AUTO_RESTART_STALE}'; "
+        "if [ \\\"$auto_restart\\\" = '1' ]; then "
+        "restart_needed=0; "
+        "systemctl is-active --quiet \\\"$service_name\\\" || restart_needed=1; "
+        "if [ -f \\\"$status_file\\\" ]; then "
+        "now=\\$(date +%s); "
+        "mtime=\\$(stat -c %Y \\\"$status_file\\\" 2>/dev/null || echo 0); "
+        "age=\\$((now - mtime)); "
+        "[ \\\"$age\\\" -gt \\\"$max_age\\\" ] && restart_needed=1; "
+        "else restart_needed=1; fi; "
+        "if [ \\\"$restart_needed\\\" -eq 1 ]; then "
+        "echo \\\"[agent_watchdog] restarting $service_name (status_file=$status_file max_age=$max_age)\\\" >&2; "
+        "systemctl restart \\\"$service_name\\\" || { echo '[agent_watchdog_restart_failed] systemctl restart failed' >&2; exit 91; }; "
+        "sleep 2; "
+        "systemctl is-active --quiet \\\"$service_name\\\" || { echo '[agent_watchdog_restart_failed] service not active after restart' >&2; exit 92; }; "
+        "fi; "
+        "fi; "
         f"tmp=\\$(mktemp /tmp/nelomai-bridge-XXXXXX.json) && "
         f"printf %s '{payload_b64}' | base64 -d > \\\"\\$tmp\\\" && "
         f"NELOMAI_AGENT_COMPONENT={component} "
@@ -213,14 +247,16 @@ def main() -> None:
             if not key_path.exists():
                 fail(f"panel SSH key file not found: {key_file}")
             completed = _run_linux_ssh_key(host, ssh_login, ssh_port, remote_command, key_file)
-            if completed.returncode != 0 and not ssh_password:
+            if completed.returncode != 0:
                 detail = (completed.stderr or completed.stdout or f"exit={completed.returncode}").strip()
                 fail(detail)
         if completed is None or completed.returncode != 0:
             completed = _run_linux_ssh(host, ssh_login, ssh_password, ssh_port, remote_command)
 
     if completed.returncode != 0:
-        detail = (completed.stderr or completed.stdout or f"exit={completed.returncode}").strip()
+        stderr = (completed.stderr or "").strip()
+        stdout = (completed.stdout or "").strip()
+        detail = f"[bridge_exec_failed] rc={completed.returncode}; stderr={stderr or '<empty>'}; stdout={stdout or '<empty>'}"
         fail(detail)
 
     stdout = (completed.stdout or "").strip()
