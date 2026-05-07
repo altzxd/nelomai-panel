@@ -74,7 +74,7 @@ def run() -> None:
 
     body = response.text
     required_tokens = [
-        "Готовность к beta rollout",
+        "Готовность к тестированию",
         "Перед запуском малой тестовой группы стоит закрыть отмеченные beta-gap’ы.",
         "Runbook: docs/panel_beta_runbook.md",
         "Не задан production SECRET_KEY.",

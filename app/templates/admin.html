@@ -232,7 +232,7 @@
                         <div class="server-runtime-item">
                             <div>
                                 <strong>{{ item.name }}</strong>
-                                <p>{{ item.server_type|upper }} · agent: {{ item.agent_version or "неизвестно" }} · contract: {{ item.contract_version or "неизвестно" }}</p>
+                                <p>{{ item.server_type|upper }} · агент: {{ item.agent_version or "неизвестно" }} · контракт: {{ item.contract_version or "неизвестно" }}</p>
                                 <p>Текущая: {{ item.current_version or "неизвестно" }}{% if item.latest_version %} · Последняя: {{ item.latest_version }}{% endif %}</p>
                                 <p>{% if item.update_available %}Рассинхрон версий: агент требует обновления.{% elif item.status == 'legacy' %}Рассинхрон версий: legacy-агент вне актуального контракта.{% elif item.status == 'repo_missing' %}Рассинхрон версий: не задан Git-репозиторий агента.{% elif item.status == 'excluded' %}Рассинхрон версий: сервер исключён из среды панели.{% else %}Рассинхрона версий нет.{% endif %}</p>
                             </div>
@@ -362,7 +362,7 @@
                                       <div class="server-runtime-item">
                                           <div>
                                               <strong>{{ item.name }}</strong>
-                                              <p>{{ item.server_type|upper }} · agent: {{ item.agent_version or "неизвестно" }} · contract: {{ item.contract_version or "неизвестно" }}</p>
+                                              <p>{{ item.server_type|upper }} · агент: {{ item.agent_version or "неизвестно" }} · контракт: {{ item.contract_version or "неизвестно" }}</p>
                                               <p>Текущая: {{ item.current_version or "неизвестно" }}{% if item.latest_version %} · Последняя: {{ item.latest_version }}{% endif %}</p>
                                               <p>{% if item.update_available %}Рассинхрон версий: агент требует обновления.{% elif item.status == 'legacy' %}Рассинхрон версий: legacy-агент вне актуального контракта.{% elif item.status == 'repo_missing' %}Рассинхрон версий: не задан Git-репозиторий агента.{% elif item.status == 'excluded' %}Рассинхрон версий: сервер исключён из среды панели.{% else %}Рассинхрона версий нет.{% endif %}</p>
                                               <p>{{ item.message }}</p>
@@ -412,7 +412,7 @@
                                 <h3>Beta launch checklist</h3>
                                 <ol class="diagnostics-details">
                                     <li><strong>Panel up</strong>: панель отвечает по HTTPS и admin login работает.</li>
-                                    <li><strong>Tic/Tak up</strong>: оба сервера активны, runtime-check зелёный, shared tunnel поднят.</li>
+                                    <li><strong>Tic/Tak готовы</strong>: оба сервера активны, среда агента проверена, общий туннель поднят.</li>
                                     <li><strong>Backup ok</strong>: backup storage доступно для записи и есть свежий full backup.</li>
                                     <li><strong>Diagnostics ok</strong>: самодиагностика без release-blocking ошибок.</li>
                                     <li><strong>First test users</strong>: подготовлены первые клиенты, интерфейсы и peer configs для пилотной группы.</li>

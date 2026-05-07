@@ -43,7 +43,7 @@
                     <span class="brand-inline-title">Nelomai</span>
                 </div>
                 <p class="eyebrow">Задачи панели</p>
-                <h2>Фоновые и долгие процессы</h2>
+                <h2>Фоновые задачи</h2>
             </div>
             <div class="topbar-actions">
                 <button class="primary-button" type="button" data-run-expired-peers-job>Очистить истёкшие пиры</button>
@@ -87,7 +87,7 @@
             <div class="settings-inline-actions">
                 <button class="ghost-button danger" type="button" data-cleanup-panel-jobs>Очистить неактуальные задачи</button>
             </div>
-            <p>Остановка на этом этапе отменяет задачу в панели. Если команда уже ушла агенту, реальное agent-side прерывание появится отдельным контрактом.</p>
+            <p>Остановка отменяет задачу в панели. Если команда уже передана агенту, сервер может завершить текущий шаг перед остановкой.</p>
             <span class="status-text" data-panel-jobs-status></span>
         </section>
 
@@ -97,7 +97,7 @@
                 <span>Тип</span>
                 <span>Статус</span>
                 <span>Запустил</span>
-                <span>Лог</span>
+                <span>Ход выполнения</span>
             </div>
             {% if jobs_page.jobs %}
                 {% for job in jobs_page.jobs %}
@@ -147,8 +147,8 @@
                         {% endif %}
                         {% if job.bootstrap_command_profile %}
                         <div class="bootstrap-profile-block">
-                            <strong>Профиль bootstrap: {{ job.bootstrap_command_profile }}</strong>
-                            <span>Пакеты: {{ job.bootstrap_safe_init_packages|length }} в safe-init{% if job.bootstrap_full_only_packages %} + {{ job.bootstrap_full_only_packages|length }} в full-delta{% endif %}</span>
+                            <strong>Профиль настройки: {{ job.bootstrap_command_profile }}</strong>
+                            <span>Пакеты настройки: {{ job.bootstrap_safe_init_packages|length }} в базовом шаге{% if job.bootstrap_full_only_packages %} + {{ job.bootstrap_full_only_packages|length }} в полном шаге{% endif %}</span>
                             {% if job.bootstrap_safe_init_packages %}
                             <span>Safe-init: {{ job.bootstrap_safe_init_packages | join(", ") }}</span>
                             {% endif %}
@@ -163,7 +163,7 @@
                             <span>
                                 {% if job.bootstrap_snapshot.pending_input.key == "ssh_password" %}SSH-пароль
                                 {% elif job.bootstrap_snapshot.pending_input.key == "ssh_host_key_confirm" %}Подтверждение SSH host key
-                                {% elif job.bootstrap_snapshot.pending_input.key and "bootstrap_step_" in job.bootstrap_snapshot.pending_input.key %}Подтверждение шага bootstrap
+                                {% elif job.bootstrap_snapshot.pending_input.key and "bootstrap_step_" in job.bootstrap_snapshot.pending_input.key %}Подтверждение шага настройки
                                 {% else %}{{ job.bootstrap_snapshot.pending_input.key or "unknown" }}{% endif %}
                                 {% if job.bootstrap_snapshot.pending_input.kind %}
                                 ·
@@ -175,7 +175,7 @@
                                 {% if job.bootstrap_snapshot.pending_input.step_index %}· шаг {{ job.bootstrap_snapshot.pending_input.step_index }}{% endif %}
                             </span>
                             {% if job.bootstrap_pending_command %}
-                            <span>Команда шага: {{ job.bootstrap_pending_command }}</span>
+                            <span>Следующий шаг: {{ job.bootstrap_pending_command }}</span>
                             {% endif %}
                             {% if job.bootstrap_snapshot.pending_input.prompt %}
                             <span>{{ job.bootstrap_snapshot.pending_input.prompt }}</span>
@@ -211,7 +211,7 @@
                             <a class="ghost-button small" href="{{ job.source_url }}">{{ job.source_label or "Открыть источник" }}</a>
                             {% endif %}
                         {% if job.can_cancel %}
-                        <button class="ghost-button small danger" type="button" data-panel-job-cancel="{{ job.id }}">Убить</button>
+                        <button class="ghost-button small danger" type="button" data-panel-job-cancel="{{ job.id }}">Остановить</button>
                         {% endif %}
                         </div>
                     </div>
@@ -220,7 +220,7 @@
             {% else %}
             <div class="logs-empty">
                 <strong>Задач пока нет</strong>
-                <span>Запусти первую очистку истёкших пиров, чтобы увидеть процесс здесь.</span>
+                <span>Запустите первую очистку истёкших пиров, чтобы увидеть процесс здесь.</span>
             </div>
             {% endif %}
         </section>

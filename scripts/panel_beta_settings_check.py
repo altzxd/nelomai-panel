@@ -108,7 +108,7 @@ def run() -> None:
 
     body = response.text
     required_tokens = [
-        "Готовность к beta rollout",
+        "Готовность к тестированию",
         "Не задан production SECRET_KEY.",
         "Панель всё ещё использует SQLite вместо PostgreSQL.",
         "Не задан NELOMAI_GIT_REPO для deploy/bootstrap/update path.",
@@ -118,7 +118,7 @@ def run() -> None:
         "Panel-server deploy checklist",
         "Beta launch checklist",
         "Panel up",
-        "Tic/Tak up",
+        "Tic/Tak готовы",
         "Backup ok",
         "Diagnostics ok",
         "First test users",

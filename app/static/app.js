@@ -1173,7 +1173,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const current = server.current_version || "неизвестно";
         const contract = server.is_legacy
           ? "legacy agent"
-          : `contract: ${server.contract_version || "неизвестно"}`;
+          : `контракт: ${server.contract_version || "неизвестно"}`;
         const capabilities = Array.isArray(server.capabilities) && server.capabilities.length
           ? ` Возможности: ${server.capabilities.join(", ")}.`
           : "";

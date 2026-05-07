@@ -101,10 +101,10 @@
                 <div class="agent-update-row {% if item.status == 'error' %}is-error{% endif %}">
                     <div>
                         <strong>{{ item.name }} · {{ item.server_type|upper }}</strong>
-                        <p>{{ item.message }}. Текущая: {{ item.current_version or "неизвестно" }}. Последняя: {{ item.latest_version or "неизвестно" }}. contract: {{ item.contract_version or "неизвестно" }}.</p>
+                        <p>{{ item.message }}. Текущая: {{ item.current_version or "неизвестно" }}. Последняя: {{ item.latest_version or "неизвестно" }}. Контракт: {{ item.contract_version or "неизвестно" }}.</p>
                     </div>
                     <span class="availability {% if item.status == 'error' or item.update_available %}is-invalid{% elif item.status in ['legacy', 'repo_missing', 'excluded'] %}is-unknown{% else %}is-online{% endif %}">
-                        {% if item.update_available %}доступно{% else %}{{ item.status }}{% endif %}
+                        {% if item.update_available %}доступно{% elif item.status == "error" %}ошибка{% elif item.status == "legacy" %}устарел{% elif item.status == "repo_missing" %}нужна проверка{% elif item.status == "excluded" %}исключён{% else %}{{ item.status }}{% endif %}
                     </span>
                     <button class="ghost-button small" type="button" data-agent-update-server="{{ item.server_id }}" {% if item.status in ['repo_missing', 'excluded'] %}disabled{% endif %}>Обновить</button>
                 </div>
@@ -122,9 +122,9 @@
                 <div class="agent-update-row">
                     <div>
                         <strong>{{ item.name }} · {{ item.server_type|upper }}</strong>
-                        <p>{{ item.message }}. Текущая: {{ item.current_version or "неизвестно" }}. Последняя: {{ item.latest_version or "неизвестно" }}. contract: {{ item.contract_version or "неизвестно" }}.</p>
+                        <p>{{ item.message }}. Текущая: {{ item.current_version or "неизвестно" }}. Последняя: {{ item.latest_version or "неизвестно" }}. Контракт: {{ item.contract_version or "неизвестно" }}.</p>
                     </div>
-                    <span class="availability is-online">{{ item.status }}</span>
+                    <span class="availability is-online">{% if item.status == "ok" %}актуально{% else %}{{ item.status }}{% endif %}</span>
                 </div>
                 {% else %}
                 <p class="muted-note">Серверов без проблем сейчас нет.</p>

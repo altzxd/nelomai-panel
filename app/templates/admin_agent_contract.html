@@ -42,7 +42,7 @@
                 <div class="brand-inline">
                     <span class="brand-inline-title">Nelomai</span>
                 </div>
-                <p class="eyebrow">panel ↔ node-agent</p>
+                <p class="eyebrow">панель ↔ агент</p>
                 <h2>Контракт агента</h2>
             </div>
             <div class="topbar-actions">
@@ -55,13 +55,13 @@
 
         <section class="server-list-grid">
             <article class="settings-card">
-                <p class="eyebrow">version</p>
+                <p class="eyebrow">версия</p>
                 <h3>{{ contract_page.contract_version }}</h3>
                 <p>Поддерживаемые версии: {{ contract_page.supported_contracts|join(", ") }}</p>
                 <p>Версия панели: {{ contract_page.panel_version }}</p>
             </article>
             <article class="settings-card">
-                <p class="eyebrow">components</p>
+                <p class="eyebrow">компоненты</p>
                 <h3>Компоненты</h3>
                 <ul class="diagnostics-details">
                     {% for component in contract_page.components %}
@@ -74,7 +74,7 @@
         <section class="settings-card contract-actions-card">
             <div class="server-list-head">
                 <div>
-                    <p class="eyebrow">actions</p>
+                    <p class="eyebrow">действия</p>
                     <h3>Поддерживаемые действия</h3>
                 </div>
             </div>
@@ -99,7 +99,7 @@
         <section class="settings-card">
             <div class="server-list-head">
                 <div>
-                    <p class="eyebrow">source of truth</p>
+                    <p class="eyebrow">источник данных</p>
                     <h3>Текущий документ контракта</h3>
                 </div>
                 <span class="server-metrics-note">{{ contract_page.doc_path }}</span>
