@@ -42,8 +42,8 @@
                 <div class="brand-inline">
                     <span class="brand-inline-title">Nelomai</span>
                 </div>
-                <p class="eyebrow">Логи панели</p>
-                <h2>События и ошибки</h2>
+                <p class="eyebrow">Журнал панели</p>
+                <h2>События панели</h2>
             </div>
             <div class="topbar-actions">
                 <form method="post" action="/logout">
@@ -54,12 +54,12 @@
 
         <section class="logs-layout">
             <form class="settings-card logs-filter-card" method="get" action="/admin/logs">
-                <h3>Фильтры логов</h3>
+                <h3>Фильтры журнала</h3>
                 <div class="settings-grid logs-filter-grid">
                     <label>
-                        <span>Тип ошибки</span>
+                        <span>Важность</span>
                         <select name="severity">
-                            <option value="all" {% if logs_page.selected_severity == "all" %}selected{% endif %}>Все</option>
+                            <option value="all" {% if logs_page.selected_severity == "all" %}selected{% endif %}>Любая</option>
                             <option value="error" {% if logs_page.selected_severity == "error" %}selected{% endif %}>Ошибки</option>
                             <option value="warning" {% if logs_page.selected_severity == "warning" %}selected{% endif %}>Предупреждения</option>
                             <option value="info" {% if logs_page.selected_severity == "info" %}selected{% endif %}>Информация</option>
@@ -111,10 +111,10 @@
             <section class="logs-table">
                 <div class="logs-head">
                     <span>Время</span>
-                    <span>Тип</span>
+                    <span>Важность и событие</span>
                     <span>Пользователь</span>
                     <span>Сервер</span>
-                    <span>Сообщение</span>
+                    <span>Что произошло</span>
                 </div>
                 {% if logs_page.logs %}
                     {% for log in logs_page.logs %}
@@ -144,8 +144,8 @@
                     {% endfor %}
                 {% else %}
                 <div class="logs-empty">
-                    <strong>Логов пока нет</strong>
-                    <span>События появятся здесь после действий в панели.</span>
+                    <strong>Событий пока нет</strong>
+                    <span>Записи появятся здесь после действий в панели.</span>
                 </div>
                 {% endif %}
             </section>

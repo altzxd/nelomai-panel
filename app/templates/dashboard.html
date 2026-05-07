@@ -98,15 +98,15 @@
                 <span class="eyebrow">Режимы</span>
                 <div class="stats-line"><span>Пользовательских интерфейсов</span><strong>{{ dashboard.interfaces|length }}</strong></div>
                 <div class="stats-line"><span>Часовой пояс handshake</span><strong>{{ moscow_now }}</strong></div>
-                <div class="stats-line"><span>Preview</span><strong>{{ "read-only" if preview_mode else "live" }}</strong></div>
+                <div class="stats-line"><span>Режим просмотра</span><strong>{{ "без изменений" if preview_mode else "рабочий" }}</strong></div>
             </div>
         </section>
 
         {% if preview_mode %}
         <section class="preview-banner">
-            <span class="availability is-preview">preview</span>
-            <strong>Режим просмотра активен</strong>
-            <span>Все действия на этой странице доступны только для чтения.</span>
+            <span class="availability is-preview">просмотр</span>
+            <strong>Режим просмотра без изменений</strong>
+            <span>Вы видите страницу как пользователь, но действия на ней не изменят данные.</span>
         </section>
         {% endif %}
 
@@ -141,7 +141,7 @@
                                     {% endif %}
                                 </p>
                                 {% if preview_mode %}
-                                <span class="availability is-preview">read-only</span>
+                                <span class="availability is-preview">просмотр</span>
                                 {% endif %}
                                 {% if is_admin_view %}
                                 <p class="interface-filter-control">
@@ -161,9 +161,9 @@
                                 {% endif %}
                                 {% if is_admin_view %}
                                 <p>
-                                    Tak endpoint:
+                                    Маршрут через Tak:
                                     <select data-interface-tak-server="{{ interface.id }}">
-                                        <option value="">standalone</option>
+                                        <option value="">Без Tak</option>
                                         {% for option in interface.available_tak_options %}
                                         <option value="{{ option.id }}" {% if interface.tak_server_id == option.id %}selected{% endif %}>{{ option.name }}</option>
                                         {% endfor %}
@@ -171,7 +171,7 @@
                                 </p>
                                 {% endif %}
                                 {% if interface.route_mode.value == "via_tak" and interface.tak_tunnel_fallback_active %}
-                                <p class="interface-tak-fallback">Маршрут через Tak временно недоступен, интерфейс работает как standalone.</p>
+                                <p class="interface-tak-fallback">Маршрут через Tak временно недоступен, интерфейс работает напрямую.</p>
                                 {% elif interface.route_mode.value == "via_tak" and interface.tak_tunnel_status_label %}
                                 <p class="interface-tak-status">Статус туннеля Tic/Tak: {{ interface.tak_tunnel_status_label }}</p>
                                 {% endif %}
@@ -209,29 +209,29 @@
                             </div>
                             {% if is_admin_view %}
                             <div class="interface-meta-item">
-                                <span>Status</span>
+                                <span>Состояние</span>
                                 <strong>
                                     {% if interface.is_invalid %}
-                                    invalid
+                                    требует внимания
                                     {% elif interface.is_enabled %}
-                                    enabled
+                                    включён
                                     {% else %}
-                                    disabled
+                                    выключен
                                     {% endif %}
                                 </strong>
                             </div>
                             <div class="interface-meta-item">
-                                <span>Tic server</span>
+                                <span>Tic сервер</span>
                                 <strong>{{ interface.tic_server_name }}</strong>
                             </div>
                             <div class="interface-meta-item">
-                                <span>Tak endpoint</span>
-                                <strong>{{ interface.tak_server_name or "standalone" }}</strong>
+                                <span>Маршрут Tak</span>
+                                <strong>{{ interface.tak_server_name or "Без Tak" }}</strong>
                             </div>
                             {% if interface.route_mode.value == "via_tak" %}
                             <div class="interface-meta-item">
                                 <span>Фактический маршрут</span>
-                                <strong>{{ "Россия (fallback)" if interface.tak_tunnel_fallback_active else "Не Россия" }}</strong>
+                                <strong>{{ "Россия (временно напрямую)" if interface.tak_tunnel_fallback_active else "Не Россия" }}</strong>
                             </div>
                             {% endif %}
                             {% endif %}
@@ -280,7 +280,7 @@
                                 <p class="peer-block-disabled">Блоки выключены</p>
                                 {% endif %}
                                 <dl class="peer-metrics">
-                                    <div><dt>Handshake</dt><dd>{{ peer.handshake_at|handshake_moscow }}</dd></div>
+                                    <div><dt>Последнее подключение</dt><dd>{{ peer.handshake_at|handshake_moscow }}</dd></div>
                                     <div><dt>Получено</dt><dd>{{ peer.live_rx_bytes|bytes_compact }}</dd></div>
                                     <div><dt>Отправлено</dt><dd>{{ peer.live_tx_bytes|bytes_compact }}</dd></div>
                                     <div><dt>Трафик 7 дней</dt><dd>{{ "%.1f"|format(peer.traffic_7d_mb / 1024) }} ГБ</dd></div>
@@ -295,22 +295,22 @@
                                 {% if is_admin_view %}
                                 <div class="peer-expiry-editor">
                                     <input type="datetime-local" value="{{ peer.expires_at.strftime('%Y-%m-%dT%H:%M') if peer.expires_at else '' }}" data-peer-expiry-input="{{ peer.id }}">
-                                    <button class="ghost-button small" type="button" data-peer-expiry-save="{{ peer.id }}">Срок жизни</button>
+                                    <button class="ghost-button small" type="button" data-peer-expiry-save="{{ peer.id }}">Срок действия</button>
                                 </div>
                                 {% endif %}
                                 {% if is_admin_view %}
                                 <div class="peer-link-action">
-                                    <button class="ghost-button small" type="button" data-peer-link-copy="{{ peer.id }}">Ссылка</button>
+                                    <button class="ghost-button small" type="button" data-peer-link-copy="{{ peer.id }}">Ссылка для подключения</button>
                                 </div>
                                 {% endif %}
                                 <div class="peer-actions">
                                     {% if preview_mode %}
-                                    <span class="availability is-preview">preview read-only</span>
+                                    <span class="availability is-preview">просмотр</span>
                                     {% endif %}
                                     <button class="ghost-button small" type="button" {% if not preview_mode %}data-peer-recreate="{{ peer.id }}"{% else %}disabled{% endif %}>Пересоздать</button>
                                     {% if peer.download_url %}
                                     <a class="ghost-button small" href="{{ peer.download_url }}">Скачать</a>
-                                    <button class="ghost-button small" type="button" data-peer-qr="{{ peer.id }}">QR</button>
+                                    <button class="ghost-button small" type="button" data-peer-qr="{{ peer.id }}">QR-код</button>
                                     {% endif %}
                                     <button class="ghost-button small danger" type="button" {% if not preview_mode %}data-peer-delete="{{ peer.id }}"{% else %}disabled{% endif %}>Удалить</button>
                                 </div>
@@ -340,7 +340,7 @@
                             <div>
                                 <strong>{{ pending.name }}</strong>
                                 <p>{{ pending.tic_server.name.split(' ')[0] }}</p>
-                                <span class="availability is-pending">owner pending</span>
+                                <span class="availability is-pending">ожидает владельца</span>
                             </div>
                             <button class="primary-button small" type="button" data-assign-interface="{{ pending.id }}">Привязать</button>
                         </div>

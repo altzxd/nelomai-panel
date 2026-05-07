@@ -42,8 +42,8 @@
                 <div class="brand-inline">
                     <span class="brand-inline-title">Nelomai</span>
                 </div>
-                <p class="eyebrow">Сервера панели</p>
-                <h2>Управление Tic и Tak серверами</h2>
+                <p class="eyebrow">Серверы панели</p>
+                <h2>Серверы Tic и Tak</h2>
             </div>
             <div class="topbar-actions">
                 <button class="ghost-button" type="button" data-server-refresh>Обновить статус</button>
@@ -91,12 +91,12 @@
                 </label>
                 <button type="submit" class="ghost-button small">Применить</button>
             </form>
-            <p>Новый сервер сначала проходит bootstrap как пустая Ubuntu 22.04. До подтверждения агента он отображается как unknown, а не online.</p>
+            <p>Новый сервер сначала проходит настройку как чистая Ubuntu 22.04. Пока агент не подтвердил связь, состояние может быть «неизвестно», это нормально для первого запуска.</p>
         </section>
 
         {% if servers_page.beta_readiness %}
         <section class="settings-card diagnostics-summary {% if servers_page.beta_readiness.status == 'error' %}is-error{% elif servers_page.beta_readiness.status == 'warning' %}is-warning{% endif %}">
-            <h3>Готовность к beta rollout</h3>
+            <h3>Готовность к тестированию</h3>
             <p>{{ servers_page.beta_readiness.message }}</p>
             {% if servers_page.beta_readiness.details %}
             <ul class="diagnostics-details">
@@ -137,7 +137,7 @@
             </p>
             {% if servers_page.selected_server.server_type == 'tak' %}
             <p class="server-metrics-note">
-                Tak-сервер используется только для bootstrap, runtime, обновлений, backup и inter-server туннеля.
+                Tak-сервер используется для первичной настройки, обновлений, резервных копий и туннеля между серверами.
                 Интерфейсы и пиры обслуживаются только через Tic-сервер.
             </p>
             {% endif %}
@@ -173,20 +173,20 @@
             {% endif %}
             <dl class="server-facts">
                 <div><dt>Интерфейсов на сервере</dt><dd>{{ servers_page.selected_server.interface_count }}</dd></div>
-                <div><dt>Endpoint для интерфейсов</dt><dd>{{ servers_page.selected_server.endpoint_count }}</dd></div>
+                <div><dt>Используется как маршрут</dt><dd>{{ servers_page.selected_server.endpoint_count }}</dd></div>
                 <div><dt>Пиров на Tic</dt><dd>{{ servers_page.selected_server.peer_count }}</dd></div>
-                <div><dt>Fallback via_tak</dt><dd>{{ servers_page.selected_server.tak_fallback_interface_count }}</dd></div>
+                <div><dt>Временно напрямую</dt><dd>{{ servers_page.selected_server.tak_fallback_interface_count }}</dd></div>
                 <div><dt>Автовосстановлены</dt><dd>{{ servers_page.selected_server.tak_recovered_interface_count }}</dd></div>
             </dl>
             {% if servers_page.selected_server.tak_fallback_interface_names %}
             <div class="server-inline-warning">
-                <strong>Через Tak сейчас не идут:</strong>
+                <strong>Временно работают напрямую:</strong>
                 <span>{{ servers_page.selected_server.tak_fallback_interface_names | join(", ") }}</span>
             </div>
             {% endif %}
             {% if servers_page.selected_server.tak_recovered_interface_names %}
             <div class="server-inline-note">
-                <strong>Tic ↔ Tak автовосстановлен:</strong>
+                <strong>Связь Tic ↔ Tak восстановлена:</strong>
                 <span>{{ servers_page.selected_server.tak_recovered_interface_names | join(", ") }}</span>
             </div>
             {% endif %}
@@ -202,7 +202,7 @@
                     </ul>
                 </div>
                 <div>
-                    <h4>Используется как endpoint</h4>
+                    <h4>Используется как маршрут</h4>
                     <ul>
                         {% for name in servers_page.selected_server.endpoint_interface_names %}
                         <li>{{ name }}</li>
@@ -221,7 +221,7 @@
             </div>
             <div class="toolbar-row">
                 <button class="ghost-button small" type="button" data-server-verify="{{ servers_page.selected_server.id }}">Перепроверить сервер</button>
-                <button class="ghost-button small" type="button" data-server-runtime-check="{{ servers_page.selected_server.id }}">Проверить runtime</button>
+                <button class="ghost-button small" type="button" data-server-runtime-check="{{ servers_page.selected_server.id }}">Проверить среду агента</button>
                 <button class="ghost-button small" type="button" data-server-restart-agent="{{ servers_page.selected_server.id }}">Перезагрузить агент</button>
                 <button class="ghost-button small" type="button" data-server-reboot="{{ servers_page.selected_server.id }}">Перезагрузить сервер</button>
                 {% if not servers_page.selected_server.is_excluded %}
@@ -257,16 +257,16 @@
             <section class="server-runtime-card" data-server-runtime-result hidden>
                 <div class="server-runtime-head">
                     <div>
-                        <p class="eyebrow">Runtime агента</p>
+                        <p class="eyebrow">Среда агента</p>
                         <h4 data-runtime-summary>Проверка ещё не запускалась</h4>
                     </div>
-                    <span class="availability is-unknown" data-runtime-badge>unknown</span>
+                    <span class="availability is-unknown" data-runtime-badge>неизвестно</span>
                 </div>
                 <dl class="server-runtime-paths" data-runtime-paths hidden>
-                    <div><dt>Mode</dt><dd data-runtime-mode>—</dd></div>
-                    <div><dt>Runtime root</dt><dd data-runtime-root>—</dd></div>
+                    <div><dt>Режим</dt><dd data-runtime-mode>—</dd></div>
+                    <div><dt>Папка среды</dt><dd data-runtime-root>—</dd></div>
                     <div><dt>WireGuard root</dt><dd data-runtime-wg-root>—</dd></div>
-                    <div><dt>Peers root</dt><dd data-runtime-peers-root>—</dd></div>
+                    <div><dt>Папка пиров</dt><dd data-runtime-peers-root>—</dd></div>
                 </dl>
                 <div class="server-runtime-list" data-runtime-checks></div>
                 <div class="job-actions">
@@ -290,10 +290,10 @@
                     </span>
                 </div>
                 <dl class="server-facts">
-                    <div><dt>Fallback интерфейсов</dt><dd>{{ pair.fallback_interface_count }}</dd></div>
+                    <div><dt>Временно напрямую</dt><dd>{{ pair.fallback_interface_count }}</dd></div>
                     <div><dt>Автовосстановлены</dt><dd>{{ pair.recovered_interface_count }}</dd></div>
                     <div><dt>Неудачных попыток</dt><dd>{{ pair.failure_count }}</dd></div>
-                    <div><dt>Manual attention</dt><dd>{{ "да" if pair.manual_attention_required else "нет" }}</dd></div>
+                    <div><dt>Нужно внимание</dt><dd>{{ "да" if pair.manual_attention_required else "нет" }}</dd></div>
                 </dl>
                 {% if pair.cooldown_until %}
                 <p class="server-inline-warning">Повторная попытка не раньше: {{ pair.cooldown_until|datetime_moscow }}</p>
@@ -346,7 +346,7 @@
                     </div>
                     <div class="bootstrap-task-preview">
                         {% set last_log = task.logs[-1] if task.logs else '' %}
-                        <p>{{ last_log or 'Ожидание следующего шага bootstrap...' }}</p>
+                        <p>{{ last_log or 'Ожидаем следующий шаг настройки...' }}</p>
                         {% if task.bootstrap_snapshot %}
                         <p class="job-bootstrap-meta bootstrap-task-meta">
                             {% if task.bootstrap_snapshot.transport %}
@@ -381,7 +381,7 @@
                         {% endif %}
                         {% if task.bootstrap_command_profile %}
                         <div class="bootstrap-profile-block">
-                            <strong>Профиль bootstrap: {{ task.bootstrap_command_profile }}</strong>
+                            <strong>Профиль настройки: {{ task.bootstrap_command_profile }}</strong>
                             <span>Пакеты: {{ task.bootstrap_safe_init_packages|length }} в safe-init{% if task.bootstrap_full_only_packages %} + {{ task.bootstrap_full_only_packages|length }} в full-delta{% endif %}</span>
                             {% if task.bootstrap_safe_init_packages %}
                             <span>Safe-init: {{ task.bootstrap_safe_init_packages | join(", ") }}</span>
@@ -509,19 +509,19 @@
                 {% endif %}
                 <dl class="server-facts">
                     <div><dt>Интерфейсов на сервере</dt><dd>{{ server.interface_count }}</dd></div>
-                    <div><dt>Endpoint для интерфейсов</dt><dd>{{ server.endpoint_count }}</dd></div>
+                    <div><dt>Используется как маршрут</dt><dd>{{ server.endpoint_count }}</dd></div>
                     <div><dt>Пиров на Tic</dt><dd>{{ server.peer_count }}</dd></div>
-                    <div><dt>Fallback via_tak</dt><dd>{{ server.tak_fallback_interface_count }}</dd></div>
+                    <div><dt>Временно напрямую</dt><dd>{{ server.tak_fallback_interface_count }}</dd></div>
                     <div><dt>Автовосстановлены</dt><dd>{{ server.tak_recovered_interface_count }}</dd></div>
                     {% if server.location_label %}
                     <div><dt>{% if server.server_type == 'tic' %}Регион{% elif server.server_type == 'tak' %}Страна{% else %}Локация{% endif %}</dt><dd>{{ server.location_label }}</dd></div>
                     {% endif %}
                 </dl>
                 {% if server.tak_fallback_interface_count %}
-                <p class="server-inline-warning">via_tak fallback: {{ server.tak_fallback_interface_count }} · {{ server.tak_fallback_interface_names | join(", ") }}</p>
+                <p class="server-inline-warning">Маршрут через Tak временно недоступен: {{ server.tak_fallback_interface_count }} · {{ server.tak_fallback_interface_names | join(", ") }}</p>
                 {% endif %}
                 {% if server.tak_recovered_interface_count %}
-                <p class="server-inline-note">Tic ↔ Tak автовосстановлен: {{ server.tak_recovered_interface_count }} · {{ server.tak_recovered_interface_names | join(", ") }}</p>
+                <p class="server-inline-note">Связь Tic ↔ Tak восстановлена: {{ server.tak_recovered_interface_count }} · {{ server.tak_recovered_interface_names | join(", ") }}</p>
                 {% endif %}
                 {% if server.agent_update_status %}
                 <p class="server-inline-note">
@@ -559,7 +559,7 @@
             <button class="ghost-button small" type="button" data-close-server-modal>Закрыть</button>
         </div>
         <form class="settings-card" data-server-create-form>
-            <p class="modal-note">Панель передаёт Node-agent базовые SSH-данные и тип сервера. Если во время bootstrap понадобится подтверждение или дополнительный ввод, следующим шагом это можно будет показать прямо здесь, без выхода из панели.</p>
+            <p class="modal-note">Панель передаст агенту тип сервера и SSH-данные для первичной настройки. Если потребуется подтверждение или дополнительный ввод, он появится здесь же.</p>
             <div class="settings-grid">
                 <label>
                     <span>Тип сервера</span>
@@ -604,7 +604,7 @@
             </div>
             <div class="bootstrap-console">
                 <div class="bootstrap-console-head">Ход настройки</div>
-                <pre class="bootstrap-console-body" data-bootstrap-console>Ожидание запуска bootstrap…</pre>
+                <pre class="bootstrap-console-body" data-bootstrap-console>Ожидаем запуск настройки…</pre>
             </div>
             <div class="toolbar-row">
                 <button class="primary-button small" type="submit">Добавить сервер</button>

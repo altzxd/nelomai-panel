@@ -42,23 +42,23 @@
                 <div class="brand-inline">
                     <span class="brand-inline-title">Nelomai</span>
                 </div>
-                <p class="eyebrow">Самодиагностика панели</p>
-                <h2>Проверка узлов и сервисов</h2>
+                <p class="eyebrow">Диагностика панели</p>
+                <h2>Состояние панели и серверов</h2>
             </div>
             <div class="topbar-actions">
                 <form method="post" action="/admin/diagnostics/run">
-                    <button type="submit" class="primary-button">Запустить проверку</button>
+                    <button type="submit" class="primary-button">Запустить диагностику</button>
                 </form>
                 <form method="post" action="/admin/diagnostics/tak-tunnels/rotate">
                     <input type="hidden" name="focused_tic_server_id" value="{{ request.query_params.get('focused_tic_server_id', '') }}">
                     <input type="hidden" name="focused_tak_server_id" value="{{ request.query_params.get('focused_tak_server_id', '') }}">
-                    <button type="submit" class="ghost-button small">Ротировать артефакты</button>
+                    <button type="submit" class="ghost-button small">Обновить служебные файлы</button>
                 </form>
             </div>
         </header>
 
         <section class="settings-card diagnostics-summary {% if diagnostics_page.overall_status == 'error' %}is-error{% elif diagnostics_page.overall_status == 'warning' %}is-warning{% endif %}">
-            <h3>Итог</h3>
+            <h3>Общий итог</h3>
             <p>{{ diagnostics_page.summary }}</p>
             {% if diagnostics_page.problem_nodes %}
             <div class="diagnostics-problem-list">
@@ -122,7 +122,7 @@
         <section class="settings-card diagnostics-recommendations">
             <div class="server-list-head">
                 <div>
-                    <p class="eyebrow">next actions</p>
+                    <p class="eyebrow">Что сделать дальше</p>
                     <h3>Рекомендации</h3>
                 </div>
             </div>
@@ -189,7 +189,7 @@
         <section class="settings-card diagnostics-incidents">
             <div class="server-list-head">
                 <div>
-                    <p class="eyebrow">incident feed</p>
+                    <p class="eyebrow">Недавние события</p>
                     <h3>Последние инциденты</h3>
                 </div>
                 <a class="ghost-button small" href="/admin/logs?severity=error">Открыть логи</a>
@@ -229,7 +229,7 @@
         <section class="settings-card diagnostics-history">
             <div class="server-list-head">
                 <div>
-                    <p class="eyebrow">run history</p>
+                    <p class="eyebrow">История проверок</p>
                     <h3>История запусков</h3>
                 </div>
                 <a class="ghost-button small" href="/admin/logs?event_type=diagnostics.run">Открыть в логах</a>

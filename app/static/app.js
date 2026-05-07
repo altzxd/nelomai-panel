@@ -769,7 +769,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const takSelect = document.querySelector(`[data-interface-tak-server="${interfaceId}"]`);
         if (select.value === "via_tak" && takSelect && !takSelect.value) {
           select.value = "standalone";
-          window.alert("Для режима via_tak сначала выберите Tak endpoint.");
+          window.alert("Чтобы включить маршрут через Tak, сначала выберите Tak сервер.");
           return;
         }
         const previousValue = select.getAttribute("data-current-value") || select.value;
@@ -817,7 +817,7 @@ document.addEventListener("DOMContentLoaded", () => {
             routeSelect.setAttribute("data-current-value", nextRouteMode);
           }
           syncInterfaceRouteControls(interfaceId, nextRouteMode);
-          showToast("success", "Endpoint интерфейса обновлён");
+          showToast("success", "Маршрут Tak обновлён");
         } catch (error) {
           select.value = previousTakServerId;
           select.setAttribute("data-current-value", previousTakServerId);
@@ -1006,7 +1006,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       try {
         setActionBusy(nextButton, true);
-        setStatus(statusNode, "Подготавливаем свободный порт и адрес...");
+        setStatus(statusNode, "Подбираем свободный порт и адрес...");
         const allocation = await requestJson("/api/admin/interfaces/prepare", {
           method: "POST",
           body: JSON.stringify({
@@ -2312,7 +2312,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (inputKey === "ssh_password" || inputKind === "password") {
         return {
           prompt: "Введите SSH пароль удалённого сервера",
-          hint: "Пароль будет отправлен только в bootstrap-задачу и не отображается в поле.",
+          hint: "Пароль будет отправлен только в задачу настройки и не отображается в поле.",
           buttonText: "Отправить пароль",
           placeholder: "Введите пароль",
           hideInput: false,
@@ -2322,8 +2322,8 @@ document.addEventListener("DOMContentLoaded", () => {
       if (/^bootstrap_step_\d+_confirm$/.test(inputKey)) {
         const stepNumber = inputKey.match(/\d+/)?.[0] || "?";
         return {
-          prompt: `Подтвердить выполнение bootstrap шага ${stepNumber}`,
-          hint: String(task?.input_prompt || "Агент запросил подтверждение следующей команды bootstrap."),
+          prompt: `Подтвердить выполнение шага настройки ${stepNumber}`,
+          hint: String(task?.input_prompt || "Агент запросил подтверждение следующей команды настройки."),
           buttonText: "Подтвердить шаг",
           placeholder: "",
           hideInput: true,
@@ -2366,7 +2366,7 @@ document.addEventListener("DOMContentLoaded", () => {
         lines.push(`Transport: ${snapshot.transport}`);
       }
       if (snapshot.mode) {
-        lines.push(`Режим bootstrap: ${snapshot.mode}`);
+        lines.push(`Режим настройки: ${snapshot.mode}`);
       }
       if (typeof snapshot.executed_step_count === "number" && typeof snapshot.command_count === "number") {
         lines.push(`Шаги: ${snapshot.executed_step_count}/${snapshot.command_count}`);
@@ -2497,7 +2497,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       if (task.status === "cancelled") {
         stopBootstrapPolling();
-        setStatus(statusNode, "Bootstrap остановлен администратором.", true);
+        setStatus(statusNode, "Настройка остановлена администратором.", true);
         return;
       }
       const summary = bootstrapStatusSummary(task);
@@ -2576,9 +2576,9 @@ document.addEventListener("DOMContentLoaded", () => {
       runtimeResultNode.hidden = false;
       const ready = !!result?.ready;
       runtimeSummaryNode.textContent = ready
-        ? "Среда агента готова к runtime-операциям"
-        : "Среда агента не готова к runtime-операциям";
-      runtimeBadgeNode.textContent = ready ? "ready" : "not ready";
+        ? "Среда агента готова к операциям"
+        : "Среда агента требует внимания";
+      runtimeBadgeNode.textContent = ready ? "готово" : "требует внимания";
       runtimeBadgeNode.className = `availability ${ready ? "is-online" : "is-offline"}`;
       if (runtimePathsNode) {
         runtimePathsNode.hidden = !(result?.mode || result?.runtime_root || result?.wireguard_root || result?.peers_root);

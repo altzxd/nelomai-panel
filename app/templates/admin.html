@@ -45,8 +45,8 @@
                 <div class="brand-inline">
                     <span class="brand-inline-title">Nelomai</span>
                 </div>
-                <p class="eyebrow">Главная админская страница</p>
-                <h2>Управление WireGuard-инфраструктурой</h2>
+                <p class="eyebrow">Админ-панель</p>
+                <h2>Управление Nelomai</h2>
             </div>
             <div class="topbar-actions">
                 <span class="role-chip">Администратор</span>
@@ -150,7 +150,7 @@
                 </div>
                 {% else %}
                 <div class="server-metrics-empty">
-                    <p>{% if admin_page.show_remote_live_metrics %}{{ server_card.metrics_note }}{% else %}Live-метрики серверов доступны на вкладке «Главная».{% endif %}</p>
+                    <p>{% if admin_page.show_remote_live_metrics %}{{ server_card.metrics_note }}{% else %}Текущие показатели серверов доступны на вкладке «Главная».{% endif %}</p>
                 </div>
                 {% endif %}
             </article>
@@ -183,11 +183,11 @@
                             </select>
                         </label>
                     </form>
-                    <p>Плитки ниже показывают все интерфейсы, их суммарный трафик и текущий статус включения.</p>
+                    <p>Ниже показаны интерфейсы пользователей, их трафик за 30 дней и текущее состояние.</p>
                 </section>
                 {% if admin_page.beta_readiness %}
                 <section class="settings-card diagnostics-summary {% if admin_page.beta_readiness.status == 'error' %}is-error{% elif admin_page.beta_readiness.status == 'warning' %}is-warning{% endif %}">
-                    <h3>Готовность к beta rollout</h3>
+                    <h3>Готовность к тестированию</h3>
                     <p>{{ admin_page.beta_readiness.message }}</p>
                     {% if admin_page.beta_readiness.details %}
                     <ul class="diagnostics-details">
@@ -220,7 +220,7 @@
                         <div>
                             <strong>Панель</strong>
                             <p>Текущая: {{ admin_page.panel_update_summary.current_version }}{% if admin_page.panel_update_summary.latest_version %} · Последняя: {{ admin_page.panel_update_summary.latest_version }}{% endif %}</p>
-                            <p>{% if admin_page.panel_update_summary.update_available %}Рассинхрон версий: панель отстаёт от последней версии.{% else %}Рассинхрона версий нет.{% endif %}</p>
+                            <p>{% if admin_page.panel_update_summary.update_available %}Доступна новая версия панели.{% else %}Версия панели актуальна.{% endif %}</p>
                         </div>
                         <span class="availability {% if admin_page.panel_update_summary.update_available %}is-invalid{% else %}is-online{% endif %}">
                             {% if admin_page.panel_update_summary.update_available %}нужно обновление{% else %}актуально{% endif %}
@@ -265,9 +265,9 @@
                                 <span class="slider"></span>
                             </label>
                             {% if interface.route_mode.value == "via_tak" and interface.tak_tunnel_fallback_active %}
-                            <span class="interface-inline-warning">via_tak недоступен, действует fallback в standalone</span>
+                            <span class="interface-inline-warning">Маршрут через Tak временно недоступен, интерфейс работает напрямую</span>
                             {% elif interface.route_mode.value == "via_tak" and interface.tak_tunnel_status_label %}
-                            <span class="interface-inline-note">туннель: {{ interface.tak_tunnel_status_label }}</span>
+                            <span class="interface-inline-note">Туннель Tic/Tak: {{ interface.tak_tunnel_status_label }}</span>
                             {% endif %}
                         </div>
                         <div class="interface-status-line">
@@ -302,7 +302,7 @@
             <div class="tab-panel active">
                 {% if admin_page.beta_readiness %}
                 <section class="settings-card diagnostics-summary {% if admin_page.beta_readiness.status == 'error' %}is-error{% elif admin_page.beta_readiness.status == 'warning' %}is-warning{% endif %}">
-                    <h3>Готовность к beta rollout</h3>
+                    <h3>Готовность к тестированию</h3>
                     <p>{{ admin_page.beta_readiness.message }}</p>
                     {% if admin_page.beta_readiness.details %}
                     <ul class="diagnostics-details">
@@ -1062,15 +1062,16 @@
         <div class="section-header">
             <div>
                 <p class="eyebrow">Новый интерфейс</p>
-                <h3>Создание интерфейса на Tic сервере</h3>
+                <h3>Создание пользовательского интерфейса</h3>
             </div>
             <button class="ghost-button small" type="button" data-close-interface-modal>Закрыть</button>
         </div>
         <form class="interface-create-form" data-interface-create-form>
+            <p class="modal-note">Сначала выберите Tic сервер, при необходимости маршрут через Tak и понятное название. На следующем шаге панель подберёт свободный порт и IPv4 адрес, если оставить поля пустыми.</p>
             <div class="interface-step" data-interface-step="1">
                 <div class="settings-grid">
                     <label>
-                        <span>Tic сервер</span>
+                        <span>Tic сервер с интерфейсом</span>
                         <select name="tic_server_id" required>
                             {% for option in admin_page.available_tic_servers %}
                             <option value="{{ option.id }}">{{ option.name }}</option>
@@ -1078,9 +1079,9 @@
                         </select>
                     </label>
                     <label>
-                        <span>Tak endpoint</span>
+                        <span>Маршрут через Tak</span>
                         <select name="tak_server_id">
-                            <option value="">standalone</option>
+                            <option value="">Без Tak</option>
                             {% for option in admin_page.available_tak_servers %}
                             <option value="{{ option.id }}">{{ option.name }}</option>
                             {% endfor %}
@@ -1100,12 +1101,12 @@
             <div class="interface-step" data-interface-step="2" hidden>
                 <div class="settings-grid">
                     <label>
-                        <span>Порт</span>
-                        <input type="text" name="listen_port" placeholder="Авто от 10001">
+                        <span>Порт WireGuard</span>
+                        <input type="text" name="listen_port" placeholder="Подберём автоматически">
                     </label>
                     <label>
-                        <span>IPv4 адрес</span>
-                        <input type="text" name="address_v4" placeholder="Авто">
+                        <span>IPv4 адрес интерфейса</span>
+                        <input type="text" name="address_v4" placeholder="Подберём автоматически">
                     </label>
                     <label>
                         <span>Лимит пиров</span>
