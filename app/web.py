@@ -245,6 +245,8 @@ def audit_event_type_for_status(status_code: int) -> str:
 
 
 async def audit_http_exception_handler(request: Request, exc: HTTPException):
+    if request.headers.get("x-nelomai-internal-check") == "access-routes-diagnostics":
+        return await http_exception_handler(request, exc)
     if exc.status_code >= 400:
         with SessionLocal() as db:
             actor_user_id = None

@@ -2000,12 +2000,19 @@ def _run_access_routes_diagnostics() -> tuple[str, str, list[str]]:
     if admin is None or user is None:
         return "warning", "Проверка доступа выполнена не полностью: нет тестовых пользователей.", ["Нужны admin и обычный пользователь."]
 
-    admin_headers = {"Cookie": f"access_token={create_access_token(admin.login)}"}
-    user_headers = {"Cookie": f"access_token={create_access_token(user.login)}"}
+    diagnostics_headers = {"X-Nelomai-Internal-Check": "access-routes-diagnostics"}
+    admin_headers = {
+        "Cookie": f"access_token={create_access_token(admin.login)}",
+        **diagnostics_headers,
+    }
+    user_headers = {
+        "Cookie": f"access_token={create_access_token(user.login)}",
+        **diagnostics_headers,
+    }
 
     try:
         with TestClient(app) as client:
-            dashboard_redirect = client.get("/dashboard", follow_redirects=False)
+            dashboard_redirect = client.get("/dashboard", headers=diagnostics_headers, follow_redirects=False)
             if dashboard_redirect.status_code != 303:
                 raise RuntimeError(f"/dashboard без авторизации вернул {dashboard_redirect.status_code}")
             details.append("Неавторизованный доступ к /dashboard уходит на login.")
