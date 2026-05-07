@@ -25,3 +25,4 @@ agents/node-tic-agent/.data/
 agents/node-tic-agent/.runtime/
 
 HANDOFF.md
+.local/
