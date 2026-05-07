@@ -23,6 +23,7 @@ import httpx
 import qrcode
 from qrcode.image.svg import SvgPathImage
 from sqlalchemy import Select, func, inspect, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload
 
 from app.config import settings
@@ -7909,7 +7910,10 @@ def _sync_server_runtime_peer_stats(db: Session, server: Server, response: dict[
                 changed = True
                 db.add(peer)
     if changed:
-        db.commit()
+        try:
+            db.commit()
+        except SQLAlchemyError:
+            db.rollback()
 
 
 def _fetch_server_runtime_view(db: Session, server: Server, *, actor_user_id: int | None = None) -> ServerRuntimeCheckView:
