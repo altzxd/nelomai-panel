@@ -259,8 +259,8 @@ ACTION_CAPABILITIES = {
 ERROR_EVENT_MESSAGES_RU = {
     "auth.login_failed": "Не удалось войти: неверный логин или пароль.",
     "http.400": "Запрос отклонён: данные заполнены неверно.",
-    "http.401": "Требуется вход в панель.",
-    "http.403": "Действие запрещено: недостаточно прав.",
+    "http.401": "Нужен вход в панель.",
+    "http.403": "Отказано по правам: у пользователя нет доступа к действию.",
     "http.404": "Запрошенный объект не найден.",
     "http.503": "Серверное действие недоступно: агент или сервер не ответил.",
     "http.error": "Произошла ошибка при обработке запроса.",
@@ -274,7 +274,13 @@ AUDIT_EVENT_TYPE_LABELS = {
     "backups.create_failed": "Ошибка создания бэкапа",
     "backups.restore_users": "Восстановление пользователей",
     "backups.verify_server_copies": "Проверка свежести BackUp",
-    "diagnostics.run": "Запуск самодиагностики",
+    "diagnostics.run": "Запуск диагностики",
+    "http.400": "Запрос отклонён",
+    "http.401": "Нужен вход",
+    "http.403": "Отказано по правам",
+    "http.404": "Объект не найден",
+    "http.503": "Серверное действие недоступно",
+    "http.error": "Ошибка запроса",
     "panel_jobs.failed": "Ошибка задачи панели",
     "peer_links.create": "Создание ссылки на пир",
     "peer_links.revoke": "Отзыв ссылки на пир",
@@ -285,19 +291,19 @@ AUDIT_EVENT_TYPE_LABELS = {
     "servers.exclude": "Исключение сервера",
     "servers.reboot": "Перезагрузка сервера",
     "servers.refresh_status": "Проверка статуса сервера",
-    "servers.verify_runtime": "Проверка runtime агента",
+    "servers.verify_runtime": "Проверка среды агента",
     "servers.restart_agent": "Перезагрузка агента",
     "servers.restore": "Восстановление сервера",
     "tak_tunnels.auto_recovered": "Автовосстановление туннеля Tic/Tak",
-    "tak_tunnels.artifacts_rotated": "Ротация артефактов туннеля Tic/Tak",
-    "tak_tunnels.cooldown": "Автовосстановление туннеля Tic/Tak отложено по backoff",
-    "tak_tunnels.backoff_cleared": "Сброшен backoff туннеля Tic/Tak",
+    "tak_tunnels.artifacts_rotated": "Обновлены служебные файлы туннеля Tic/Tak",
+    "tak_tunnels.cooldown": "Повторная попытка туннеля Tic/Tak отложена",
+    "tak_tunnels.backoff_cleared": "Сброшена пауза восстановления туннеля Tic/Tak",
     "tak_tunnels.manual_repaired": "Ручное восстановление туннеля Tic/Tak",
     "updates.agent_apply": "Обновление агента",
     "updates.agent_check": "Проверка обновлений агента",
     "updates.panel_check": "Проверка обновлений панели",
     "updates.panel_check_failed": "Ошибка проверки обновлений панели",
-    "tak_tunnels.manual_attention_required": "Туннель Tic/Tak требует ручного вмешательства",
+    "tak_tunnels.manual_attention_required": "Туннель Tic/Tak требует внимания",
 }
 
 AGENT_ACTION_LABELS_RU = {
@@ -327,7 +333,7 @@ AGENT_ACTION_LABELS_RU = {
     "update_peer_block_filters": "переключение фильтров блока",
     "update_server_agent": "обновление агента",
     "verify_server_backup_copy": "проверка свежести серверного snapshot",
-    "verify_server_runtime": "проверка runtime агента",
+    "verify_server_runtime": "проверка среды агента",
     "verify_server_status": "проверка статуса сервера",
 }
 
@@ -1531,7 +1537,7 @@ def _reconcile_tak_tunnel_routes(db: Session) -> None:
                 event_type="tak_tunnels.cooldown",
                 severity="warning",
                 message=f"Tak tunnel auto-repair delayed by cooldown: tic={sample.tic_server.name}, tak={sample.tak_server.name}",
-                message_ru=f"Автовосстановление туннеля Tic/Tak отложено по backoff для пары {sample.tic_server.name} → {sample.tak_server.name}",
+                message_ru=f"Повторная попытка восстановления туннеля Tic/Tak отложена для пары {sample.tic_server.name} → {sample.tak_server.name}",
                 server_id=sample.tic_server.id,
                 details=json.dumps(details, ensure_ascii=False),
                 commit=False,
@@ -1619,15 +1625,35 @@ def _format_audit_details_ru(log: AuditLog) -> str | None:
     try:
         details = json.loads(log.details)
     except json.JSONDecodeError:
+        details = None
+
+    if log.event_type == "http.401":
+        return "Панель попросила пользователя войти перед продолжением."
+
+    if log.event_type == "http.403":
+        return "Панель заблокировала действие по правилам доступа."
+
+    if log.event_type == "http.404":
+        return "Запрошенная страница или запись не найдена."
+
+    if log.event_type == "http.400":
+        return "Запрос не прошёл проверку данных."
+
+    if details is None:
         return log.details
 
     if log.event_type == "diagnostics.run" and isinstance(details, dict):
         overall_status = str(details.get("overall_status") or "unknown")
+        status_label = {
+            "ok": "всё штатно",
+            "warning": "есть предупреждения",
+            "error": "нужна проверка",
+        }.get(overall_status, overall_status)
         problem_count = int(details.get("problem_count") or 0)
         recommendation_count = int(details.get("recommendation_count") or 0)
         incident_count = int(details.get("incident_count") or 0)
         parts = [
-            f"итог: {overall_status}",
+            f"итог: {status_label}",
             f"проблемных узлов: {problem_count}",
             f"рекомендаций: {recommendation_count}",
             f"инцидентов: {incident_count}",
@@ -1646,7 +1672,7 @@ def _format_audit_details_ru(log: AuditLog) -> str | None:
         if tic_server_name or tak_server_name:
             parts.append(f"пара: {tic_server_name} → {tak_server_name}".strip())
         if previous_status:
-            parts.append(f"до восстановления: {previous_status}")
+            parts.append(f"до восстановления: {_tak_tunnel_status_label_ui(previous_status)}")
         if isinstance(interface_names, list) and interface_names:
             parts.append(f"интерфейсы: {', '.join(str(item) for item in interface_names[:6])}")
         return " | ".join(part for part in parts if part) or log.details
@@ -1694,7 +1720,7 @@ def _format_audit_details_ru(log: AuditLog) -> str | None:
         if failure_count:
             parts.append(f"неудачных попыток: {failure_count}")
         if cooldown_until:
-            parts.append(f"cooldown до: {cooldown_until}")
+            parts.append(f"повторная попытка после: {cooldown_until}")
         if isinstance(interface_names, list) and interface_names:
             parts.append(f"интерфейсы: {', '.join(str(item) for item in interface_names[:6])}")
         return " | ".join(part for part in parts if part) or log.details
@@ -1711,7 +1737,7 @@ def _format_audit_details_ru(log: AuditLog) -> str | None:
         if failure_count:
             parts.append(f"сброшено неудачных попыток: {failure_count}")
         if manual_attention:
-            parts.append("сброшен manual attention")
+            parts.append("снят флаг ручной проверки")
         if isinstance(interface_names, list) and interface_names:
             parts.append(f"интерфейсы: {', '.join(str(item) for item in interface_names[:6])}")
         return " | ".join(part for part in parts if part) or log.details
@@ -1728,7 +1754,7 @@ def _format_audit_details_ru(log: AuditLog) -> str | None:
         if failure_count:
             parts.append(f"неудачных попыток: {failure_count}")
         if cooldown_until:
-            parts.append(f"cooldown до: {cooldown_until}")
+            parts.append(f"повторная попытка после: {cooldown_until}")
         if isinstance(interface_names, list) and interface_names:
             parts.append(f"интерфейсы: {', '.join(str(item) for item in interface_names[:6])}")
         return " | ".join(part for part in parts if part) or log.details

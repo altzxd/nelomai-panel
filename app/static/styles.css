@@ -858,6 +858,12 @@ textarea[disabled] {
     gap: 24px;
 }
 
+.topbar-subtitle {
+    max-width: 720px;
+    margin-top: 6px;
+    color: var(--muted);
+}
+
 .role-chip {
     display: inline-flex;
     align-items: center;
@@ -1059,7 +1065,50 @@ textarea[disabled] {
     background: rgba(255, 194, 87, 0.08);
 }
 
+.logs-row.severity-access {
+    background: rgba(129, 156, 216, 0.06);
+}
+
 .log-severity {
+    display: grid;
+    gap: 5px;
+    color: var(--muted);
+}
+
+.log-severity-pill {
+    display: inline-flex;
+    width: fit-content;
+    align-items: center;
+    padding: 4px 9px;
+    border-radius: 999px;
+    font-size: 0.76rem;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.log-severity-pill.is-error {
+    background: rgba(255, 122, 158, 0.16);
+    color: #ffd6e0;
+}
+
+.log-severity-pill.is-warning {
+    background: rgba(255, 211, 122, 0.14);
+    color: #ffe5b5;
+}
+
+.log-severity-pill.is-info,
+.log-severity-pill.is-access {
+    background: rgba(97, 213, 172, 0.12);
+    color: #bff5dd;
+}
+
+.log-event-type {
+    color: var(--text);
+    font-weight: 700;
+}
+
+.log-severity-note {
+    font-size: 0.82rem;
     color: var(--muted);
 }
 

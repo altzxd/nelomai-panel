@@ -24,7 +24,7 @@
             <a class="nav-icon-pill {% if has_problem_jobs %}is-problem{% endif %}" href="/admin/jobs" title="Задачи" aria-label="Задачи">
                 <span class="nav-icon">⏱</span>
             </a>
-            <a class="nav-icon-pill active" href="/admin/logs" title="Логи" aria-label="Логи">
+            <a class="nav-icon-pill active" href="/admin/logs" title="Журнал" aria-label="Журнал">
                 <span class="nav-icon">≡</span>
             </a>
             <a class="nav-icon-pill" href="/admin/diagnostics" title="Диагностика" aria-label="Диагностика">
@@ -44,6 +44,7 @@
                 </div>
                 <p class="eyebrow">Журнал панели</p>
                 <h2>События панели</h2>
+                <p class="topbar-subtitle">Здесь собраны действия пользователей, служебные проверки и события серверов. Отказы по правам обычно означают, что панель корректно заблокировала недоступное действие.</p>
             </div>
             <div class="topbar-actions">
                 <form method="post" action="/logout">
@@ -60,8 +61,8 @@
                         <span>Важность</span>
                         <select name="severity">
                             <option value="all" {% if logs_page.selected_severity == "all" %}selected{% endif %}>Любая</option>
-                            <option value="error" {% if logs_page.selected_severity == "error" %}selected{% endif %}>Ошибки</option>
-                            <option value="warning" {% if logs_page.selected_severity == "warning" %}selected{% endif %}>Предупреждения</option>
+                            <option value="error" {% if logs_page.selected_severity == "error" %}selected{% endif %}>Требует внимания</option>
+                            <option value="warning" {% if logs_page.selected_severity == "warning" %}selected{% endif %}>Предупреждение</option>
                             <option value="info" {% if logs_page.selected_severity == "info" %}selected{% endif %}>Информация</option>
                         </select>
                     </label>
@@ -118,9 +119,16 @@
                 </div>
                 {% if logs_page.logs %}
                     {% for log in logs_page.logs %}
-                    <article class="logs-row severity-{{ log.severity }}">
+                    {% set is_access_denied = log.event_type in ["http.401", "http.403"] %}
+                    {% set severity_label = "Отказано по правам" if is_access_denied else ("Требует внимания" if log.severity == "error" else ("Предупреждение" if log.severity == "warning" else "Информация")) %}
+                    {% set severity_note = "Доступ заблокирован штатно" if is_access_denied else ("Нужна проверка" if log.severity == "error" else ("Проверьте при случае" if log.severity == "warning" else "Служебное событие")) %}
+                    <article class="logs-row {% if is_access_denied %}severity-access{% else %}severity-{{ log.severity }}{% endif %}">
                         <span>{{ log.created_at|datetime_moscow }}</span>
-                        <span class="log-severity">{{ log.severity }} · {{ log.event_type_label }}</span>
+                        <span class="log-severity">
+                            <span class="log-severity-pill {% if is_access_denied %}is-access{% elif log.severity == 'error' %}is-error{% elif log.severity == 'warning' %}is-warning{% else %}is-info{% endif %}">{{ severity_label }}</span>
+                            <span class="log-event-type">{{ log.event_type_label }}</span>
+                            <span class="log-severity-note">{{ severity_note }}</span>
+                        </span>
                         <span>{{ log.actor_login or log.target_login or "—" }}</span>
                         <span>
                             {% if log.server_name and log.server_url %}
