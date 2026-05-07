@@ -2561,14 +2561,14 @@ def run_panel_diagnostics(
                 continue
             if focused_tak_server_id is not None and sample.tak_server_id != focused_tak_server_id:
                 continue
-            pair_label = f"{sample.tic_server.name} → {sample.tak_server.name}"
+            pair_label = f"{sample.tic_server.name} -> {sample.tak_server.name}"
             pair_state = dict(repair_state.get(_tak_tunnel_pair_key(sample.tic_server_id, sample.tak_server_id)) or {})
             failure_count = int(pair_state.get("failure_count") or 0)
             cooldown_until = _tak_tunnel_parse_datetime(pair_state.get("cooldown_until"))
             if bool(pair_state.get("manual_attention_required")):
-                manual_attention_pairs.append(f"{pair_label} В· РЅРµСѓРґР°С‡РЅС‹С… РїРѕРїС‹С‚РѕРє: {failure_count}")
+                manual_attention_pairs.append(f"{pair_label} · неудачных попыток: {failure_count}")
             elif cooldown_until is not None and cooldown_until > utc_now():
-                cooldown_pairs.append(f"{pair_label} В· retry after {cooldown_until.isoformat()}")
+                cooldown_pairs.append(f"{pair_label} - retry after {cooldown_until.isoformat()}")
             if any(
                 interface.tak_tunnel_last_status == "recovered" and not interface.tak_tunnel_fallback_active
                 for interface in pair_interfaces
@@ -2596,7 +2596,7 @@ def run_panel_diagnostics(
                             tak_server_id=sample.tak_server_id,
                         )
                         rotation_at = rotation_event.created_at.isoformat() if rotation_event is not None else "время неизвестно"
-                        rotated_pairs.append(f"{pair_label} · rev {artifact_revision} · {rotation_at}")
+                        rotated_pairs.append(f"{pair_label} - rev {artifact_revision} - {rotation_at}")
                     if not is_active:
                         tak_tunnel_status = "warning" if tak_tunnel_status == "ok" else tak_tunnel_status
                         interface_names = ", ".join(sorted(interface.name for interface in pair_interfaces))
@@ -2606,7 +2606,7 @@ def run_panel_diagnostics(
                     failed_pairs.append(f"{pair_label}: {exc}")
                     tak_tunnel_action_links.append(
                         DiagnosticsCheckView.ActionLinkView(
-                            label=f"{sample.tic_server.name} ↔ {sample.tak_server.name}",
+                            label=f"{sample.tic_server.name} <-> {sample.tak_server.name}",
                             url=f"/admin/servers?bucket=active&server_type=tic&selected_server_id={sample.tic_server.id}",
                         )
                     )
@@ -2618,7 +2618,7 @@ def run_panel_diagnostics(
                 )
                 if rotation_event is not None:
                     rotation_at = rotation_event.created_at.isoformat()
-                    rotated_pairs.append(f"{pair_label} ? latest rotation ? {rotation_at}")
+                    rotated_pairs.append(f"{pair_label} - latest rotation - {rotation_at}")
                 if any(interface.tak_tunnel_fallback_active for interface in pair_interfaces):
                     tak_tunnel_status = "warning" if tak_tunnel_status == "ok" else tak_tunnel_status
                     interface_names = ", ".join(sorted(interface.name for interface in pair_interfaces))
@@ -2632,9 +2632,9 @@ def run_panel_diagnostics(
         if rotated_pairs:
             tak_tunnel_details.append(f"Последние ротации артефактов: {'; '.join(rotated_pairs[:5])}")
         if cooldown_pairs:
-            tak_tunnel_details.append(f"Р’ cooldown: {'; '.join(cooldown_pairs[:5])}")
+            tak_tunnel_details.append(f"В cooldown: {'; '.join(cooldown_pairs[:5])}")
         if manual_attention_pairs:
-            tak_tunnel_details.append(f"РўСЂРµР±СѓСЋС‚ СЂСѓС‡РЅРѕРіРѕ РІРјРµС€Р°С‚РµР»СЊСЃС‚РІР°: {'; '.join(manual_attention_pairs[:5])}")
+            tak_tunnel_details.append(f"Требуют ручного вмешательства: {'; '.join(manual_attention_pairs[:5])}")
         tak_tunnel_action_links.append(
             DiagnosticsCheckView.ActionLinkView(
                 label="Логи автовосстановления",
@@ -2655,7 +2655,7 @@ def run_panel_diagnostics(
         )
         tak_tunnel_action_links.append(
             DiagnosticsCheckView.ActionLinkView(
-                label="Р›РѕРіРё СЂСѓС‡РЅРѕРіРѕ РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёСЏ",
+                label="Логи ручного восстановления",
                 url="/admin/logs?event_type=tak_tunnels.manual_repaired",
             )
         )
@@ -2726,26 +2726,26 @@ def run_panel_diagnostics(
                     raw_status = focused_pair.tak_tunnel_last_status or ("fallback" if focused_pair.tak_tunnel_fallback_active else "unknown")
                     pair_status = "warning" if focused_pair.tak_tunnel_fallback_active else "ok"
                     pair_message = (
-                        "?????? ???? ?????????? fallback ??? ??????????."
+                        "Сейчас пара использует fallback для интерфейсов."
                         if focused_pair.tak_tunnel_fallback_active
-                        else "?????? ???? ?? ?????????? ????????? fallback."
+                        else "Сейчас пара не использует аварийный fallback."
                     )
-                    pair_details.append(f"Snapshot-?????? ??????: {raw_status}")
-                    pair_details.append("Live tunnel-check ??????????? ?????? ?? ?????? ?????????? ?????????.")
+                    pair_details.append(f"Snapshot-статус пары: {raw_status}")
+                    pair_details.append("Live tunnel-check недоступен сейчас из-за ошибки проверки туннеля.")
                     rotation_event = _latest_tak_tunnel_rotation_event(
                         db,
                         tic_server_id=focused_pair.tic_server_id,
                         tak_server_id=focused_pair.tak_server_id,
                     )
                     if rotation_event is not None:
-                        pair_details.append(f"????????? ??????? ??????????: {rotation_event.created_at.isoformat()}")
+                        pair_details.append(f"Последняя ротация артефактов: {rotation_event.created_at.isoformat()}")
                 if bool(focused_pair_state.get("manual_attention_required")):
-                    pair_details.append("РђРІС‚РѕРІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёРµ РѕСЃС‚Р°РЅРѕРІР»РµРЅРѕ: С‚СЂРµР±СѓРµС‚СЃСЏ СЂСѓС‡РЅРѕРµ РІРјРµС€Р°С‚РµР»СЊСЃС‚РІРѕ.")
+                    pair_details.append("Автовосстановление остановлено: требуется ручное вмешательство.")
                 elif failure_count:
-                    pair_details.append(f"РќРµСѓРґР°С‡РЅС‹С… РїРѕРїС‹С‚РѕРє РїРѕРґСЂСЏРґ: {failure_count}")
+                    pair_details.append(f"Неудачных попыток подряд: {failure_count}")
                 cooldown_until = _tak_tunnel_parse_datetime(focused_pair_state.get("cooldown_until"))
                 if cooldown_until is not None and cooldown_until > utc_now():
-                    pair_details.append(f"РџРѕРІС‚РѕСЂРЅР°СЏ РїРѕРїС‹С‚РєР° РЅРµ СЂР°РЅСЊС€Рµ: {cooldown_until.isoformat()}")
+                    pair_details.append(f"Повторная попытка не раньше: {cooldown_until.isoformat()}")
                 last_recovered_at = _tak_tunnel_parse_datetime(focused_pair_state.get("last_recovered_at"))
                 if last_recovered_at is not None:
                     pair_details.append(f"Последнее успешное восстановление: {last_recovered_at.isoformat()}")

@@ -213,7 +213,7 @@ def format_handshake(value):
 
 def format_bytes_compact(value):
     if value is None:
-        return "РќРµС‚ РґР°РЅРЅС‹С…"
+        return "Нет данных"
     size = float(value)
     units = ["B", "KB", "MB", "GB", "TB"]
     for unit in units:

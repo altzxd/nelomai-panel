@@ -943,12 +943,12 @@ document.addEventListener("DOMContentLoaded", () => {
       const listenPortInput = interfaceCreateForm?.querySelector('input[name="listen_port"]');
       const addressInput = interfaceCreateForm?.querySelector('input[name="address_v4"]');
       if (!interfaceTicSelect?.value || !nameInput?.value.trim()) {
-        window.alert("???????? Tic ?????? ? ??????? ???????? ??????????.");
+        window.alert("Выберите Tic сервер и укажите название интерфейса.");
         return;
       }
       try {
         setActionBusy(nextButton, true);
-        setStatus(statusNode, "??????????? ????????? ???? ? ?????...");
+        setStatus(statusNode, "Подготавливаем свободный порт и адрес...");
         const allocation = await requestJson("/api/admin/interfaces/prepare", {
           method: "POST",
           body: JSON.stringify({
@@ -967,7 +967,7 @@ document.addEventListener("DOMContentLoaded", () => {
         showInterfaceStep(1);
       } catch (error) {
         setStatus(statusNode, error.message, true);
-        showToast("??????", error.message, "error");
+        showToast("Ошибка", error.message, "error");
       } finally {
         setActionBusy(nextButton, false);
       }
