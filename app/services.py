@@ -4299,7 +4299,6 @@ def check_panel_updates(db: Session, actor: User) -> dict[str, object]:
             else f"Панель актуальна: текущая версия {current_version}, последняя {latest_version}."
         ),
         actor_user_id=actor.id,
-        details=f"auto_create_interfaces={1 if auto_create_interfaces else 0}",
     )
     _PANEL_UPDATE_CACHE["fetched_at"] = time.time()
     _PANEL_UPDATE_CACHE["value"] = dict(result)
