@@ -601,16 +601,60 @@ textarea[disabled] {
 }
 .peer-comment-editor {
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) 24px;
     gap: 10px;
+    align-items: center;
     margin: 16px 0;
 }
 .peer-comment-editor input {
     width: 100%;
 }
-.peer-comment-editor .ghost-button {
-    justify-self: stretch;
-    width: 100%;
+
+.peer-comment-save-state {
+    width: 20px;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #9bf1cb;
+    opacity: 0;
+    transition: opacity 0.18s ease;
+}
+
+.peer-comment-save-state.is-visible {
+    opacity: 1;
+}
+
+.peer-comment-save-state.is-saving::before {
+    content: "";
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid rgba(181, 216, 255, 0.35);
+    border-top-color: #b5d8ff;
+    animation: peer-comment-spin 0.7s linear infinite;
+}
+
+.peer-comment-save-state.is-saved::before {
+    content: "✓";
+    font-size: 0.95rem;
+    font-weight: 800;
+}
+
+.peer-comment-save-state.is-error {
+    color: #ffd6e0;
+}
+
+.peer-comment-save-state.is-error::before {
+    content: "!";
+    font-size: 0.95rem;
+    font-weight: 800;
+}
+
+@keyframes peer-comment-spin {
+    to {
+        transform: rotate(360deg);
+    }
 }
 .peer-expiry-editor {
     display: grid;

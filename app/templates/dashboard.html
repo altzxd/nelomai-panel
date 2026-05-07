@@ -289,7 +289,7 @@
                                 {% if not preview_mode %}
                                 <div class="peer-comment-editor">
                                     <input type="text" value="{{ peer.comment or '' }}" maxlength="255" placeholder="Комментарий" data-peer-comment-input="{{ peer.id }}">
-                                    <button class="ghost-button small" type="button" data-peer-comment-save="{{ peer.id }}">Сохранить комментарий</button>
+                                    <span class="peer-comment-save-state" data-peer-comment-state="{{ peer.id }}" aria-live="polite"></span>
                                 </div>
                                 {% endif %}
                                 {% if is_admin_view %}

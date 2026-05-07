@@ -458,24 +458,82 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     });
 
-    document.querySelectorAll("[data-peer-comment-save]").forEach((button) => {
-      button.addEventListener("click", async () => {
-        const peerId = button.getAttribute("data-peer-comment-save");
-        const input = document.querySelector(`[data-peer-comment-input="${peerId}"]`);
-        if (!peerId || !input) {
+    document.querySelectorAll("[data-peer-comment-input]").forEach((input) => {
+      const peerId = input.getAttribute("data-peer-comment-input");
+      const stateNode = peerId ? document.querySelector(`[data-peer-comment-state="${peerId}"]`) : null;
+      let saveTimer = null;
+      let savedValue = input.value;
+      let saveSequence = 0;
+      let hideSavedTimer = null;
+
+      const setCommentState = (state) => {
+        if (!stateNode) {
           return;
         }
+        if (hideSavedTimer) {
+          window.clearTimeout(hideSavedTimer);
+          hideSavedTimer = null;
+        }
+        stateNode.className = "peer-comment-save-state";
+        stateNode.removeAttribute("aria-label");
+        if (!state) {
+          return;
+        }
+        stateNode.classList.add("is-visible", `is-${state}`);
+        if (state === "saving") {
+          stateNode.setAttribute("aria-label", "Комментарий сохраняется");
+        } else if (state === "saved") {
+          stateNode.setAttribute("aria-label", "Комментарий сохранён");
+          hideSavedTimer = window.setTimeout(() => setCommentState(""), 2500);
+        } else if (state === "error") {
+          stateNode.setAttribute("aria-label", "Комментарий не сохранён");
+        }
+      };
+
+      const saveComment = async () => {
+        if (!peerId || input.value === savedValue) {
+          return;
+        }
+        const sequence = ++saveSequence;
+        const value = input.value;
+        setCommentState("saving");
         try {
           await requestJson(`/api/peers/${peerId}/comment`, {
             method: "PUT",
-            body: JSON.stringify({ comment: input.value }),
+            body: JSON.stringify({ comment: value }),
           });
-          showToastAfterReload("success", "Комментарий сохранён");
-          window.setTimeout(() => window.location.reload(), 150);
+          if (sequence === saveSequence && input.value === value) {
+            savedValue = value;
+            setCommentState("saved");
+          }
         } catch (error) {
-          window.alert(error.message);
-          showToast("error", error.message, "error");
+          if (sequence === saveSequence && input.value === value) {
+            setCommentState("error");
+          }
+          showToast("Ошибка", error.message, "error");
         }
+      };
+
+      const scheduleSave = () => {
+        if (input.value !== savedValue) {
+          setCommentState("");
+        }
+        if (saveTimer) {
+          window.clearTimeout(saveTimer);
+        }
+        saveTimer = window.setTimeout(() => {
+          saveTimer = null;
+          saveComment();
+        }, 900);
+      };
+
+      input.addEventListener("input", scheduleSave);
+      input.addEventListener("blur", () => {
+        if (saveTimer) {
+          window.clearTimeout(saveTimer);
+          saveTimer = null;
+        }
+        saveComment();
       });
     });
 
